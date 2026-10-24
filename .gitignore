@@ -1,0 +1,21 @@
+# Per-PC state written by Play.bat
+data/
+
+# Never commit game data: disc images, extracted or decoded game files, analysis output
+*.iso
+*.gcm
+*.ciso
+*.rvz
+*.gcz
+*.wia
+*.dol
+*.elf
+*.bin
+*.rel
+*.thp
+disc/
+build/
+unpacked/
+ghidra_proj/
+ghidra_out/
+__pycache__/
