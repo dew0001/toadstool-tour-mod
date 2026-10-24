@@ -4,12 +4,12 @@
     "patch":  "mod/patches/v1.json",
     "patch_sha256":  "77a342c2f200242dc1976e07e51ff7e08530ef36e39286370f715cde47052bd7",
     "result_sha1":  "bdd31e515a9a4dc4324b3e6fadba89c45e5f7833",
-    "app_version":  1,
+    "app_version":  2,
     "app_files":  {
-                      "app/play.ps1":  "f908bb1a2b567b1b5e102f32bc36f5b9b01b801fa762430476ab0a11dd54bd4d",
-                      "app/common.ps1":  "877a7bd5b3ff7827bf3af601edc2179c64f09d7f589a0bafaa8161fae8ee6b49",
+                      "app/play.ps1":  "baf331a215d1cb92838bd80cedb7e44430cbeafad99c3692deb0f931b4451f1c",
+                      "app/common.ps1":  "6b39aa4e9e59d84f6167ecc929479be37248e2750a5eee3b791f0ca18a8e9752",
                       "app/TTMod.cs":  "9cdea40ad38f1a0053e0b557a736b2f5c7ec9e05559fd5bd471c79574deed49d",
-                      "app/version.txt":  "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04"
+                      "app/version.txt":  "df4e26a04a444901b95afef44e4a96cfae34690fff2ad2c66389c70079cdff2b"
                   },
     "dolphin":  "2606a",
     "textures":  {

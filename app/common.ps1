@@ -70,6 +70,81 @@ function Pick-File($title, $filter) {
 	return $null
 }
 
+# ---- Dolphin INI editing (keeps every other line as it was)
+
+function Read-IniSection($path, $section) {
+	$values = [ordered]@{}
+	if (-not (Test-Path $path)) { return $values }
+	$inside = $false
+	foreach ($line in Get-Content $path) {
+		if ($line -match '^\s*\[(.+)\]\s*$') { $inside = ($Matches[1] -eq $section); continue }
+		if ($inside -and $line -match '^\s*([^#;=][^=]*?)\s*=\s*(.*?)\s*$') { $values[$Matches[1]] = $Matches[2] }
+	}
+	return $values
+}
+
+function Set-IniValues($path, $section, $values) {
+	$lines = New-Object System.Collections.Generic.List[string]
+	if (Test-Path $path) { foreach ($l in Get-Content $path) { $lines.Add($l) } }
+	$start = -1
+	for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "^\s*\[$([regex]::Escape($section))\]\s*$") { $start = $i; break } }
+	if ($start -lt 0) {
+		if ($lines.Count -and $lines[$lines.Count - 1] -ne '') { $lines.Add('') }
+		$lines.Add("[$section]"); $start = $lines.Count - 1
+	}
+	$end = $lines.Count
+	for ($i = $start + 1; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\s*\[.+\]\s*$') { $end = $i; break } }
+	foreach ($key in $values.Keys) {
+		$set = "$key = $($values[$key])"
+		$found = $false
+		for ($i = $start + 1; $i -lt $end; $i++) {
+			if ($lines[$i] -match "^\s*$([regex]::Escape($key))\s*=") { $lines[$i] = $set; $found = $true; break }
+		}
+		if (-not $found) {
+			$at = $end
+			while ($at -gt $start + 1 -and $lines[$at - 1] -eq '') { $at-- }
+			$lines.Insert($at, $set); $end++
+		}
+	}
+	New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+	[IO.File]::WriteAllLines($path, $lines)
+}
+
+# ---- Controller layout for the mod (Xbox-style names; SDL and XInput controllers both use them)
+# LB/RB pick clubs, LT/RT zoom, left stick only aims, right stick left/right still turns the camera,
+# right stick up/down moves the range mark (the game's R/L), View/Back gives side views (the game's Z).
+$ModLayoutVersion = 1
+$ModProfileName = 'Toadstool Tour Mod'
+$ModLayout = [ordered]@{
+	'Main Stick/Up'     = '`Shoulder R`'
+	'Main Stick/Down'   = '`Shoulder L`'
+	'C-Stick/Up'        = '`Trigger R`'
+	'C-Stick/Down'      = '`Trigger L`'
+	'Triggers/R'        = '`Right Y+`'
+	'Triggers/L'        = '`Right Y-`'
+	'Triggers/R-Analog' = '`Right Y+`'
+	'Triggers/L-Analog' = '`Right Y-`'
+	'Buttons/Z'         = '`Back`'
+}
+
+# Writes a Dolphin controller profile from the player's own Port 1 setup with the mod layout on top,
+# and tells Dolphin to use it for the modded game only. Returns a short status for the player.
+function Install-ModControllerProfile($userDir, $gameIni) {
+	$pad = Read-IniSection (Join-Path $userDir 'Config\GCPadNew.ini') 'GCPad1'
+	if (-not $pad['Device'] -or $pad['Device'] -notmatch '^(SDL|XInput)/') {
+		return "Kept your own controls (mod layout needs an Xbox/PlayStation-style controller on Port 1; yours is '$($pad['Device'])')."
+	}
+	$profile = Join-Path $userDir "Config\Profiles\GCPad\$ModProfileName.ini"
+	$lines = New-Object System.Collections.Generic.List[string]
+	$lines.Add('[Profile]')
+	foreach ($k in $pad.Keys) { if (-not $ModLayout.Contains($k)) { $lines.Add("$k = $($pad[$k])") } }
+	foreach ($k in $ModLayout.Keys) { $lines.Add("$k = $($ModLayout[$k])") }
+	New-Item -ItemType Directory -Force (Split-Path $profile) | Out-Null
+	[IO.File]::WriteAllLines($profile, $lines)
+	Set-IniValues $gameIni 'Controls' ([ordered]@{ 'PadProfile1' = $ModProfileName })
+	return "Mod controls set for $($pad['Device'] -replace '^\w+/\d+/', ''): LB/RB clubs, LT/RT zoom, left stick aims."
+}
+
 # Turn a patch (parsed JSON) into { disc path -> new bytes }, checking every result hash.
 function Get-PatchChanges($src, $disc, $patch) {
 	$changed = New-Object 'System.Collections.Generic.Dictionary[string,byte[]]'

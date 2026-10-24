@@ -173,6 +173,20 @@ CacheHiresTextures = True
 MaxAnisotropy = 4
 '@ | Set-Content -Path $ini -Encoding ASCII
 }
+# Force 16:9: Dolphin's automatic aspect detection sometimes flips to 4:3 and squeezes the picture.
+Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'AspectRatio' = '1' })
+
+# Mod controller layout, rebuilt when the layout changes or you switch controllers.
+$device = (Read-IniSection (Join-Path $DolphinUserDir 'Config\GCPadNew.ini') 'GCPad1')['Device']
+$profilePath = Join-Path $DolphinUserDir "Config\Profiles\GCPad\$ModProfileName.ini"
+$layoutCurrent = $config['layout_version'] -eq $ModLayoutVersion -and $config['layout_device'] -eq $device -and
+	(($device -notmatch '^(SDL|XInput)/') -or (Test-Path $profilePath))
+if (-not $layoutCurrent) {
+	Say (Install-ModControllerProfile $DolphinUserDir $ini)
+	$config['layout_version'] = $ModLayoutVersion
+	$config['layout_device'] = $device
+	Save-Config
+}
 
 # 6. Start the game.
 $dolphin = $config['dolphin_exe']
