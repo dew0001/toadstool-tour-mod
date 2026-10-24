@@ -175,6 +175,8 @@ MaxAnisotropy = 4
 }
 # Force 16:9: Dolphin's automatic aspect detection sometimes flips to 4:3 and squeezes the picture.
 Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'AspectRatio' = '1' })
+# Start the mod fullscreen (Alt+Enter switches back to a window); other games keep their own setting.
+Set-IniValues $ini 'Display' ([ordered]@{ 'Fullscreen' = 'True' })
 
 # Mod controller layout, rebuilt when the layout changes or you switch controllers.
 $device = (Read-IniSection (Join-Path $DolphinUserDir 'Config\GCPadNew.ini') 'GCPad1')['Device']
