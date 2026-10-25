@@ -175,8 +175,19 @@ MaxAnisotropy = 4
 }
 # Force 16:9: Dolphin's automatic aspect detection sometimes flips to 4:3 and squeezes the picture.
 Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'AspectRatio' = '1' })
-# Start the mod fullscreen (Alt+Enter switches back to a window); other games keep their own setting.
+# Start the mod fullscreen, covering the whole screen and taskbar (borderless, so Alt+Tab and overlays
+# behave); Alt+Enter switches back to a window. Other games keep their own setting.
 Set-IniValues $ini 'Display' ([ordered]@{ 'Fullscreen' = 'True' })
+Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'BorderlessFullscreen' = 'True' })
+# The HD textures are part of the mod, so keep them on even if this file predates them or was edited.
+Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'HiresTextures' = 'True'; 'CacheHiresTextures' = 'True' })
+# Sharp by default. Dolphin's own default is native 640x528, which looks blurry on a modern screen, so when
+# neither this game's settings nor the player's global graphics settings pick a resolution above native,
+# scale to the screen (Auto). A resolution the player chose stays theirs.
+$globalRes = (Read-IniSection (Join-Path $DolphinUserDir 'Config\GFX.ini') 'Settings')['InternalResolution']
+if (-not (Read-IniSection $ini 'Video_Settings').Contains('InternalResolution') -and (-not $globalRes -or $globalRes -eq '1')) {
+	Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'InternalResolution' = '0' })
+}
 
 # Mod controller layout, rebuilt when the layout changes or you switch controllers.
 $device = (Read-IniSection (Join-Path $DolphinUserDir 'Config\GCPadNew.ini') 'GCPad1')['Device']
@@ -192,12 +203,11 @@ if (-not $layoutCurrent) {
 
 # 6. Start the game.
 $dolphin = $config['dolphin_exe']
-if (-not $dolphin -or -not (Test-Path $dolphin)) {
-	$running = Get-Process Dolphin -ErrorAction SilentlyContinue | Select-Object -First 1
-	$candidates = @((Join-Path $env:ProgramFiles 'Dolphin-x64\Dolphin.exe'), (Join-Path $env:ProgramFiles 'Dolphin\Dolphin.exe'))
-	if ($running) { $dolphin = $running.Path } else { $dolphin = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+if (-not $dolphin -or -not (Test-Path $dolphin)) { $dolphin = Find-DolphinExe $(if ($latest) { $latest.dolphin }) }
+if (-not $dolphin) {
+	Say 'Where is Dolphin? Pick Dolphin.exe, in the folder you installed or unzipped Dolphin to.'
+	$dolphin = Pick-File 'Find Dolphin.exe' 'Dolphin.exe|Dolphin.exe'
 }
-if (-not $dolphin) { $dolphin = Pick-File 'Find Dolphin.exe' 'Dolphin.exe|Dolphin.exe' }
 if ($dolphin) {
 	$config['dolphin_exe'] = $dolphin
 	Save-Config
@@ -208,5 +218,7 @@ if ($dolphin) {
 }
 $title = if ($config['installed_version']) { "Mario Golf: Toadstool Tour (Mod v$($config['installed_version']))" } else { 'Mario Golf: Toadstool Tour (Mod)' }
 if ($NoLaunch) { Say "Done. Start Dolphin whenever you like; the game is listed as ""$title""." Green; exit 0 }
-if ($dolphin) { Start-Process -FilePath $dolphin -ArgumentList @('-e', "`"$out`"") }
+$launch = @('-e', "`"$out`"")
+if ($PSBoundParameters.ContainsKey('DolphinUserDir')) { $launch = @('-u', "`"$DolphinUserDir`"") + $launch }
+if ($dolphin) { Start-Process -FilePath $dolphin -ArgumentList $launch }
 else { Say "Open Dolphin and start ""$title"" (file: $out)." }

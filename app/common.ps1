@@ -42,6 +42,25 @@ function Get-DolphinVersion($exe) {
 	return $null
 }
 
+# Dolphin.exe: a running Dolphin, the usual install folders, then Windows' own record of programs that have
+# run (a portable Dolphin lives wherever it was unzipped). Prefers the group's Dolphin version when given.
+function Find-DolphinExe($wantVersion) {
+	$found = @(Get-Process Dolphin -ErrorAction SilentlyContinue | Where-Object { $_.Path } | ForEach-Object { $_.Path })
+	$found += @((Join-Path $env:ProgramFiles 'Dolphin-x64\Dolphin.exe'), (Join-Path $env:ProgramFiles 'Dolphin\Dolphin.exe'))
+	$mui = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache'
+	if (Test-Path $mui) {
+		$found += @((Get-Item $mui).Property | Where-Object { $_ -match '\\Dolphin\.exe\.FriendlyAppName$' } | ForEach-Object { $_ -replace '\.FriendlyAppName$', '' })
+	}
+	$store = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store'
+	if (Test-Path $store) { $found += @((Get-Item $store).Property | Where-Object { $_ -match '\\Dolphin\.exe$' }) }
+	$found = @($found | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
+	if ($wantVersion) {
+		$match = $found | Where-Object { (Get-DolphinVersion $_) -eq $wantVersion } | Select-Object -First 1
+		if ($match) { return $match }
+	}
+	return $found | Select-Object -First 1
+}
+
 function Test-CleanGame($path) {
 	try {
 		$s = [TTMod]::Open($path)
@@ -111,19 +130,21 @@ function Set-IniValues($path, $section, $values) {
 }
 
 # ---- Controller layout for the mod (Xbox-style names; SDL and XInput controllers both use them)
-# LB/RB pick clubs, LT/RT zoom, left stick only aims, right stick left/right still turns the camera,
-# right stick up/down moves the range mark (the game's R/L), View/Back gives side views (the game's Z).
-$ModLayoutVersion = 1
+# LB/RB pick clubs, LT/RT zoom, left stick left/right aims and up/down sets the power (up moves the
+# landing spot farther: the game's L, down closer: its R), right stick left/right still turns the camera
+# and up/down also sets the power, View/Back gives side views (the game's Z). Left stick up/down only
+# counts past half tilt, so aiming with it doesn't nudge the power.
+$ModLayoutVersion = 2
 $ModProfileName = 'Toadstool Tour Mod'
 $ModLayout = [ordered]@{
 	'Main Stick/Up'     = '`Shoulder R`'
 	'Main Stick/Down'   = '`Shoulder L`'
 	'C-Stick/Up'        = '`Trigger R`'
 	'C-Stick/Down'      = '`Trigger L`'
-	'Triggers/R'        = '`Right Y+`'
-	'Triggers/L'        = '`Right Y-`'
-	'Triggers/R-Analog' = '`Right Y+`'
-	'Triggers/L-Analog' = '`Right Y-`'
+	'Triggers/L'        = ''  # stick up: landing spot farther (filled from the player's own stick setup)
+	'Triggers/R'        = ''  # stick down: landing spot closer
+	'Triggers/L-Analog' = ''
+	'Triggers/R-Analog' = ''
 	'Buttons/Z'         = '`Back`'
 }
 
@@ -134,15 +155,28 @@ function Install-ModControllerProfile($userDir, $gameIni) {
 	if (-not $pad['Device'] -or $pad['Device'] -notmatch '^(SDL|XInput)/') {
 		return "Kept your own controls (mod layout needs an Xbox/PlayStation-style controller on Port 1; yours is '$($pad['Device'])')."
 	}
+	# Up/down come from the player's own stick bindings, since SDL and XInput name "up" differently.
+	$stick = @{}
+	foreach ($k in 'Main Stick/Up', 'Main Stick/Down', 'C-Stick/Up', 'C-Stick/Down') { $stick[$k] = $pad[$k] }
+	if (-not $stick['Main Stick/Up']) { $stick['Main Stick/Up'] = '`Left Y+`' }
+	if (-not $stick['Main Stick/Down']) { $stick['Main Stick/Down'] = '`Left Y-`' }
+	if (-not $stick['C-Stick/Up']) { $stick['C-Stick/Up'] = '`Right Y+`' }
+	if (-not $stick['C-Stick/Down']) { $stick['C-Stick/Down'] = '`Right Y-`' }
+	$layout = [ordered]@{}
+	foreach ($k in $ModLayout.Keys) { $layout[$k] = $ModLayout[$k] }
+	$layout['Triggers/L'] = "($($stick['Main Stick/Up'])) | ($($stick['C-Stick/Up']))"
+	$layout['Triggers/R'] = "($($stick['Main Stick/Down'])) | ($($stick['C-Stick/Down']))"
+	$layout['Triggers/L-Analog'] = $stick['C-Stick/Up']
+	$layout['Triggers/R-Analog'] = $stick['C-Stick/Down']
 	$profile = Join-Path $userDir "Config\Profiles\GCPad\$ModProfileName.ini"
 	$lines = New-Object System.Collections.Generic.List[string]
 	$lines.Add('[Profile]')
-	foreach ($k in $pad.Keys) { if (-not $ModLayout.Contains($k)) { $lines.Add("$k = $($pad[$k])") } }
-	foreach ($k in $ModLayout.Keys) { $lines.Add("$k = $($ModLayout[$k])") }
+	foreach ($k in $pad.Keys) { if (-not $layout.Contains($k)) { $lines.Add("$k = $($pad[$k])") } }
+	foreach ($k in $layout.Keys) { $lines.Add("$k = $($layout[$k])") }
 	New-Item -ItemType Directory -Force (Split-Path $profile) | Out-Null
 	[IO.File]::WriteAllLines($profile, $lines)
 	Set-IniValues $gameIni 'Controls' ([ordered]@{ 'PadProfile1' = $ModProfileName })
-	return "Mod controls set for $($pad['Device'] -replace '^\w+/\d+/', ''): LB/RB clubs, LT/RT zoom, left stick aims."
+	return "Mod controls set for $($pad['Device'] -replace '^\w+/\d+/', ''): LB/RB clubs, LT/RT views, left stick aims and sets power."
 }
 
 # Turn a patch (parsed JSON) into { disc path -> new bytes }, checking every result hash.

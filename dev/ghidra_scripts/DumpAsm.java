@@ -37,6 +37,10 @@ public class DumpAsm extends GhidraScript {
 		Address end = start.add(len);
 		for (Address a = start; a.compareTo(end) < 0; a = a.add(4)) {
 			Instruction ins = getInstructionAt(a);
+			if (ins == null && getDataAt(a) == null) {
+				disassemble(a);  // decode on demand (imports made with -noanalysis)
+				ins = getInstructionAt(a);
+			}
 			String text = ins == null ? "(no instruction)" : ins.toString();
 			out.printf("  %s  %08x  %s%n", a, readWord(a), text);
 		}
