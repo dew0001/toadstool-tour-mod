@@ -13,11 +13,14 @@ Everything here runs on the maintainer's PC against a clean, extracted GFTE01 di
 | `find_dead_code.py` | Confirms a `main.dol` function is referenced nowhere on the disc, so it's safe to reuse for patch code |
 | `dol2elf.py`, `ghidra_export.ps1`, `ghidra_scripts/` | Ghidra headless analysis: `main.dol` plus overlays as one ELF, then exported C and disassembly helpers |
 | `find_func.py`, `scan_code.py`, `survey_headers.py`, `patch_text.py` | Investigation helpers |
+| `tools/` | Live testing against a running Dolphin (read/write game RAM, trace cameras and power, find values and strings, log draws and messages with `debug_patch.py`) and Ghidra disassembly (`dumpasm.ps1`). See [`RE-NOTES.md`](RE-NOTES.md#testing-workflow). |
+
+**[`RE-NOTES.md`](RE-NOTES.md) is the reference for everything learned about the game's code:** addresses, structures, the hooks each version adds, and the free memory used for patch code. Read it before changing a hook, and add to it when you find something.
 
 ## Key facts
 
 - **Game code:** the golf overlay `C/L/V` is a flat image loaded at 0x80400000. `B/U/C` is a second overlay at the same address. Small-data bases are r2 = 0x802DF480 and r13 = 0x802DFA60.
-- **Patch code location:** the stubs live over `FUN_8006eab4`, a dead SDK torus-drawing helper (736 bytes). Don't put code at 0x80001800; it gets wiped before the first frame is drawn.
+- **Patch code location:** the stubs live over dead functions in `main.dol` (six so far; list in `RE-NOTES.md`). Don't put code at 0x80001800; it gets wiped before the first frame is drawn.
 - **Disc layout:** files sit at the outer end of the disc, aligned to 32 bytes. Everything between the file table and 0x1032F9A0 (about 271 MB) is free. `TTMod.Build` moves any file that grows into that space.
 - **Game ID:** keep GFTEMD across versions so saves carry over. The version number goes in the banner title.
 

@@ -23,14 +23,21 @@ def addi(rd, ra, imm): return 0x38000000 | rd << 21 | ra << 16 | _simm(imm)
 def ori(ra, rs, imm): return 0x60000000 | rs << 21 | ra << 16 | _simm(imm)
 def mulli(rd, ra, imm): return 0x1C000000 | rd << 21 | ra << 16 | _simm(imm)
 def add(rd, ra, rb): return 0x7C000214 | rd << 21 | ra << 16 | rb << 11
+def mullw(rd, ra, rb): return 0x7C0001D6 | rd << 21 | ra << 16 | rb << 11
 def mr(ra, rs): return 0x7C000378 | rs << 21 | ra << 16 | rs << 11
+def or_(ra, rs, rb): return 0x7C000378 | rs << 21 | ra << 16 | rb << 11
 def andi_(ra, rs, imm): return 0x70000000 | rs << 21 | ra << 16 | (imm & 0xFFFF)
+def xoris(ra, rs, imm): return 0x6C000000 | rs << 21 | ra << 16 | (imm & 0xFFFF)
+def rlwinm(ra, rs, sh, mb, me): return 0x54000000 | rs << 21 | ra << 16 | sh << 11 | mb << 6 | me << 1
+def slwi(ra, rs, n): return rlwinm(ra, rs, n, 0, 31 - n)
+def srwi(ra, rs, n): return rlwinm(ra, rs, 32 - n, n, 31)
 def cmpwi(ra, imm): return 0x2C000000 | ra << 16 | _simm(imm)
 def cmpw(ra, rb): return 0x7C000000 | ra << 16 | rb << 11  # into cr0
 def lwz(rd, d, ra): return _d(32, rd, d, ra)
 def lbz(rd, d, ra): return _d(34, rd, d, ra)
 def lhz(rd, d, ra): return _d(40, rd, d, ra)
 def stw(rs, d, ra): return _d(36, rs, d, ra)
+def stb(rs, d, ra): return _d(38, rs, d, ra)
 def sth(rs, d, ra): return _d(44, rs, d, ra)
 def stwu(rs, d, ra): return _d(37, rs, d, ra)
 def mflr(rd): return 0x7C0802A6 | rd << 21
@@ -48,6 +55,9 @@ def fdivs(d, a, b): return 0xEC000024 | d << 21 | a << 16 | b << 11
 def fneg(d, b): return 0xFC000050 | d << 21 | b << 11
 def frsqrte(d, b): return 0xFC000034 | d << 21 | b << 11
 def fcmpu(a, b): return 0xFC000000 | a << 16 | b << 11  # into cr0
+def fmadds(d, a, c, b): return 0xEC00003A | d << 21 | a << 16 | b << 11 | c << 6  # d = a*c + b
+def fmr(d, b): return 0xFC000090 | d << 21 | b << 11
+def frsp(d, b): return 0xFC000018 | d << 21 | b << 11
 
 
 # branches
@@ -141,6 +151,10 @@ def selftest():
         lbz(0, 0x68FB, 9): 0x880968FB, lbz(0, 0xD16, 31): 0x881F0D16, stwu(1, -0x48, 1): 0x9421FFB8,
         mflr(0): 0x7C0802A6, bl(0x80425BB0, 0x80456D1C): 0x4803116D, bl(0x80405620, 0x80423BBC): 0x4801E59D,
         COND["bne"] | 0x18: 0x40820018, COND["blt"] | 0x1C: 0x4180001C, COND["beq"] | 0x28: 0x41820028,
+        xoris(0, 0, 0x8000): 0x6C008000, xoris(0, 27, 0x8000): 0x6F608000, rlwinm(9, 9, 3, 0, 28): 0x55291838,
+        slwi(9, 9, 3): 0x55291838, frsp(0, 0): 0xFC000018, fmr(1, 28): 0xFC20E090, mullw(9, 9, 0): 0x7D2901D6,
+        or_(0, 0, 9): 0x7C004B78, stb(9, 0xD, 27): 0x993B000D,
+        fmadds(13, 13, 0, 12): 0xEDAD603A, fmadds(0, 0, 29, 30): 0xEC00F77A,
     }
     for got, want in known.items():
         assert got == want, f"{got:08X} != {want:08X}"

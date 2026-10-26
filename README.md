@@ -5,6 +5,9 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 - **Widescreen built in:** real 16:9 with the HUD out at the screen edges, every piece in its proper shape. No cheats or special Dolphin settings needed.
 - **Everything unlocked:** every course and character from the start.
 - **TV-style cameras:** after you hit, the camera cuts to behind and above the ball and follows it all the way. Putts are aimed, stroked and followed from behind the ball, down the line.
+- **Power to the yard:** the left stick moves the landing spot and the power gauge in quarter steps (1 yard with a 240-yard driver; finer with shorter clubs) instead of 4-yard jumps. Putts keep the game's own steps.
+- **See-through golfer when putting:** your golfer turns see-through from lining up the putt until the ball rolls, so the line, the grid and the cup stay in view. Turn it off and on with **Start → See-Through**; it's on every time the game starts.
+- **Steady zoom view:** the view that flies out along your shot toward the hole now glides high over the course and looks down, instead of skimming the ground, bobbing over bumps and ending up behind trees.
 - **Hold A to fast-forward** the ball after you hit (about 3× speed). The ball ends up exactly where it would have.
 - **No intro movie** and no shattered-glass screen effect.
 - **Replays ask first:** B after a shot opens *Continue / Watch Replay* instead of replaying straight away. Only the player who hit can open it.
@@ -18,12 +21,13 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 | Control | Does |
 | --- | --- |
 | Left stick left/right | Aim |
-| Left stick up/down | Power: moves the landing spot farther/closer (and the power gauge with it); tilt further to move it faster |
+| Left stick up/down | Power: moves the landing spot farther/closer a yard at a time (and the power gauge with it); tilt further to move it faster |
 | LB / RB | Change club |
 | LT / RT | Switch views (RT looks down to the hole or landing spot) |
 | Right stick | Turn the camera; up/down also sets the power |
 | View / Back | Side view while held |
 | A | Swing; hold after the hit to fast-forward |
+| Start | Pause menu (Scorecard, Rules, ..., **See-Through** on/off) |
 
 Every way of looking around still works on putts: the camera goes back down the line when you let go. These controls are set up for the modded game only, from your own Port 1 controller settings; other games keep yours.
 
@@ -67,11 +71,11 @@ If a player shows as not having the game, their mod version or Dolphin version d
 ## Credits
 
 - **Widescreen:** based on gamemasterplc's 16:9 Gecko code from the Dolphin wiki, rebuilt as a permanent patch.
-- **Cameras, fast-forward, no intro:** written for this mod.
+- **Cameras, fast-forward, no intro, yard-by-yard power, see-through golfer:** written for this mod.
 - **HD UI textures:** "Toadstool Tour 4x" by NickPancakes ([Dolphin forum thread](https://forums.dolphin-emu.org/Thread-mario-golf-toadstool-tour-gcn-4x-ui-texture-pack)). Downloaded from the author's own link, not re-hosted here.
 
 Please don't share game files (.iso and similar). Share this repo; everyone builds from their own copy.
 
 ## For the maintainer
 
-`dev/` holds the tools that decode the game's files and build the mod; see [`dev/README.md`](dev/README.md). To publish version N, run `dev\publish.ps1`, then commit and push. Everyone's next `Play.bat` picks it up.
+`dev/` holds the tools that decode the game's files and build the mod; see [`dev/README.md`](dev/README.md). What's been learned about the game's code (addresses, structures, hooks) is in [`dev/RE-NOTES.md`](dev/RE-NOTES.md), and the live-testing tools are in `dev/tools/`. To publish version N, run `dev\publish.ps1`, then commit and push. Everyone's next `Play.bat` picks it up.

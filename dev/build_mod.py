@@ -28,9 +28,15 @@ Changes (v3):
   - HUD at the screen edges: GXSetProjection's 2D x offset is shifted a quarter screen for the HUD pieces in
     PROJ_CALLERS (left or right), and HUD_SPLITS re-anchor mid-function where one function draws both sides
 
-Patch code lives over FUN_8006eab4, an SDK torus-drawing helper nothing on the disc references
-(checked with find_dead_code.py). Low memory at 0x80001800 does NOT work: the code there is gone
-by the time the game first draws.
+Changes (v4):
+  - Power in quarter steps (1 yd with a 240-yd driver): the stick moves a quarter step, the shot builder adds
+    it (real shots) or blends two steps' launch speeds (previews), and the power bar label counts it
+  - Zoom view rides high over the ground along the aim line and looks down, instead of hugging the terrain
+  - See-through golfer while putting (aim to stroke), with a See-Through On/Off row in the pause menu
+
+Patch code lives over dead functions (cave 1-6 below; checked with find_dead_code.py). Low memory at
+0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
+the game code each hook relies on.
 """
 import os
 import struct
@@ -137,8 +143,8 @@ RESULT_TIMER, RESULT_LENGTH = 0x30, 0x34  # player record: the replay is possibl
 STATE_STOPPED = 8
 PAD_B = 0x200
 
-RANGE_RATE = 0x804DAE88     # golf: landing-spot speed per unit of L/R (16 = 1% of max distance a frame at full)
-RANGE_RATE_OLD, RANGE_RATE_NEW = 16.0, 14.0  # full tilt: 60%/s -> 20%/s; half tilt about 7%/s either way
+# (v3 slowed the landing spot with the rate constant at 0x804DAE88, 16.0 -> 14.0; v4 steps a quarter as far per
+# tick instead, so the constant stays the game's 16.0: full tilt is one quarter step a frame.)
 CAVE4 = 0x80021C60          # dead printf-style formatter: holds the HUD anchor table (data only)
 CAVE4_SIZE = 2200
 CAVE4_FIRST = 0x9421FE20
@@ -169,6 +175,85 @@ SLOT_ITEMS_NEW = [0] * 8 + [1] * 8 + [2] * 8 + [3] * 8  # power shot, mulligan, 
 # the game itself uses to cancel a transition.
 GLASS_BREAK_SITES = [0x804570D0, 0x8045744C, 0x804574AC, 0x80457718]  # li r4,4 before bl FUN_8000f93c
 LI_R4_4, LI_R4_NONE = 0x38800004, 0x3880FFFF
+
+# ---- v4: power in quarter steps, steady zoom camera
+# Power is a whole number of swing-meter steps (setup +0x1D0, 1..60; one step per meter frame), so the landing
+# spot moved 1/60 of the club's reach per tick (4 yd with a 240-yd driver). The shot builder FUN_804c6668 turns
+# the step into launch values; the launch speed comes from a per-step table that FUN_8044cee8 solves (by
+# simulating) so carry = reach * step / 60. v4 keeps a quarter step beside the game's step: the stick moves
+# quarters, and the builder adds the quarter (real shots) or blends the two neighbouring steps' launch speeds
+# (previews), so the landing spot, the distance and the shot all move a quarter step (1 yd) at a time.
+CAVE5 = 0x800411B8          # dead FUN_800411b8 (find_dead_code.py: DEAD)
+CAVE5_SIZE = 1076
+CAVE5_FIRST = 0x7C0802A6
+SETUP_AUTO = 0x184          # shot setup: byte, nonzero while the game swings by itself (replays)
+SETUP_RANGE = 0x1D0         # shot setup: power in meter steps (the landing spot); the meter's step when swung
+SETUP_RANGE_MAX = 0x250     # shot setup: steps in a full meter (60)
+SETUP_PLAYER = 0x25C        # shot setup: the player record it belongs to
+SETUP_ZOOM = 0x16C          # shot setup: zoom view amount: < 0 overhead, 0..1 rising, > 1 out along the aim line
+PLAYER_SETUP = 0x5168       # player record: its shot setup
+RANGE_TARGET = 0x80523CBC   # golf: the swing meter's target step (the aimed SETUP_RANGE)
+RANGE_STEP_HOOK = 0x80414538  # range adjust (FUN_80412f6c): lbz r0,0x184(r31), just before range += step (r10)
+RANGE_STEP_WORD = 0x881F0184
+SPREAD_HOOK = 0x804C68E0    # shot builder, real shots: frsp f0,f0 = (float)step, about to be scaled by the spread
+SPREAD_WORD = 0xFC000018
+TABLE_HOOK = 0x804C6A3C     # shot builder, previews and putts: stfs f0,0x48(r31) = the step's launch speed
+TABLE_WORD = 0xD01F0048
+SOLVE_STEP = 0x8044CEE8     # (setup, shot) fills the launch-speed table entry for setup's step (cached)
+YARDS_HOOK = 0x8046C964     # power bar HUD (FUN_8046bc78): mullw r9,r9,r0 = shown step * club reach (then / 60)
+YARDS_WORD = 0x7D2901D6
+HUD_SETUP = 0x34            # power bar HUD object: the shot setup it shows
+RANGE_MIN = 5               # the game's lowest aimable step
+VIEW_ZOOM = 6
+# Zoom view: past amount 1 the game flies its camera out along the aim line a few feet over the ground (terrain
+# checks every frame), so it bobs over every bump and ends up behind trees and hills. v4 keeps the game's path
+# along the line but rides high over the ground and looks down at it.
+# See-through golfer: while the shooter putts (aim to stroke), their golfer model is drawn see-through. Characters
+# are drawn by MODEL_DRAW (model instance in r3; the shooter's is player +PLAYER_GOLFER). Their materials take
+# alpha from the channel material colour (TEV alpha = raster alpha x texture alpha, alpha test only drops 0),
+# so during that one draw the material colour's alpha is scaled down, blending is forced on and depth writes off;
+# afterwards the blend and depth modes the game last asked for are put back.
+MODEL_DRAW = 0x800072C8         # draw a model instance (r3) with matrix r4
+MODEL_DRAW_FIRST = 0x9421FD08   # stwu r1,-0x2f8(r1)
+GX_SET_BLEND = 0x8006E154       # GXSetBlendMode(type, src, dst, op)
+GX_SET_BLEND_FIRST = 0x800D0230
+GX_SET_MAT_COLOR = 0x8006AF08   # GXSetChanMatColor(channel, &color)
+GX_SET_MAT_COLOR_FIRST = 0x28030005
+GX_SET_ZMODE = 0x8006E23C       # GXSetZMode(enable, func, update)
+GX_SET_ZMODE_FIRST = 0x800D0238
+PLAYER_GOLFER = 0x518C          # player record: the golfer's model instance
+STATE_AIM = 4
+GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET = 1, 4, 5, 15
+GHOST_ALPHA = 0x60              # golfer opacity while see-through, out of 256
+GHOST_OFF, GHOST_PUTTS, GHOST_ALWAYS = 0, 1, 2  # ghost_mode values (ALWAYS: any club; for testing)
+# Its setting is a row in the in-round pause menu (Start). FUN_80473918 fills the menu's item list (codes at
+# PAUSE_LIST, count at menu +0x116, at most 6 rows); row text is message 0x10D + code, the help line 0x118 +
+# code; 30 frames after A, the menu runs the cursor item through a jump table. The row reuses code 10 ("Start
+# Game Over", which only one training mode lists, and only when that code isn't already there): its icon is a
+# real menu icon, and while our row is listed the message hook answers its two messages with ours.
+CAVE6 = 0x8003CA40          # dead FUN_8003ca40 (find_dead_code.py: DEAD)
+CAVE6_SIZE = 684
+CAVE6_FIRST = 0x7C0802A6
+PAUSE_LIST = 0x80523F48
+PAUSE_COUNT, PAUSE_CURSOR, PAUSE_ROWS, PAUSE_HELP = 0x116, 0x110, 0x20, 0x4  # pause menu: rows' text boxes at +0x20
+PAUSE_ROWS_MAX = 6
+PAUSE_BUILD = 0x80473918
+PAUSE_BUILD_CALLS = [0x80473194, 0x804737EC]
+PAUSE_RUN = 0x80476E48      # bl FUN_80019bf8 right before the item jump table (r25 = menu)
+PAUSE_RUN_TARGET = 0x80019BF8
+PAUSE_RUN_DEFAULT = 0x80477894  # where the jump table goes for codes it doesn't know
+SET_TEXT = 0x80024CFC       # (text box, message id, 0, 0x20, mode): show a message in a text box
+GHOST_ITEM = 10
+MSG_GHOST_ITEM, MSG_GHOST_HELP = 0x10D + GHOST_ITEM, 0x118 + GHOST_ITEM
+GHOST_TEXT_ON = b"\x074\x094See-Through: On\x00"
+GHOST_TEXT_OFF = b"\x074\x094See-Through: Off\x00"
+GHOST_TEXT_HELP = b"\x074\x094See through your golfer\x01while putting.\x00"
+ZOOM_TUNING = {
+    "height": 65.0,       # feet above the ground the camera rides on (clears most tree tops)
+    "pitch": 0.5,         # looks down this much per foot ahead (about 27 degrees)
+    "ground_ease": 0.05,  # how fast that ground height follows the game's camera (per frame)
+    "blend": 1 / 0.3,     # takes over from the game's camera by zoom amount 0.3
+}
 
 
 def normalize_xz(a, x, z, n2):
@@ -304,6 +389,185 @@ def cave2_code(aim_place):
     return blob, {"ff": a.labels["ff"], "cam": a.labels["cam"]}
 
 
+def cave5_code():
+    """Assemble the quarter-step power and the zoom camera. Returns (bytes, labels)."""
+    a = ppc.Asm(CAVE5)
+    # quarter-step state: whose aim it is, the club and step it was set at, and the quarter (0..3)
+    a.word("fine")
+    a.word("fine_club")
+    a.word("fine_step_n")
+    a.word("fine_quarter")
+    for i in range(4):
+        a.float(f"quarter{i}", i / 4)
+    a.word("zoom_on")
+    a.float("ground", 0.0)
+    a.float("zero", 0.0)
+    a.float("one", 1.0)
+    a.float("tiny", 1e-12)
+    for name, value in ZOOM_TUNING.items():
+        a.float(name, value)
+    F_CLUB, F_STEP, F_QUARTER, F_TABLE = 4, 8, 12, 16
+    Z_GROUND, Z_ZERO, Z_ONE, Z_TINY, Z_HEIGHT, Z_PITCH, Z_EASE, Z_BLEND = (4 * i for i in range(1, 9))
+    hi_t, lo_t = ppc.hi_lo(RANGE_TARGET)
+
+    # Replaces `lbz r0,0x184(r31)` just before the range adjust adds its step (r10 = -1, 0 or +1; r31 = setup):
+    # the step moves a quarter instead. The game's step only moves when the quarters roll over, so r10 becomes
+    # 0 or the step. Same aim, club and step as last time = keep the quarter; anything else starts from 0.
+    # Putts keep whole steps (they are small already, and their label shows tenths).
+    a.label("fine_step")
+    a(ppc.stwu(1, -16, 1), ppc.stw(9, 8, 1), ppc.stw(12, 12, 1))
+    a(ppc.lbz(0, SETUP_AUTO, 31), ppc.cmpwi(0, 0))
+    a.br("bne", "fs_done")                      # the game is swinging by itself
+    a(ppc.cmpwi(10, 0))
+    a.br("beq", "fs_done")
+    a(ppc.lwz(0, SETUP_CLUB, 31), ppc.cmpwi(0, CLUB_PUTTER))
+    a.br("beq", "fs_done")
+    a.la(9, "fine")
+    a(ppc.lwz(11, SETUP_RANGE, 31))
+    a(ppc.lwz(12, SETUP_PLAYER, 31), ppc.lwz(0, 0, 9), ppc.cmpw(0, 12))
+    a.br("bne", "fs_reset")
+    a(ppc.lwz(12, SETUP_CLUB, 31), ppc.lwz(0, F_CLUB, 9), ppc.cmpw(0, 12))
+    a.br("bne", "fs_reset")
+    a(ppc.lwz(0, F_STEP, 9), ppc.cmpw(0, 11))
+    a.br("bne", "fs_reset")
+    a(ppc.lwz(12, F_QUARTER, 9))
+    a.br("b", "fs_have")
+    a.label("fs_reset")
+    a(ppc.li(12, 0))
+    a.label("fs_have")
+    a(ppc.slwi(0, 11, 2), ppc.add(0, 0, 12), ppc.add(0, 0, 10))      # quarters
+    a(ppc.cmpwi(0, 4 * RANGE_MIN))
+    a.br("bge", "fs_low_ok")
+    a(ppc.li(0, 4 * RANGE_MIN))
+    a.label("fs_low_ok")
+    a(ppc.lwz(12, SETUP_RANGE_MAX, 31), ppc.slwi(12, 12, 2), ppc.cmpw(0, 12))
+    a.br("ble", "fs_high_ok")
+    a(ppc.mr(0, 12))
+    a.label("fs_high_ok")
+    a(ppc.andi_(12, 0, 3), ppc.stw(12, F_QUARTER, 9), ppc.srwi(0, 0, 2), ppc.stw(0, F_STEP, 9))
+    a(ppc.cmpw(0, 11))
+    a.br("bne", "fs_moved")
+    a(ppc.li(10, 0))                            # same step, another quarter
+    a.label("fs_moved")
+    a(ppc.lwz(12, SETUP_PLAYER, 31), ppc.stw(12, 0, 9), ppc.lwz(12, SETUP_CLUB, 31), ppc.stw(12, F_CLUB, 9))
+    a.label("fs_done")
+    a(ppc.lwz(9, 8, 1), ppc.lwz(12, 12, 1), ppc.addi(1, 1, 16))
+    a(ppc.lbz(0, SETUP_AUTO, 31), ppc.BLR)
+
+    def quarter_check(fail, setup_reg, step_reg):
+        """Branch to fail unless player r30's aim set a quarter at this club and target, with step_reg below a
+        full meter. Leaves r10 = state block and setup_reg = the setup. Uses r0, r12."""
+        a.la(10, "fine")
+        a(ppc.lwz(12, 0, 10), ppc.cmpw(12, 30))
+        a.br("bne", fail)
+        a(ppc.lwz(setup_reg, PLAYER_SETUP, 30))
+        a(ppc.lwz(12, SETUP_CLUB, setup_reg), ppc.lwz(0, F_CLUB, 10), ppc.cmpw(0, 12))
+        a.br("bne", fail)
+        a(ppc.lwz(12, SETUP_RANGE_MAX, setup_reg), ppc.cmpw(step_reg, 12))
+        a.br("bge", fail)
+        a(ppc.lis(12, hi_t), ppc.lwz(12, lo_t, 12), ppc.lwz(0, F_STEP, 10), ppc.cmpw(0, 12))
+        a.br("bne", fail)
+
+    # Real shots: replaces `frsp f0,f0` (f0 = the swung step as a double, also at 0xC(r1) ^ 0x80000000;
+    # r30 = player). Adds the quarter. Leaf; r0, r3, r4, r10, r12 and f11 are free here.
+    a.label("fine_add")
+    a(ppc.lwz(0, 0xC, 1), ppc.xoris(4, 0, 0x8000))
+    quarter_check("fa_plain", 3, 4)
+    a(ppc.lwz(0, F_QUARTER, 10), ppc.slwi(0, 0, 2), ppc.add(12, 10, 0), ppc.lfs(11, F_TABLE, 12))
+    a(ppc.frsp(0, 0), ppc.fadds(0, 0, 11), ppc.BLR)
+    a.label("fa_plain")
+    a(ppc.frsp(0, 0), ppc.BLR)
+
+    # Previews and putts: replaces `stfs f0,0x48(r31)` (f0 = the step's launch speed from the table, r9 + 0x34 =
+    # its table entry, r11 = step, r30 = player, r31 = shot). With a quarter set, solves the next step too and
+    # stores the blend of the two speeds.
+    a.label("fine_lerp")
+    a(ppc.stwu(1, -32, 1), ppc.mflr(0), ppc.stw(0, 36, 1), ppc.stfs(0, 0x48, 31))
+    quarter_check("fl_done", 3, 11)
+    a(ppc.lwz(0, F_QUARTER, 10), ppc.cmpwi(0, 0))
+    a.br("beq", "fl_done")
+    a(ppc.slwi(0, 0, 2), ppc.add(12, 10, 0), ppc.lfs(0, F_TABLE, 12), ppc.stfs(0, 8, 1))
+    a(ppc.stw(9, 12, 1), ppc.stw(11, 16, 1))
+    a(ppc.addi(0, 11, 1), ppc.stw(0, SETUP_RANGE, 3), ppc.mr(4, 31))
+    a.bl(SOLVE_STEP)
+    a(ppc.lwz(3, PLAYER_SETUP, 30), ppc.lwz(11, 16, 1), ppc.stw(11, SETUP_RANGE, 3))
+    a(ppc.lwz(9, 12, 1), ppc.lfs(12, 0x34, 9), ppc.lfs(13, 0x3C, 9), ppc.lfs(11, 8, 1))
+    a(ppc.fsubs(13, 13, 12), ppc.fmadds(0, 13, 11, 12), ppc.stfs(0, 0x48, 31))
+    a.label("fl_done")
+    a(ppc.lfs(0, 0x48, 31), ppc.lwz(0, 36, 1), ppc.mtlr(0), ppc.addi(1, 1, 32), ppc.BLR)
+
+    # Power bar label: replaces `mullw r9,r9,r0` (r9 = shown step, r0 = club reach in yards, r23 = the HUD;
+    # the game then divides by 60). Returns (4 * step + quarter) * reach / 4, so the label counts yards.
+    a.label("fine_yards")
+    a(ppc.stwu(1, -16, 1), ppc.stw(8, 8, 1))
+    a.la(11, "fine")
+    a(ppc.lwz(12, HUD_SETUP, 23))
+    a(ppc.lwz(10, SETUP_PLAYER, 12), ppc.lwz(8, 0, 11), ppc.cmpw(8, 10))
+    a.br("bne", "fy_plain")
+    a(ppc.lwz(10, SETUP_CLUB, 12), ppc.lwz(8, F_CLUB, 11), ppc.cmpw(8, 10))
+    a.br("bne", "fy_plain")
+    a(ppc.lwz(8, F_STEP, 11), ppc.cmpw(8, 9))
+    a.br("bne", "fy_plain")
+    a(ppc.lwz(8, F_QUARTER, 11))
+    a.br("b", "fy_scale")
+    a.label("fy_plain")
+    a(ppc.li(8, 0))
+    a.label("fy_scale")
+    a(ppc.slwi(9, 9, 2), ppc.add(9, 9, 8), ppc.mullw(9, 9, 0), ppc.srwi(9, 9, 2))
+    a(ppc.lwz(8, 8, 1), ppc.addi(1, 1, 16), ppc.BLR)
+
+    # Zoom view, called after the game's aim camera (r3 = shot setup). Out along the aim line the camera keeps
+    # the game's spot on the line but rides ZOOM_TUNING height over an eased ground height and looks down ahead.
+    # From zoom 0 to 0.3 it blends in from the game's camera. Leaf; uses r0, r4, r7-r11, f0-f10.
+    a.label("zoom")
+    a.la(8, "zoom_on")
+    a(ppc.lwz(4, SETUP_VIEW, 3), ppc.cmpwi(4, VIEW_ZOOM))
+    a.br("bne", "zoom_off")
+    a(ppc.lfs(2, SETUP_ZOOM, 3), ppc.lfs(0, Z_ZERO, 8), ppc.fcmpu(2, 0))
+    a.br("ble", "zoom_off")
+    hi, lo = ppc.hi_lo(CAMERA_PTR)
+    a(ppc.lis(10, hi), ppc.lwz(10, lo, 10))
+    a(ppc.lfs(3, 0xC, 10), ppc.lfs(0, 0x0, 10), ppc.fsubs(3, 3, 0),     # the game's view direction, level
+      ppc.lfs(4, 0x14, 10), ppc.lfs(0, 0x8, 10), ppc.fsubs(4, 4, 0))
+    a(ppc.fmuls(5, 3, 3), ppc.fmuls(6, 4, 4), ppc.fadds(5, 5, 6), ppc.lfs(6, Z_TINY, 8), ppc.fcmpu(5, 6))
+    a.br("blt", "zoom_done")
+    hi, lo = ppc.hi_lo(CAVE2)
+    a(ppc.lis(7, hi), ppc.addi(7, 7, lo))
+    normalize_xz(a, 3, 4, 5)
+    hi, lo = ppc.hi_lo(AIM_BALL)
+    a(ppc.lis(9, hi), ppc.lfs(1, lo + 4, 9))                           # ball height
+    a(ppc.lwz(11, 0, 8), ppc.cmpwi(11, 0))
+    a.br("bne", "zoom_ground")
+    a(ppc.stfs(1, Z_GROUND, 8), ppc.li(11, 1), ppc.stw(11, 0, 8))      # zoom just started: ground = ball
+    a.label("zoom_ground")
+    a(ppc.lfs(0, Z_ONE, 8), ppc.fcmpu(2, 0))
+    a.br("ble", "zoom_rising")
+    a(ppc.lfs(1, 0x4, 10))              # out along the line the game keeps its camera just over the ground
+    a.label("zoom_rising")
+    a(ppc.lfs(0, Z_GROUND, 8), ppc.fsubs(1, 1, 0), ppc.lfs(6, Z_EASE, 8), ppc.fmadds(0, 1, 6, 0),
+      ppc.stfs(0, Z_GROUND, 8))
+    a(ppc.lfs(6, Z_HEIGHT, 8), ppc.fadds(6, 0, 6))                      # f6 = our eye height
+    a(ppc.lfs(7, Z_BLEND, 8), ppc.fmuls(7, 2, 7), ppc.lfs(0, Z_ONE, 8), ppc.fcmpu(7, 0))
+    a.br("ble", "zoom_weight")
+    a(ppc.fmr(7, 0))
+    a.label("zoom_weight")                                              # f7 = how much is ours
+    a(ppc.lfs(8, 0x4, 10), ppc.fsubs(6, 6, 8), ppc.fmadds(6, 6, 7, 8), ppc.stfs(6, 0x4, 10))
+    for off, d in ((0x0, 3), (0x8, 4)):                                 # look one foot ahead, level ...
+        a(ppc.lfs(8, off, 10), ppc.fadds(9, 8, d), ppc.lfs(10, off + 0xC, 10), ppc.fsubs(9, 9, 10),
+          ppc.fmadds(9, 9, 7, 10), ppc.stfs(9, off + 0xC, 10))
+    a(ppc.lfs(9, Z_PITCH, 8), ppc.fsubs(9, 6, 9), ppc.lfs(10, 0x10, 10), ppc.fsubs(9, 9, 10),
+      ppc.fmadds(9, 9, 7, 10), ppc.stfs(9, 0x10, 10))                   # ... and down
+    a.label("zoom_done")
+    a(ppc.BLR)
+    a.label("zoom_off")
+    a(ppc.li(0, 0), ppc.stw(0, 0, 8), ppc.BLR)
+
+    blob = a.assemble()
+    if len(blob) > CAVE5_SIZE:
+        raise SystemExit(f"cave 5 code is {len(blob)} bytes; only {CAVE5_SIZE} available")
+    return blob, dict(a.labels)
+
+
 def bl_sites(blob, base, target):
     """Addresses of `bl target` in a code image loaded at base."""
     out = []
@@ -343,7 +607,75 @@ def anchor_table(proj_sites):
     return blob
 
 
-def cave3_code():
+def cave6_code():
+    """Assemble the See-Through setting and its pause-menu row. Returns (bytes, labels)."""
+    a = ppc.Asm(CAVE6)
+    a.word("ghost_mode", GHOST_PUTTS)   # the setting (on by default; lasts until the game is turned off)
+    a.word("ghost_item")                # 1 while the pause menu lists our row
+    for name, text in (("ghost_text_on", GHOST_TEXT_ON), ("ghost_text_off", GHOST_TEXT_OFF),
+                       ("ghost_help", GHOST_TEXT_HELP)):
+        a.label(name)
+        text += b"\x00" * (-len(text) % 4)
+        a(*struct.unpack(f">{len(text) // 4}I", text))
+
+    # Replaces `bl PAUSE_BUILD` (r3 = pause menu): after the game lists its rows, add ours if there's room
+    # and the code is free.
+    a.label("ghost_menu")
+    a(ppc.stwu(1, -16, 1), ppc.mflr(0), ppc.stw(0, 20, 1), ppc.stw(31, 12, 1), ppc.mr(31, 3))
+    a.bl(PAUSE_BUILD)
+    a.la(12, "ghost_item")
+    a(ppc.li(0, 0), ppc.stw(0, 0, 12), ppc.lbz(11, PAUSE_COUNT, 31), ppc.cmpwi(11, PAUSE_ROWS_MAX))
+    a.br("bge", "gm_done")
+    hi, lo = ppc.hi_lo(PAUSE_LIST)
+    a(ppc.lis(10, hi), ppc.addi(10, 10, lo), ppc.li(9, 0))
+    a.label("gm_loop")
+    a(ppc.cmpw(9, 11))
+    a.br("bge", "gm_add")
+    a(ppc.slwi(8, 9, 2), ppc.add(8, 8, 10), ppc.lwz(8, 0, 8), ppc.cmpwi(8, GHOST_ITEM))
+    a.br("beq", "gm_done")
+    a(ppc.addi(9, 9, 1))
+    a.br("b", "gm_loop")
+    a.label("gm_add")
+    a(ppc.slwi(8, 11, 2), ppc.add(8, 8, 10), ppc.li(0, GHOST_ITEM), ppc.stw(0, 0, 8))
+    a(ppc.addi(11, 11, 1), ppc.stb(11, PAUSE_COUNT, 31), ppc.li(0, 1), ppc.stw(0, 0, 12))
+    a.label("gm_done")
+    a(ppc.lwz(31, 12, 1), ppc.lwz(0, 20, 1), ppc.mtlr(0), ppc.addi(1, 1, 16), ppc.BLR)
+
+    # Replaces `bl PAUSE_RUN_TARGET` just before the menu runs the chosen row (r25 = menu). Our row flips the
+    # setting, shows the new text and goes back to the menu, skipping the game's jump table.
+    a.label("ghost_select")
+    a(ppc.stwu(1, -16, 1), ppc.mflr(0), ppc.stw(0, 20, 1))
+    a.bl(PAUSE_RUN_TARGET)
+    a.la(12, "ghost_item")
+    a(ppc.lwz(0, 0, 12), ppc.cmpwi(0, 0))
+    a.br("beq", "gs_game")
+    hi, lo = ppc.hi_lo(PAUSE_LIST)
+    a(ppc.lwz(10, PAUSE_CURSOR, 25), ppc.slwi(10, 10, 2), ppc.lis(11, hi), ppc.addi(11, 11, lo), ppc.add(11, 11, 10),
+      ppc.lwz(0, 0, 11), ppc.cmpwi(0, GHOST_ITEM))
+    a.br("bne", "gs_game")
+    a.la(12, "ghost_mode")
+    a(ppc.lwz(0, 0, 12), ppc.cmpwi(0, GHOST_OFF), ppc.li(0, GHOST_PUTTS))
+    a.br("beq", "gs_set")
+    a(ppc.li(0, GHOST_OFF))
+    a.label("gs_set")
+    a(ppc.stw(0, 0, 12))
+    a(ppc.add(10, 10, 25), ppc.lwz(3, PAUSE_ROWS, 10), ppc.li(4, MSG_GHOST_ITEM), ppc.li(5, 0), ppc.li(6, 0x20),
+      ppc.li(7, 3))
+    a.bl(SET_TEXT)
+    a(ppc.lwz(3, PAUSE_HELP, 25), ppc.li(4, MSG_GHOST_HELP), ppc.li(5, 0), ppc.li(6, 0x20), ppc.li(7, 2))
+    a.bl(SET_TEXT)
+    hi, lo = ppc.hi_lo(PAUSE_RUN_DEFAULT)
+    a(ppc.addi(1, 1, 16), ppc.lis(12, hi), ppc.addi(12, 12, lo), ppc.mtlr(12), ppc.BLR)
+    a.label("gs_game")
+    a(ppc.lwz(0, 20, 1), ppc.mtlr(0), ppc.addi(1, 1, 16), ppc.BLR)
+
+    blob = a.assemble()
+    if len(blob) > CAVE6_SIZE:
+        raise SystemExit(f"cave 6 code is {len(blob)} bytes; only {CAVE6_SIZE} available")
+    return blob, dict(a.labels)
+
+
+def cave3_code(zoom, v6):
     """Assemble the putt aim view, the replay prompt and the HUD anchors. Returns (bytes, labels)."""
     a = ppc.Asm(CAVE3)
     a.word("prompt_open")  # 1 while our Continue / Watch Replay menu is up
@@ -358,6 +690,8 @@ def cave3_code():
     a.label("aim")
     a(ppc.stwu(1, -16, 1), ppc.mflr(0), ppc.stw(0, 20, 1), ppc.stw(31, 12, 1), ppc.mr(31, 3))
     a.bl(AIM_CAMERA)
+    a(ppc.mr(3, 31))
+    a.bl(zoom)  # v4: steady zoom view (does nothing in the other views)
     hi, lo = ppc.hi_lo(CAVE2)
     a(ppc.lis(7, hi), ppc.addi(7, 7, lo))  # r7 = camera data block
     a(ppc.lwz(4, SETUP_CLUB, 31), ppc.cmpwi(4, CLUB_PUTTER))
@@ -397,13 +731,34 @@ def cave3_code():
 
     # Message lookup hook (first instruction of MSG_LOOKUP): while our prompt is up, option code 7's text
     # reads "Watch Replay"; everything else goes to the game's lookup untouched.
+    # v4: while the pause menu lists our See-Through row, its two messages are ours.
     a.label("text_hook")
     a.la(12, "prompt_open")
     a(ppc.lwz(0, 0, 12), ppc.cmpwi(0, 0))
-    a.br("beq", "text_game")
+    a.br("beq", "text_ghost")
     a(ppc.cmpwi(3, MSG_OPTION_REPLAY))
-    a.br("bne", "text_game")
+    a.br("bne", "text_ghost")
     a.la(3, "replay_text")
+    a(ppc.BLR)
+    a.label("text_ghost")
+    hi, lo = ppc.hi_lo(v6["ghost_item"])
+    a(ppc.lis(12, hi), ppc.lwz(0, lo, 12), ppc.cmpwi(0, 0))
+    a.br("beq", "text_game")
+    a(ppc.cmpwi(3, MSG_GHOST_HELP))
+    a.br("bne", "text_ghost_row")
+    hi, lo = ppc.hi_lo(v6["ghost_help"])
+    a(ppc.lis(3, hi), ppc.addi(3, 3, lo), ppc.BLR)
+    a.label("text_ghost_row")
+    a(ppc.cmpwi(3, MSG_GHOST_ITEM))
+    a.br("bne", "text_game")
+    hi, lo = ppc.hi_lo(v6["ghost_mode"])
+    a(ppc.lis(12, hi), ppc.lwz(0, lo, 12), ppc.cmpwi(0, GHOST_OFF))
+    hi, lo = ppc.hi_lo(v6["ghost_text_on"])
+    a(ppc.lis(3, hi), ppc.addi(3, 3, lo))
+    a.br("bne", "text_ghost_done")
+    hi, lo = ppc.hi_lo(v6["ghost_text_off"])
+    a(ppc.lis(3, hi), ppc.addi(3, 3, lo))
+    a.label("text_ghost_done")
     a(ppc.BLR)
     a.label("text_game")
     a(MSG_LOOKUP_FIRST)
@@ -513,6 +868,93 @@ def cave3_code():
           ppc.stw(0, GX_DIRTY, 13))
         a.b(target)
 
+    # v4 see-through golfer (see MODEL_DRAW). State: whether the golfer is being drawn see-through, the blend
+    # and depth modes the game last asked for, and the material colour passed instead. The setting is in cave 6.
+    a.word("ghost_on")
+    for i, v in enumerate((GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET)):
+        a.word(f"blend{i}", v)
+    for i, v in enumerate((1, 3, 1)):  # GX_TRUE, GX_LEQUAL, GX_TRUE: what the character materials use
+        a.word(f"zmode{i}", v)
+    a.word("ghost_color")
+    G_ON, G_BLEND, G_ZMODE, G_COLOR = 0, 4, 20, 32
+
+    # Replaces MODEL_DRAW's first instruction (r3 = model instance). The shooter's golfer, putting (aim to
+    # stroke) with the setting on, is drawn see-through; everything else draws as normal.
+    a.label("ghost_draw")
+    hi, lo = ppc.hi_lo(v6["ghost_mode"])
+    a(ppc.lis(11, hi), ppc.lwz(11, lo, 11), ppc.cmpwi(11, GHOST_OFF))
+    a.br("beq", "gd_plain")
+    a.la(12, "ghost_on")
+    hi, lo = ppc.hi_lo(CUR_PLAYER)
+    a(ppc.lis(10, hi), ppc.lbz(10, lo, 10), ppc.andi_(0, 10, 0x80))
+    a.br("bne", "gd_plain")
+    a(ppc.mulli(10, 10, PLAYER_STRIDE))
+    hi, lo = ppc.hi_lo(PLAYERS)
+    a(ppc.lis(9, hi), ppc.addi(9, 9, lo), ppc.add(9, 9, 10))              # r9 = shooter
+    a(ppc.lwz(10, PLAYER_GOLFER, 9), ppc.cmpw(10, 3))
+    a.br("bne", "gd_plain")
+    a(ppc.lwz(10, 0x24, 9), ppc.cmpwi(10, STATE_AIM))
+    a.br("blt", "gd_plain")
+    a(ppc.cmpwi(10, STATE_LAUNCHED))
+    a.br("bgt", "gd_plain")
+    a(ppc.cmpwi(11, GHOST_ALWAYS))
+    a.br("beq", "gd_ghost")
+    a(ppc.lwz(10, SETUP_PTR, 9), ppc.lwz(10, SETUP_CLUB, 10), ppc.cmpwi(10, CLUB_PUTTER))
+    a.br("bne", "gd_plain")
+    a.label("gd_ghost")
+    a(ppc.stwu(1, -32, 1), ppc.mflr(0), ppc.stw(0, 36, 1), ppc.stw(3, 8, 1), ppc.stw(4, 12, 1), ppc.stw(5, 16, 1))
+    a(ppc.li(0, 1), ppc.stw(0, G_ON, 12))
+    a(ppc.li(3, GX_BM_BLEND), ppc.li(4, GX_BL_SRCALPHA), ppc.li(5, GX_BL_INVSRCALPHA), ppc.li(6, GX_LO_SET))
+    a.br("bl", "blend_raw")
+    a(ppc.li(3, 1), ppc.li(4, 3), ppc.li(5, 0))
+    a.br("bl", "zmode_raw")
+    a(ppc.lwz(3, 8, 1), ppc.lwz(4, 12, 1), ppc.lwz(5, 16, 1))
+    a.br("bl", "gd_plain")                                               # the game's draw
+    a.la(12, "ghost_on")
+    a(ppc.li(0, 0), ppc.stw(0, G_ON, 12))
+    a(ppc.lwz(3, G_BLEND, 12), ppc.lwz(4, G_BLEND + 4, 12), ppc.lwz(5, G_BLEND + 8, 12),
+      ppc.lwz(6, G_BLEND + 12, 12))
+    a.br("bl", "blend_raw")
+    a.la(12, "ghost_on")
+    a(ppc.lwz(3, G_ZMODE, 12), ppc.lwz(4, G_ZMODE + 4, 12), ppc.lwz(5, G_ZMODE + 8, 12))
+    a.br("bl", "zmode_raw")
+    a(ppc.lwz(0, 36, 1), ppc.mtlr(0), ppc.addi(1, 1, 32), ppc.BLR)
+    a.label("gd_plain")
+    a(MODEL_DRAW_FIRST)
+    a.b(MODEL_DRAW + 4)
+
+    # GXSetBlendMode / GXSetZMode entries: remember what the game asks for; while the golfer is drawn
+    # see-through, blend by source alpha and leave depth unwritten instead.
+    a.label("blend_hook")
+    a.la(12, "ghost_on")
+    a(ppc.stw(3, G_BLEND, 12), ppc.stw(4, G_BLEND + 4, 12), ppc.stw(5, G_BLEND + 8, 12),
+      ppc.stw(6, G_BLEND + 12, 12), ppc.lwz(11, G_ON, 12), ppc.cmpwi(11, 0))
+    a.br("beq", "blend_raw")
+    a(ppc.li(3, GX_BM_BLEND), ppc.li(4, GX_BL_SRCALPHA), ppc.li(5, GX_BL_INVSRCALPHA))
+    a.label("blend_raw")
+    a(GX_SET_BLEND_FIRST)
+    a.b(GX_SET_BLEND + 4)
+    a.label("zmode_hook")
+    a.la(12, "ghost_on")
+    a(ppc.stw(3, G_ZMODE, 12), ppc.stw(4, G_ZMODE + 4, 12), ppc.stw(5, G_ZMODE + 8, 12),
+      ppc.lwz(11, G_ON, 12), ppc.cmpwi(11, 0))
+    a.br("beq", "zmode_raw")
+    a(ppc.li(5, 0))
+    a.label("zmode_raw")
+    a(GX_SET_ZMODE_FIRST)
+    a.b(GX_SET_ZMODE + 4)
+
+    # GXSetChanMatColor entry (r4 = &color, RGBA): while see-through, pass a copy with alpha scaled down.
+    a.label("color_hook")
+    a.la(12, "ghost_on")
+    a(ppc.lwz(11, G_ON, 12), ppc.cmpwi(11, 0))
+    a.br("beq", "color_go")
+    a(ppc.lwz(11, 0, 4), ppc.rlwinm(10, 11, 0, 24, 31), ppc.mulli(10, 10, GHOST_ALPHA), ppc.srwi(10, 10, 8),
+      ppc.rlwinm(11, 11, 0, 0, 23), ppc.or_(11, 11, 10), ppc.stw(11, G_COLOR, 12), ppc.addi(4, 12, G_COLOR))
+    a.label("color_go")
+    a(GX_SET_MAT_COLOR_FIRST)
+    a.b(GX_SET_MAT_COLOR + 4)
+
     blob = a.assemble()
     if len(blob) > CAVE3_SIZE:
         raise SystemExit(f"cave 3 code is {len(blob)} bytes; only {CAVE3_SIZE} available")
@@ -586,19 +1028,23 @@ def check_matrix_site(buf, base, hook):
         raise SystemExit(f"0x{hook:08X}: no GXSetProjection call right after the hook")
 
 
-def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4):
+def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
     base = t0_addr - t0_off  # address of file offset 0, for word()/put()
 
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
-                              (CAVE4, CAVE4_FIRST, cave4)):
+                              (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6)):
         if word(data, base, addr) != first:  # still the original (dead) function
             raise SystemExit(f"0x{addr:08X}: expected first instruction {first:08X}")
         data[addr - base:addr - base + len(code)] = code
     put(data, base, MSG_LOOKUP, ppc.b(MSG_LOOKUP, v3["text_hook"]), MSG_LOOKUP_FIRST)
     put(data, base, PROJ_STORE_X, ppc.b(PROJ_STORE_X, v3["anchor"]), PROJ_STORE_X_WORD)
+    for site, first, stub in ((MODEL_DRAW, MODEL_DRAW_FIRST, "ghost_draw"), (GX_SET_BLEND, GX_SET_BLEND_FIRST, "blend_hook"),
+                              (GX_SET_ZMODE, GX_SET_ZMODE_FIRST, "zmode_hook"),
+                              (GX_SET_MAT_COLOR, GX_SET_MAT_COLOR_FIRST, "color_hook")):
+        put(data, base, site, ppc.b(site, v3[stub]), first)
     put(data, base, ASPECT_CONST, K_ASPECT, 0x3F9BE76D)
     put(data, base, ORTHO_HOOK, ppc.b(ORTHO_HOOK, stubs[ORTHO_HOOK]), ppc.fdivs(10, 9, 8))
     for hook in DOL_MATRIX_HOOKS:
@@ -617,7 +1063,7 @@ def float_word(v):
     return struct.unpack(">I", struct.pack(">f", v))[0]
 
 
-def patch_overlay(clean_files, build_files, rel, stubs, v2, v3):
+def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4):
     raw = open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     kind, _ = lz.header(raw)
     blob, _ = lz.decompress(raw)
@@ -643,9 +1089,14 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3):
             ppc.bl(HOOK_MENU_RESULT, 0x804840A8))
         for site, _, target in HUD_SPLITS:
             put(buf, OVERLAY_BASE, site, ppc.bl(site, v3[f"split_{site:08X}"]), ppc.bl(site, target))
-        put(buf, OVERLAY_BASE, RANGE_RATE, float_word(RANGE_RATE_NEW), float_word(RANGE_RATE_OLD))
         for i, (old, new) in enumerate(zip(SLOT_ITEMS_OLD, SLOT_ITEMS_NEW)):
             put(buf, OVERLAY_BASE, SLOT_ITEMS + 4 * i, new, old)
+        for site, expect, stub in ((RANGE_STEP_HOOK, RANGE_STEP_WORD, "fine_step"), (SPREAD_HOOK, SPREAD_WORD, "fine_add"),
+                                   (TABLE_HOOK, TABLE_WORD, "fine_lerp"), (YARDS_HOOK, YARDS_WORD, "fine_yards")):
+            put(buf, OVERLAY_BASE, site, ppc.bl(site, v4[stub]), expect)
+        for site in PAUSE_BUILD_CALLS:
+            put(buf, OVERLAY_BASE, site, ppc.bl(site, v4["ghost_menu"]), ppc.bl(site, PAUSE_BUILD))
+        put(buf, OVERLAY_BASE, PAUSE_RUN, ppc.bl(PAUSE_RUN, v4["ghost_select"]), ppc.bl(PAUSE_RUN, PAUSE_RUN_TARGET))
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -675,7 +1126,10 @@ def main():
     ppc.selftest()
     proj_sites = projection_call_sites(clean)
     cave4 = anchor_table(proj_sites)
-    cave3, v3 = cave3_code()
+    cave5, v4 = cave5_code()
+    cave6, v6 = cave6_code()
+    v4.update(v6)
+    cave3, v3 = cave3_code(v4["zoom"], v6)
     cave, stubs = build_cave()
     cave2, v2 = cave2_code(v3["aim_place"])
     print(f"cave 2: {len(cave2)} of {CAVE2_SIZE} bytes at 0x{CAVE2:08X} (fast-forward 0x{v2['ff']:08X},"
@@ -684,10 +1138,14 @@ def main():
           f" replay prompt 0x{v3['replay_check']:08X}, HUD anchors 0x{v3['anchor']:08X})")
     print(f"cave 4: {len(cave4)} of {CAVE4_SIZE} bytes at 0x{CAVE4:08X} (anchor table, {len(proj_sites)} callers,"
           f" {sum(1 for s in proj_sites if PROJ_CALLERS.get(s))} anchored)")
+    print(f"cave 5: {len(cave5)} of {CAVE5_SIZE} bytes at 0x{CAVE5:08X} (quarter steps 0x{v4['fine_step']:08X},"
+          f" zoom 0x{v4['zoom']:08X})")
+    print(f"cave 6: {len(cave6)} of {CAVE6_SIZE} bytes at 0x{CAVE6:08X} (see-through setting 0x{v6['ghost_mode']:08X},"
+          f" pause menu row 0x{v6['ghost_menu']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4)
+              cave3, v3, cave4, cave5, cave6)
     for rel in OVERLAY_MATRIX_HOOKS:
-        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3)
+        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4)
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
               os.path.join(clean, "files"), os.path.join(build, "files"))
 
