@@ -88,13 +88,18 @@ def serve():
     udp.bind(("127.0.0.1", DSU_PORT))
     clients = {}  # address -> last request time
     number = [0]
+    seen = {}  # message type -> how many requests came in (for status)
 
     def receive():
         while True:
-            data, addr = udp.recvfrom(1024)
+            try:
+                data, addr = udp.recvfrom(1024)
+            except ConnectionResetError:   # Windows: a Dolphin we were streaming to has closed
+                continue
             if len(data) < 20 or data[:4] != b"DSUC":
                 continue
             msg = struct.unpack_from("<I", data, 16)[0]
+            seen[hex(msg)] = seen.get(hex(msg), 0) + 1
             if msg == MSG_VERSION:
                 udp.sendto(packet(server_id, MSG_VERSION, struct.pack("<HH", PROTOCOL, 0)), addr)
             elif msg == MSG_PORTS:
@@ -112,7 +117,10 @@ def serve():
                     del clients[addr]
                     continue
                 number[0] += 1
-                udp.sendto(packet(server_id, MSG_DATA, data_body(pad, number[0])), addr)
+                try:
+                    udp.sendto(packet(server_id, MSG_DATA, data_body(pad, number[0])), addr)
+                except OSError:
+                    clients.pop(addr, None)
             time.sleep(0.004)
 
     def run_command(line):
@@ -122,7 +130,8 @@ def serve():
         verb, args = parts[0].lower(), parts[1:]
         if verb == "status":
             held, sticks = pad.snapshot()
-            return json.dumps({"held": sorted(held), "sticks": sticks, "clients": [f"{a[0]}:{a[1]}" for a in clients]})
+            return json.dumps({"held": sorted(held), "sticks": sticks, "clients": [f"{a[0]}:{a[1]}" for a in clients],
+                               "requests": seen})
         if verb == "wait":
             time.sleep(float(args[0]) / 1000)
             return "ok"

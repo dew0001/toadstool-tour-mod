@@ -1,20 +1,20 @@
 {
-    "name":  "Toadstool Tour Mod",
-    "version":  6,
-    "patch":  "mod/patches/v6.json",
-    "patch_sha256":  "43e6389773e76ac69ee3900db3780b8e0880c610da4e7a7ec0495ca45f8db603",
-    "result_sha1":  "b01965f3eab391f05edd6d40074c20dd9e38538f",
-    "app_version":  3,
-    "app_files":  {
-                      "app/play.ps1":  "ee233b04815026d7bcb84fc858c45eebce097b62f581e8a160ecc91017f6ed5b",
-                      "app/common.ps1":  "ada01be48df71485dd19bcc70e550df16d52c76d0c937a478d571f339b53eaae",
-                      "app/TTMod.cs":  "9cdea40ad38f1a0053e0b557a736b2f5c7ec9e05559fd5bd471c79574deed49d",
-                      "app/version.txt":  "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce"
-                  },
-    "dolphin":  "2606a",
-    "textures":  {
-                     "mega":  "https://mega.nz/file/uph2xbRY#VoZqBPjbGxnetCxzsGogiV_gA8AIb9GuRKXSUkQaLOw",
-                     "sha256":  "b23b08689819b5ebc4ad4b86ac49f120902cce628a99e1f7de1a1c2c589d8e0c",
-                     "credit":  "Toadstool Tour 4x UI texture pack by NickPancakes - https://forums.dolphin-emu.org/Thread-mario-golf-toadstool-tour-gcn-4x-ui-texture-pack"
-                 }
+  "name": "Toadstool Tour Mod",
+  "version": 7,
+  "patch": "mod/patches/v7.json",
+  "patch_sha256": "eec4c12ea4dda4e23bc40f04f46568d1fe48b713d76768d68a481e547b2fddda",
+  "result_sha1": "d54b55e1f41e20085a0caa917642da5769c28dea",
+  "app_version": 4,
+  "app_files": {
+    "app/play.ps1": "ee233b04815026d7bcb84fc858c45eebce097b62f581e8a160ecc91017f6ed5b",
+    "app/common.ps1": "748275ef1a59f86526c87f3e11b814da599bbc0251e8088f102043dfa77b7487",
+    "app/TTMod.cs": "3210e42c42b50749a455c31da8bf32fc8f277889e0635fb0a7894edeea6df529",
+    "app/version.txt": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+  },
+  "dolphin": "2606a",
+  "textures": {
+    "mega": "https://mega.nz/file/uph2xbRY#VoZqBPjbGxnetCxzsGogiV_gA8AIb9GuRKXSUkQaLOw",
+    "sha256": "b23b08689819b5ebc4ad4b86ac49f120902cce628a99e1f7de1a1c2c589d8e0c",
+    "credit": "Toadstool Tour 4x UI texture pack by NickPancakes - https://forums.dolphin-emu.org/Thread-mario-golf-toadstool-tour-gcn-4x-ui-texture-pack"
+  }
 }

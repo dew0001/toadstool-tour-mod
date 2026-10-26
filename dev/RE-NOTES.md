@@ -31,8 +31,9 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003CA40 | 684 | FUN_8003ca40 | v4 See-Through setting and pause-menu row |
 | 0x800757BC | 704 | FUN_800757bc | v5 zoom view camera |
 | 0x80093938 | 648 | FUN_80093938 | v6 yardage box (rounded, fitted to the number) |
+| 0x80040CE8 | 600 | FUN_80040ce8 | v7 Shy Guy's link record for the select screen (`--shyguy` only) |
 
-Still free (DEAD in `find_dead_code.py`): 0x80040CE8 (600), 0x8003CDE4 (540), 0x80053528 (476),
+Still free (DEAD in `find_dead_code.py`): 0x8003CDE4 (540), 0x80053528 (476),
 0x80054EFC (424), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug
 patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
 0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
@@ -150,6 +151,64 @@ patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
   scale alpha by `GHOST_ALPHA`, force source-alpha blending and turn depth writes off during that draw, and
   remember the game's last blend and depth modes, which are put back afterwards.
 
+## Characters (v7 Shy Guy)
+
+Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8 Game Boy Advance link golfers
+(16-23), built like Koopa Troopa (golfer 15) with his own files.
+
+- **Koopa Troopa's files:** golfer models `C/V/S` and `C/V/Z` (same skeleton; Z has 5 fewer face bones and no eye
+  expressions; both are loaded for a round), body texture bank `C/V/R` (type 1), in-round face `C/V/U` (64x64
+  RGB5A3), emblem and name plate `C/V/T` (two 256x128 CMPR on white). Select screen: its own lighter Koopa
+  `B/V/D` (77 bones, slightly different bind pose, textures inside the file), the grid of 16 faces `B/U/P`
+  texture 0 (464x116 CMPR, 58x58 each, 8 x 2, Koopa 6th in the top row) and the row of 16 faces `B/U/M`
+  texture 25 (1024x64 RGB5A3, 64x64 each, used for the 1P badge). Each character has a group like this
+  (Mario: `C/R/T`, `C/S/A`, `C/R/U`..`Z`, face `C/R/V`).
+- **Golfer 16's files:** models `C/W/B` and `C/W/E`, bank `C/W/A`, face `C/W/D`, emblem `C/W/C`, select-screen
+  model `B/V/K`; on the extra page `B/U/P` texture 1 (cell 0) and `B/U/M` texture 39 (slot 0).
+- **Link records** (the save data's Game Boy Advance golfers): 4 at 0x80234040 + 0x284 x slot, each two golfer
+  entries of 0x2C (golfer 16 + 2 x slot + entry +0x1C) and the record name at +0x268 (non-empty = present;
+  +0x27C a version byte). Entry: +0x00/+0x10 name, +0x1A drive (u16, yards), +0x1C body, +0x1F..+0x24 the six
+  stats, +0x28 voice (Koopa 15). The select screen lists them on an extra page, Down from the grid's bottom row
+  (`_DAT_8044bab0` = 1): `FUN_8040aad4` fills its 8-golfer list at 0x80445B2C (-1 = none) between
+  `bl FUN_80410000` at 0x8040AB98 and `bl FUN_80410140` at 0x8040ACC4, and `FUN_80405b30` draws its cards
+  (`cmpwi r31,1` at 0x80405F8C: two cells per record). v7 writes Shy Guy's record into slot 0 before the fill
+  (cave 9, `shyguy.RECORD`: his name, Koopa's 200-yard drive, stats and voice), hides its second golfer after
+  it, and draws one cell per record. A round copies the chosen golfer's data to 0x8017573C and 0x804E5D74; the
+  drive comes from entry +0x1A (`FUN_8044c344`).
+- **Golfer objects in a round:** `FUN_804074a8(code)` makes each golfer: Koopa (15) in `FUN_804bd45c`, vtable
+  0x804CA3C8; golfer 16 in `FUN_804c7220`'s default case, vtable 0x804CC948. Both are 0x1E4 bytes on the same
+  base constructor `FUN_80407590`. The vtables have 47 methods; [22], [23] and [24] return the file IDs of the
+  golfer model, the bank and the second model, [25] the character data. Golfer 16's own methods are a child's
+  (with Koopa's files they draw see-through and give a 30-step meter), so v7 copies Koopa's 47 into golfer 16's
+  vtable except [22]-[24] (`GOLFER16_VTABLE` in `build_mod.py`).
+- **Model format** (`model.py`): type-2 module; root (magic 0x0131A313) found through the code stub's HA16/LO16
+  relocations at +20/+24. Meshes (0x3C): +6 texcoord sets, +7 textures, +8 texture entries (4 bytes: flag short,
+  texture, material), +0x28 groups, +0x2C -> groups, +0x34 shader, +0x38 part (1 = body, 3..11 = clubs). Groups
+  (0x38): +0 flags (bit 0 rigid, bit 1 list of display lists), +4 matrix count, +8 up to 10 bones (PNMTXIDX = 3 x
+  slot, one byte per vertex when the count isn't 1), +0x30 list count, +0x34 -> entries (0x20: list, size,
+  model-space bounding box). **Rigid groups index the root's +0x08/+0x1C/+0x30 arrays and their positions are
+  in model space, bind pose**: the draw (`MODEL_DRAW`, `FUN_80006524`) loads each bone's skin matrix (animated
+  world x the bone's +0x04 inverse bind) into the palette, except for bones with bit 0 set at +0x5C. Skinned
+  groups index a per-instance buffer the CPU fills every frame. Triangles are clockwise (the OBJ's are the other
+  way). Each list ends with three `08 10 00000001` commands, then zero padding to 32 bytes.
+- **Texture sets** (models' root +0x8C and texture files, magic 0x0020AF30): count, then (header offset, 0)
+  pairs; header 0x24: height << 16 | width, format, data offset (high bit set = in the character's bank file,
+  else from the set's start), wraps, filters, max LOD << 8. CMPR mip levels under 8 pixels still take a 32-byte
+  tile. Dolphin's CMPR blends are 5/8 + 3/8.
+- **Names and lines** live in `main.dol` message banks with per-message u32 offset tables (e.g. the name list's
+  table at file 0x1406A8), so a shorter text padded with NULs is safe. Golfer 16's name comes from its link
+  record, so v7 changes no messages.
+- **HD texture pack:** NickPancakes' pack replaces textures by XXH64 of their data (`tex1_WxH_hash_fmt`), so any
+  picture the mod changes falls back to the game's resolution, including the other faces in `B/U/P` and `B/U/M`.
+- `shyguy.py` builds `C/W/B`, `C/W/E` and `B/V/K` from Koopa's `C/V/S`, `C/V/Z` and `B/V/D` (`bone_map`: the bone
+  with the matching parent nearest its bind position), and `C/W/A` from `C/V/R` with the OBJ's texture at the
+  start. In each model the body meshes get a 32-byte NOP list and one gets the OBJ as two rigid groups (pelvis,
+  legs, feet; arms), with positions/normals/texcoords moved to the end of the module after copies of Koopa's (so
+  the clubs keep their indices). The body is 90% size and set back 1.2 units because Koopa's swings bring his
+  hands 2 units in front of his hips, inside Shy Guy's robe; the arms are moved onto Koopa's arm line. Golfer
+  16's files grow by about 60 KB each (`C/W/B` 504 KB packed, Koopa's `C/V/S` 443 KB). The patch names Koopa's
+  file as each one's `base` (`make_patch.py BASE`), so Koopa's data goes in as copies.
+
 ## Menus
 
 - **Post-shot menu** `FUN_80483564(menu, type, pad)` / `FUN_804835f4`: +0x46 option count, +0x50/+0x54/+0x58
@@ -190,18 +249,24 @@ with keyboard controls. Set `TTMOD_ROOT`, `TTMOD_DOL` or `TTMOD_PID` to point el
 
 1. Build into the build tree: `python -I dev\build_mod.py <disc> <build> --version N`.
 2. Run the test Dolphin **hands-off** (never the player's own Dolphin, and never let Dolphin update itself):
-   `dev\tools\test_dolphin.ps1 start [-Image <main.dol or .iso>]`. It switches the test profile to the virtual
-   controller (`dsu_pad.py`, Dolphin's DSU Client on udp 26760), turns on background input, maps the screenshot
-   hotkey to the pad's PS button, puts the window off-screen and hands focus back. Nothing goes through the real
-   keyboard, mouse or screen, so it never gets in the way of whoever is using the PC.
+   `dev\tools\test_dolphin.ps1 start [-Image <main.dol or .iso>]`. It starts Dolphin on its own hidden Windows
+   desktop (`TTModTest`), so no window ever shows on the player's screen or takes focus, switches the test
+   profile to the virtual controller (`dsu_pad.py`, Dolphin's DSU Client on udp 26760), turns on background
+   input and hotkeys without focus (`HotkeysRequireFocus = False`), maps the screenshot hotkey to the pad's PS
+   button and forgets the saved game-window position (Qt.ini `[renderwidget]`). It sends no keys and moves no
+   windows. Rendering and screenshots work on the hidden desktop. (Don't go back to an off-screen window on the
+   normal desktop: the test profile's game settings start fullscreen, and Dolphin restores its last window
+   position over the configured one, which once covered the player's screen.)
 3. Drive it: `python -I dev\tools\dsu_pad.py press Cross` / `seq "Share 200; wait 3000; Cross 200"` /
    `stick L 0 1 300` / `status`. Mapping: A = Cross, B = Circle, X = Square, Y = Triangle, Z = R1,
    Start = Share, L/R = L2/R2, main stick = left stick, C-stick = right stick, D-pad = Pad N/S/E/W.
    Look: `test_dolphin.ps1 shot` prints a screenshot path (a 960-wide `.small.png` copy). `stop` closes it.
-   To hand the test game to a person: `test_dolphin.ps1 keyboard`, then `start` (keys: x = A, z = B, c = X,
-   s = Y, d = Z, i/k/j/l = C-stick, q/w = L/R, arrows = main stick, Enter = Start).
-4. Menus to a round: Start, A, A (1 Player), A (Mario; Pad E five times = Koopa Troopa), Pad E, A (Character
-   Match), A, A (Novice), A (course), A (Yes), then A. About 3 s between menu steps, 8 s for the course to load.
+   To hand the test game to a person (only when they ask): `test_dolphin.ps1 play` starts it on the normal
+   desktop with keyboard controls (keys: x = A, z = B, c = X, s = Y, d = Z, i/k/j/l = C-stick, q/w = L/R,
+   arrows = main stick, Enter = Start).
+4. Menus to a round: Start, A, A (1 Player), A (Mario; Pad E five times = Koopa Troopa; Pad S twice = Shy Guy on
+   the extra page), Pad E, A (Character Match; Pad E three times = Stroke Play), A, A (Novice), A (course), A
+   (Yes), then A. About 3 s between menu steps, 8 s for the course to load.
 5. Tools in `dev\tools` (PowerShell 7 or 5.1):
    - `gcmem.ps1` (dot-source): `[GCMem]::Open(pid, 'GFTEMD')`, `U8/U32/F32/W32(address)`, `ReadGC(address, n)`;
      finds Dolphin's emulated RAM by the game ID and the 0x01800000 size at +0x28.

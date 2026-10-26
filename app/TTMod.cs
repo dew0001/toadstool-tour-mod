@@ -274,6 +274,13 @@ public static class TTMod
     // ---------------------------------------------------------------- Camelot LZSS
     public static byte[] Decompress(byte[] data)
     {
+        int end;
+        return Decompress(data, out end);
+    }
+
+    // `end` is the offset just past the stream's end marker (a type 2 file's relocation table follows it).
+    public static byte[] Decompress(byte[] data, out int end)
+    {
         List<byte> o = new List<byte>(((data[1] << 16) | (data[2] << 8) | data[3]) + 16);
         int src = 4;
         while (true)
@@ -284,7 +291,7 @@ public static class TTMod
                 if (((flags >> bit) & 1) == 0) { o.Add(data[src++]); continue; }
                 int b1 = data[src], b2 = data[src + 1];
                 int dist = ((b1 & 0xF0) << 4) | b2;
-                if (dist == 0) return o.ToArray();
+                if (dist == 0) { end = src + 2; return o.ToArray(); }
                 int len;
                 if ((b1 & 0x0F) != 0) { len = (b1 & 0x0F) + 1; src += 2; }
                 else { len = data[src + 2] + 0x11; src += 3; }
@@ -293,6 +300,30 @@ public static class TTMod
                 for (int i = 0; i < len; i++) o.Add(o[pos + i]);
             }
         }
+    }
+
+    // A type 2 file's relocation table: its 8-byte entries without the terminator.
+    public static byte[] Relocations(byte[] data)
+    {
+        int end;
+        Decompress(data, out end);
+        int at = (end + 7) & ~7, n = at;
+        while (data[n] != 0xFF) n += 8;
+        byte[] t = new byte[n - at];
+        Array.Copy(data, at, t, 0, t.Length);
+        return t;
+    }
+
+    // Type 2: the LZSS file, then the relocation table at the next 8-byte boundary, ended by 8 x 0xFF.
+    public static byte[] Pack(int kind, byte[] data, byte[] relocations)
+    {
+        byte[] body = Pack(kind, data);
+        int at = (int)Align(body.Length, 8);
+        byte[] o = new byte[at + relocations.Length + 8];
+        Array.Copy(body, o, body.Length);
+        Array.Copy(relocations, 0, o, at, relocations.Length);
+        for (int i = 0; i < 8; i++) o[at + relocations.Length + i] = 0xFF;
+        return o;
     }
 
     // Same greedy matcher as the mod's Python tools, so output is byte-identical.
@@ -500,6 +531,20 @@ public static class TTMod
         byte[] b = new byte[s.Length / 2];
         for (int i = 0; i < b.Length; i++) b[i] = Convert.ToByte(s.Substring(2 * i, 2), 16);
         return b;
+    }
+
+    // A copy of `b`, cut short or zero-filled to `n` bytes.
+    public static byte[] Resize(byte[] b, long n)
+    {
+        byte[] o = new byte[n];
+        Array.Copy(b, o, Math.Min(b.Length, n));
+        return o;
+    }
+
+    // Move runs of the original file to new places (so the patch never carries game data).
+    public static void ApplyCopies(byte[] target, byte[] source, long[] from, long[] to, long[] lengths)
+    {
+        for (int i = 0; i < from.Length; i++) Array.Copy(source, from[i], target, to[i], lengths[i]);
     }
 
     public static void ApplyEdits(byte[] target, long[] offsets, string[] hexes)

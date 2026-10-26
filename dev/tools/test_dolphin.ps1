@@ -1,15 +1,17 @@
-# Run the test Dolphin hands-off: its only controller is the virtual DSU pad (dsu_pad.py), background input is on
-# so it never needs focus, the screenshot hotkey is the pad's PS button, and its window sits off-screen. Nothing
-# goes through the real keyboard, mouse or screen, so the PC stays free for whoever is using it.
+# Run the test Dolphin hands-off: it starts on its own hidden Windows desktop, so its window never shows up on the
+# screen and can't take focus; its only controller is the virtual DSU pad (dsu_pad.py), background input is on so
+# it never needs focus, and the screenshot hotkey is the pad's PS button. Nothing goes through the real keyboard,
+# mouse or screen, so the PC stays free for whoever is using it.
 #
 #   test_dolphin.ps1 start [-Image <main.dol or .iso>] [-Profile <user folder>] [-Dolphin <Dolphin.exe>]
 #   test_dolphin.ps1 shot            take a screenshot, print its path (read it with any image viewer/tool)
 #   test_dolphin.ps1 stop
-#   test_dolphin.ps1 keyboard        switch the profile back to keyboard play in a normal window (to hand it over)
+#   test_dolphin.ps1 play [-Image ...]   start it on the normal desktop for a person to play (their own controller
+#                                        mapping from their Dolphin, else keyboard controls)
 #
 # Drive it with: python -I dsu_pad.py press Cross / seq "Share 200; wait 3000; Cross 200" / stick L 0 1 300 ...
 param(
-	[Parameter(Mandatory, Position = 0)] [ValidateSet('start', 'shot', 'stop', 'keyboard')] [string] $Action,
+	[Parameter(Mandatory, Position = 0)] [ValidateSet('start', 'shot', 'stop', 'play')] [string] $Action,
 	[string] $Image = (Join-Path $PSScriptRoot '..\..\..\build\sys\main.dol'),
 	[string] $Profile = (Join-Path $PSScriptRoot '..\..\..\mod\test-profile'),
 	[string] $Dolphin = (Join-Path $PSScriptRoot '..\..\..\..\dolphin-2606a-x64\Dolphin-x64\Dolphin.exe')
@@ -19,6 +21,7 @@ $Profile = (Resolve-Path $Profile).Path
 $config = Join-Path $Profile 'Config'
 $pidFile = Join-Path $Profile 'pid.txt'
 $pad = 'DSUClient/0/TestPad'
+$desktopName = 'TTModTest'
 
 function Set-Ini([string] $Path, [string] $Section, [hashtable] $Values) {
 	$lines = [System.Collections.Generic.List[string]]::new()
@@ -35,6 +38,19 @@ function Set-Ini([string] $Path, [string] $Section, [hashtable] $Values) {
 		if (-not $found) { $lines.Insert($end, "$key = $($Values[$key])") }
 	}
 	Set-Content -Path $Path -Value $lines -Encoding ascii
+}
+
+# Dolphin puts its game window back where it last was (Qt.ini [renderwidget]), over the Dolphin.ini position.
+function Clear-SavedWindow {
+	$qt = Join-Path $config 'Qt.ini'
+	if (-not (Test-Path $qt)) { return }
+	$out = [System.Collections.Generic.List[string]]::new()
+	$skip = $false
+	foreach ($l in @(Get-Content $qt)) {
+		if ($l -match '^\[') { $skip = $l -eq '[renderwidget]' }
+		if (-not $skip) { $out.Add($l) }
+	}
+	Set-Content -Path $qt -Value $out -Encoding ascii
 }
 
 function Write-PadProfile([bool] $Virtual) {
@@ -63,11 +79,55 @@ function Write-PadProfile([bool] $Virtual) {
 	Set-Content -Path (Join-Path $config 'GCPadNew.ini') -Value $lines -Encoding ascii
 }
 
-Add-Type -Namespace TT -Name Win -MemberDefinition @'
-[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
-[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+# For a person playing: the controller mapping from their own Dolphin when port 1 there is a controller (it's
+# copied into the test profile; their Dolphin is left alone). Returns the device, or nothing for the keyboard keys.
+function Use-PlayerPad {
+	$own = @((Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Dolphin Emulator\Config\GCPadNew.ini'),
+		(Join-Path $env:APPDATA 'Dolphin Emulator\Config\GCPadNew.ini')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+	if (-not $own) { return }
+	$device = @(Get-Content $own | Where-Object { $_ -match '^Device = ' })[0] -replace '^Device = ', ''
+	if (-not $device -or $device -like '*Keyboard*') { return }
+	Copy-Item $own (Join-Path $config 'GCPadNew.ini') -Force
+	$device
+}
+
+Add-Type -Namespace TT -Name Desk -MemberDefinition @'
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+public struct STARTUPINFO {
+	public int cb; public string lpReserved; public string lpDesktop; public string lpTitle;
+	public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+	public short wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+}
+[StructLayout(LayoutKind.Sequential)]
+public struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
+[DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern IntPtr CreateDesktop(string name, IntPtr device, IntPtr devmode, int flags, uint access, IntPtr sa);
+[DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr h);
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern bool CreateProcess(string app, System.Text.StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit,
+	uint flags, IntPtr env, string dir, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+[DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+[DllImport("user32.dll")] public static extern uint WaitForInputIdle(IntPtr process, uint ms);
+
+// Start a program on another desktop of this window station: its windows are never on the user's screen.
+public static int StartOnDesktop(string desktop, string exe, string args, string dir) {
+	IntPtr d = CreateDesktop(desktop, IntPtr.Zero, IntPtr.Zero, 0, 0x10000000, IntPtr.Zero);  // GENERIC_ALL
+	if (d == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+	try {
+		STARTUPINFO si = new STARTUPINFO();
+		si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+		si.lpDesktop = "WinSta0\\" + desktop;
+		PROCESS_INFORMATION pi;
+		System.Text.StringBuilder cmd = new System.Text.StringBuilder("\"" + exe + "\" " + args);
+		if (!CreateProcess(exe, cmd, IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, dir, ref si, out pi))
+			throw new System.ComponentModel.Win32Exception();
+		WaitForInputIdle(pi.hProcess, 20000);  // until Dolphin is on the desktop; closing it sooner would end it
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+		return pi.dwProcessId;
+	}
+	finally { CloseDesktop(d); }  // from here on the desktop lives as long as Dolphin runs on it
+}
 '@
 
 function Stop-Test {
@@ -79,20 +139,29 @@ function Stop-Test {
 
 switch ($Action) {
 	'stop' { Stop-Test }
-	'keyboard' {
+	'play' {
+		Stop-Test
+		Clear-SavedWindow
 		Write-PadProfile $false
+		$device = Use-PlayerPad
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Input' @{ BackgroundInput = 'False' }
+		Set-Ini (Join-Path $config 'Dolphin.ini') 'General' @{ HotkeysRequireFocus = 'True' }
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Display' @{ RenderWindowXPos = '100'; RenderWindowYPos = '100' }
-		'keyboard play, normal window (takes effect on the next start)'
+		$p = Start-Process -FilePath $Dolphin -ArgumentList '-u', "`"$Profile`"", '-b', '-e', "`"$((Resolve-Path $Image).Path)`"" -PassThru
+		$p.Id | Set-Content $pidFile
+		if ($device) { "test Dolphin $($p.Id) on $Image (your controller: $device)" }
+		else { "test Dolphin $($p.Id) on $Image (keyboard: x = A, z = B, c = X, s = Y, d = Z, arrows, Enter = Start)" }
 	}
 	'start' {
 		Stop-Test
+		Clear-SavedWindow
 		Set-Ini (Join-Path $config 'DSUClient.ini') 'Server' @{ Enabled = 'True'; Entries = 'TestPad:127.0.0.1:26760;' }
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Input' @{ BackgroundInput = 'True' }
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Interface' @{ PauseOnFocusLost = 'False'; ConfirmStop = 'False' }
+		Set-Ini (Join-Path $config 'Dolphin.ini') 'General' @{ HotkeysRequireFocus = 'False' }   # the screenshot key
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Display' @{
 			Fullscreen = 'False'; RenderToMain = 'False'; KeepWindowOnTop = 'False'; RenderWindowAutoSize = 'False'
-			RenderWindowXPos = '-4000'; RenderWindowYPos = '200'; RenderWindowWidth = '960'; RenderWindowHeight = '540'
+			RenderWindowXPos = '0'; RenderWindowYPos = '0'; RenderWindowWidth = '960'; RenderWindowHeight = '540'
 		}
 		Set-Ini (Join-Path $config 'Hotkeys.ini') 'Hotkeys' @{ Device = $pad; 'General/Take Screenshot' = '`PS`' }
 		Write-PadProfile $true
@@ -101,17 +170,11 @@ switch ($Action) {
 			Start-Process -FilePath python -ArgumentList '-I', "`"$(Join-Path $PSScriptRoot 'dsu_pad.py')`"", 'serve' -WindowStyle Hidden
 			Start-Sleep -Milliseconds 800
 		}
-		$before = [TT.Win]::GetForegroundWindow()
-		$p = Start-Process -FilePath $Dolphin -ArgumentList '-u', "`"$Profile`"", '-b', '-e', "`"$((Resolve-Path $Image).Path)`"" -PassThru
-		$p.Id | Set-Content $pidFile
-		for ($i = 0; $i -lt 50; $i++) {   # put focus back where it was as soon as Dolphin's window shows up
-			Start-Sleep -Milliseconds 200
-			$p.Refresh()
-			if ($p.MainWindowHandle -ne [IntPtr]::Zero) { break }
-		}
-		[TT.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [TT.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)  # Alt tap lets us hand focus back
-		[TT.Win]::SetForegroundWindow($before) | Out-Null
-		"test Dolphin $($p.Id) on $Image (hands-off)"
+		$exe = (Resolve-Path $Dolphin).Path
+		$cmdArgs = "-u `"$Profile`" -b -e `"$((Resolve-Path $Image).Path)`""
+		$id = [TT.Desk]::StartOnDesktop($desktopName, $exe, $cmdArgs, (Split-Path $exe))
+		$id | Set-Content $pidFile
+		"test Dolphin $id on $Image (hidden desktop '$desktopName', hands-off)"
 	}
 	'shot' {
 		$dir = Join-Path $Profile 'ScreenShots'

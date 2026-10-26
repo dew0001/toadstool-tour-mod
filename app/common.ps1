@@ -191,6 +191,30 @@ function Get-PatchChanges($src, $disc, $patch) {
 			[TTMod]::ApplyEdits($work, $at, $hex)
 			if ($f.compressed) { $new = [TTMod]::Pack([int]$f.type, $work) } else { $new = $work }
 		}
+		elseif ($f.op -eq 'rebuild') {
+			# A compressed file that changes size and/or relocation table: runs of the original are moved (copies),
+			# the mod's own bytes are written over them (edits), then it's packed again with its relocations.
+			$basePath = $f.path
+			if ($f.base) { $basePath = $f.base }   # built from another file of the game
+			$orig = [TTMod]::ReadPart($src, $disc, $basePath)
+			$base = [TTMod]::Decompress($orig)
+			$work = [TTMod]::Resize($base, [long]$f.size)
+			[long[]]$from = @($f.copies | ForEach-Object { [long]$_.from })
+			[long[]]$to = @($f.copies | ForEach-Object { [long]$_.to })
+			[long[]]$len = @($f.copies | ForEach-Object { [long]$_.len })
+			[TTMod]::ApplyCopies($work, $base, $from, $to, $len)
+			[long[]]$at = @($f.edits | ForEach-Object { [long]$_.at })
+			[string[]]$hex = @($f.edits | ForEach-Object { [string]$_.hex })
+			[TTMod]::ApplyEdits($work, $at, $hex)
+			if ($null -ne $f.relocs) {
+				$table = [TTMod]::Resize([TTMod]::Relocations($orig), 8 * [long]$f.relocs.count)
+				[long[]]$at = @($f.relocs.edits | ForEach-Object { [long]$_.at })
+				[string[]]$hex = @($f.relocs.edits | ForEach-Object { [string]$_.hex })
+				[TTMod]::ApplyEdits($table, $at, $hex)
+				$new = [TTMod]::Pack([int]$f.type, $work, $table)
+			}
+			else { $new = [TTMod]::Pack([int]$f.type, $work) }
+		}
 		elseif ($f.op -eq 'replace') {
 			$new = [Convert]::FromBase64String($f.data)  # the mod's own data, never the game's
 		}

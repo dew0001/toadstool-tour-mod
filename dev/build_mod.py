@@ -1,6 +1,7 @@
 """Build the modded Toadstool Tour tree from a clean extracted disc.
 
 Usage: python -I build_mod.py <clean disc dir> <build dir> [--version N] [--no-unlock] [--no-aspect-write] [--keep-id]
+                              [--shyguy <folder with Shy Guy.obj and its texture>]
 The build dir must already hold a copy of the clean tree (robocopy); this script only rewrites
 the files it changes, reading every original from <clean disc dir>.
 
@@ -43,6 +44,13 @@ Changes (v5):
 Changes (v6):
   - Yardage box fitted to the number, centred on it, with rounded corners (cave 8, BOX)
 
+Changes (v7, with --shyguy):
+  - Shy Guy as a 17th golfer: the select screen's extra page (Down from the grid's bottom row) lists him as golfer 16.
+    Cave 9 writes his Game Boy Advance link record into slot 0 whenever the select screen fills that page and hides
+    the record's second golfer (the page also draws one card per record instead of two). Golfer 16 gets Koopa
+    Troopa's golfer methods apart from its file names (GOLFER16_VTABLE), and shyguy.py builds its files from
+    Koopa's with the OBJ in place of his body, so Shy Guy swings like Koopa and keeps his own shape.
+
 Patch code lives over dead functions (cave 1-6 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -77,6 +85,7 @@ GAME_ID = b"GFTEMD"
 VERSION = sys.argv[sys.argv.index("--version") + 1] if "--version" in sys.argv else "1"
 BANNER_TITLE = f"Mario Golf: Toadstool Tour (Mod v{VERSION})".encode("ascii")
 
+SHYGUY = sys.argv[sys.argv.index("--shyguy") + 1] if "--shyguy" in sys.argv else None
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
 
@@ -282,6 +291,58 @@ ZOOM_TUNING = {             # feet; "share" = fraction of the shot's length, for
 # HUD set, quads from x = -w-32..-w and w..w+32). v5 makes both quads zero-wide: a clean box with the number.
 YARDS_WING_EDITS = [(0x8046C7B4, 0x3809FFE0, 0x38090000),   # left wing: subi r0,r9,0x20 -> addi r0,r9,0
                     (0x8046C80C, 0x381F0020, 0x381F0000)]   # right wing: addi r0,r31,0x20 -> addi r0,r31,0
+
+# ---- v7: Shy Guy, a 17th golfer (cave 9; only with --shyguy)
+# The select screen (FUN_8040aad4) fills its extra page from the 4 Game Boy Advance link records in the save data
+# (LINK_RECORDS + 0x284 * slot, two golfers each: golfer 16 + 2 * slot + body; empty when the name at +0x268 is).
+# Cave 9 writes Shy Guy's record (shyguy.RECORD) into slot 0 just before that and hides its second golfer after.
+CAVE9 = 0x80040CE8          # dead FUN_80040ce8 (find_dead_code.py: DEAD)
+CAVE9_SIZE = 600
+CAVE9_FIRST = 0x9421FFD0
+LINK_RECORDS = 0x80234040   # 4 records of LINK_SIZE
+LINK_SIZE = 0x284
+LINK_GOLFERS = 0x80445B2C   # the extra page's 8 golfers (record * 2 + which, -1 = none), filled by the loop
+GBA_FILL_HOOK = 0x8040AB98  # bl FUN_80410000, just before the fill loop
+GBA_FILL_TARGET = 0x80410000
+GBA_DONE_HOOK = 0x8040ACC4  # bl FUN_80410140, just after it
+GBA_DONE_TARGET = 0x80410140
+GBA_ROW_CELLS = 0x80405F8C  # cmpwi r31,1 in FUN_80405b30: the extra page draws 2 cells per link record -> 1
+GBA_ROW_CELLS_WORD = 0x2C1F0001
+# In rounds each golfer is an object made by FUN_804074a8(code) with a vtable of 47 methods in the golf overlay.
+# Golfer 16 (code 0x10, made by FUN_804c7220's default case) gets Koopa Troopa's methods (code 15, FUN_804bd45c;
+# same object size and base constructor) except the three that name its files, which shyguy.py builds from Koopa's.
+GOLFER16_VTABLE = 0x804CC948
+KOOPA_VTABLE = 0x804CA3C8
+VTABLE_METHODS = 47
+FILE_METHODS = {22: 0x804CCABC, 23: 0x804CCAB0, 24: 0x804CCAC8}   # golfer 16's: C/W/B, C/W/A, C/W/E
+
+
+def cave9_code(record):
+    """Assemble the select screen's link record for Shy Guy. record: offset -> 4 bytes. Returns (bytes, labels)."""
+    a = ppc.Asm(CAVE9)
+    # Replaces the `bl FUN_80410000` before the fill loop: record 0 is cleared and becomes golfer 16's, then on to
+    # FUN_80410000 (r3-r10 untouched, so its arguments pass through).
+    a.label("link_record")
+    hi, lo = ppc.hi_lo(LINK_RECORDS)
+    a(ppc.lis(12, hi), ppc.addi(12, 12, lo), ppc.addi(11, 12, LINK_SIZE), ppc.li(0, 0))
+    a.label("link_clear")
+    a(ppc.stw(0, 0, 12), ppc.addi(12, 12, 4), ppc.cmpw(12, 11))
+    a.br("blt", "link_clear")
+    a(ppc.lis(12, hi), ppc.addi(12, 12, lo))
+    for off, data in sorted(record.items()):
+        w = struct.unpack(">I", data)[0]
+        a(ppc.lis(11, w >> 16), ppc.ori(11, 11, w & 0xFFFF), ppc.stw(11, off, 12))
+    a.b(GBA_FILL_TARGET)
+    # Replaces the `bl FUN_80410140` after the fill loop: record 0's second golfer isn't listed.
+    a.label("link_hide")
+    hi, lo = ppc.hi_lo(LINK_GOLFERS + 4)
+    a(ppc.li(0, -1), ppc.lis(12, hi), ppc.stw(0, lo, 12))
+    a.b(GBA_DONE_TARGET)
+    code = a.assemble()
+    if len(code) > CAVE9_SIZE:
+        raise SystemExit(f"cave 9 code is {len(code)} bytes; only {CAVE9_SIZE} fit")
+    return code, a.labels
+
 
 # ---- v6: the yardage box fits the number, with rounded corners (cave 8)
 # The box is drawn before the number exists: a body quad x -w..w (HUD texture 0x10, u 0.625..0.6875) and 14-px end
@@ -1190,7 +1251,7 @@ def check_matrix_site(buf, base, hook):
         raise SystemExit(f"0x{hook:08X}: no GXSetProjection call right after the hook")
 
 
-def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8):
+def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1198,7 +1259,9 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
 
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
                               (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
-                              (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8)):
+                              (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9)):
+        if code is None:
+            continue
         if word(data, base, addr) != first:  # still the original (dead) function
             raise SystemExit(f"0x{addr:08X}: expected first instruction {first:08X}")
         data[addr - base:addr - base + len(code)] = code
@@ -1226,7 +1289,7 @@ def float_word(v):
     return struct.unpack(">I", struct.pack(">f", v))[0]
 
 
-def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4):
+def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None):
     raw = open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     kind, _ = lz.header(raw)
     blob, _ = lz.decompress(raw)
@@ -1264,6 +1327,20 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4):
             put(buf, OVERLAY_BASE, site, new, old)
         for site, old, stub in ((BOX_HIDE_HOOK, BOX_HIDE_WORD, "box_hide"), (BOX_TEXT_HOOK, BOX_TEXT_WORD, "box_text")):
             put(buf, OVERLAY_BASE, site, ppc.bl(site, v4[stub]), old)
+        if v9:  # golfer 16 (Shy Guy) behaves like Koopa Troopa, with his own files
+            for k in range(VTABLE_METHODS):
+                koopa = word(buf, OVERLAY_BASE, KOOPA_VTABLE + 4 * k)
+                old = word(buf, OVERLAY_BASE, GOLFER16_VTABLE + 4 * k)
+                if k in FILE_METHODS and old != FILE_METHODS[k]:
+                    raise SystemExit(f"golfer 16's vtable entry {k} isn't its file method")
+                if k not in FILE_METHODS:
+                    put(buf, OVERLAY_BASE, GOLFER16_VTABLE + 4 * k, koopa, old)
+    if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record
+        put(buf, OVERLAY_BASE, GBA_FILL_HOOK, ppc.bl(GBA_FILL_HOOK, v9["link_record"]),
+            ppc.bl(GBA_FILL_HOOK, GBA_FILL_TARGET))
+        put(buf, OVERLAY_BASE, GBA_DONE_HOOK, ppc.bl(GBA_DONE_HOOK, v9["link_hide"]),
+            ppc.bl(GBA_DONE_HOOK, GBA_DONE_TARGET))
+        put(buf, OVERLAY_BASE, GBA_ROW_CELLS, GBA_ROW_CELLS_WORD & ~0xFFFF, GBA_ROW_CELLS_WORD)   # cmpwi r31,0
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -1288,7 +1365,8 @@ def patch_ids(clean_sys, build_sys, clean_files, build_files):
 
 
 def main():
-    args = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith("--") and sys.argv[i - 1] != "--version"]
+    args = [a for i, a in enumerate(sys.argv[1:], 1)
+            if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy")]
     clean, build = args[:2]
     ppc.selftest()
     proj_sites = projection_call_sites(clean)
@@ -1313,12 +1391,21 @@ def main():
           f" pause menu row 0x{v6['ghost_menu']:08X})")
     print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
     print(f"cave 8: {len(cave8)} of {CAVE8_SIZE} bytes at 0x{CAVE8:08X} (yardage box 0x{v8['box_text']:08X})")
+    cave9 = v9 = None
+    if SHYGUY:
+        import shyguy
+        cave9, v9 = cave9_code(shyguy.RECORD)
+        print(f"cave 9: {len(cave9)} of {CAVE9_SIZE} bytes at 0x{CAVE9:08X} (Shy Guy's link record"
+              f" 0x{v9['link_record']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9)
     for rel in OVERLAY_MATRIX_HOOKS:
-        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4)
+        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9)
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
               os.path.join(clean, "files"), os.path.join(build, "files"))
+    if SHYGUY:
+        for rel, data in shyguy.build(os.path.join(clean, "files"), SHYGUY).items():
+            open(os.path.join(build, "files", *rel.split("/")), "wb").write(data)
 
 
 if __name__ == "__main__":
