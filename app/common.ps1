@@ -130,21 +130,23 @@ function Set-IniValues($path, $section, $values) {
 }
 
 # ---- Controller layout for the mod (Xbox-style names; SDL and XInput controllers both use them)
-# LB/RB pick clubs, LT/RT zoom, left stick left/right aims and up/down sets the power (up moves the
+# LB/RB pick clubs, LT/RT switch views, left stick left/right aims and up/down sets the power (up moves the
 # landing spot farther: the game's L, down closer: its R), right stick left/right still turns the camera
-# and up/down also sets the power, View/Back gives side views (the game's Z). Left stick up/down only
-# counts past half tilt, so aiming with it doesn't nudge the power.
-$ModLayoutVersion = 2
+# and up/down also sets the power, View/Back gives side views (the game's Z). The sticks drive the game's
+# analog L/R, so the landing spot moves faster the further you tilt; a 25% dead zone keeps aiming from
+# nudging it. Full tilt also clicks L/R for the menus that use them.
+$ModLayoutVersion = 3
 $ModProfileName = 'Toadstool Tour Mod'
 $ModLayout = [ordered]@{
 	'Main Stick/Up'     = '`Shoulder R`'
 	'Main Stick/Down'   = '`Shoulder L`'
 	'C-Stick/Up'        = '`Trigger R`'
 	'C-Stick/Down'      = '`Trigger L`'
-	'Triggers/L'        = ''  # stick up: landing spot farther (filled from the player's own stick setup)
-	'Triggers/R'        = ''  # stick down: landing spot closer
-	'Triggers/L-Analog' = ''
-	'Triggers/R-Analog' = ''
+	'Triggers/L'        = ''  # analog only (filled below): a digital L would force full speed
+	'Triggers/R'        = ''
+	'Triggers/L-Analog' = ''  # stick up: landing spot farther (filled from the player's own stick setup)
+	'Triggers/R-Analog' = ''  # stick down: landing spot closer
+	'Triggers/Dead Zone' = '25.000000000000000'
 	'Buttons/Z'         = '`Back`'
 }
 
@@ -164,10 +166,8 @@ function Install-ModControllerProfile($userDir, $gameIni) {
 	if (-not $stick['C-Stick/Down']) { $stick['C-Stick/Down'] = '`Right Y-`' }
 	$layout = [ordered]@{}
 	foreach ($k in $ModLayout.Keys) { $layout[$k] = $ModLayout[$k] }
-	$layout['Triggers/L'] = "($($stick['Main Stick/Up'])) | ($($stick['C-Stick/Up']))"
-	$layout['Triggers/R'] = "($($stick['Main Stick/Down'])) | ($($stick['C-Stick/Down']))"
-	$layout['Triggers/L-Analog'] = $stick['C-Stick/Up']
-	$layout['Triggers/R-Analog'] = $stick['C-Stick/Down']
+	$layout['Triggers/L-Analog'] = "($($stick['Main Stick/Up'])) | ($($stick['C-Stick/Up']))"
+	$layout['Triggers/R-Analog'] = "($($stick['Main Stick/Down'])) | ($($stick['C-Stick/Down']))"
 	$profile = Join-Path $userDir "Config\Profiles\GCPad\$ModProfileName.ini"
 	$lines = New-Object System.Collections.Generic.List[string]
 	$lines.Add('[Profile]')

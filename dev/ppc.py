@@ -26,6 +26,7 @@ def add(rd, ra, rb): return 0x7C000214 | rd << 21 | ra << 16 | rb << 11
 def mr(ra, rs): return 0x7C000378 | rs << 21 | ra << 16 | rs << 11
 def andi_(ra, rs, imm): return 0x70000000 | rs << 21 | ra << 16 | (imm & 0xFFFF)
 def cmpwi(ra, imm): return 0x2C000000 | ra << 16 | _simm(imm)
+def cmpw(ra, rb): return 0x7C000000 | ra << 16 | rb << 11  # into cr0
 def lwz(rd, d, ra): return _d(32, rd, d, ra)
 def lbz(rd, d, ra): return _d(34, rd, d, ra)
 def lhz(rd, d, ra): return _d(40, rd, d, ra)

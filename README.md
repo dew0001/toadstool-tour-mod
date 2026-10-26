@@ -2,11 +2,13 @@
 
 A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolphin](https://dolphin-emu.org).
 
-- **Widescreen built in:** real 16:9 with a correctly shaped HUD. No cheats or special Dolphin settings needed.
+- **Widescreen built in:** real 16:9 with the HUD out at the screen edges, every piece in its proper shape. No cheats or special Dolphin settings needed.
 - **Everything unlocked:** every course and character from the start.
 - **TV-style cameras:** after you hit, the camera cuts to behind and above the ball and follows it all the way. Putts are aimed, stroked and followed from behind the ball, down the line.
 - **Hold A to fast-forward** the ball after you hit (about 3× speed). The ball ends up exactly where it would have.
 - **No intro movie** and no shattered-glass screen effect.
+- **Replays ask first:** B after a shot opens *Continue / Watch Replay* instead of replaying straight away. Only the player who hit can open it.
+- **Club Slots:** the item reel no longer has *Double the points*; its slots went to the other four items.
 - **Separate entry:** shows up in Dolphin as *Mario Golf: Toadstool Tour (Mod vN)* with its own game ID (GFTEMD) and save, next to your normal copy.
 - **Fullscreen and sharp:** starts fullscreen over the whole screen (Alt+Enter for a window) at a resolution that fits your screen, with HD UI textures by NickPancakes installed automatically.
 - **Automatic updates:** `Play.bat` checks for a new version every time you start the game.
@@ -16,7 +18,7 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 | Control | Does |
 | --- | --- |
 | Left stick left/right | Aim |
-| Left stick up/down | Power: moves the landing spot farther/closer (and the power gauge with it) |
+| Left stick up/down | Power: moves the landing spot farther/closer (and the power gauge with it); tilt further to move it faster |
 | LB / RB | Change club |
 | LT / RT | Switch views (RT looks down to the hole or landing spot) |
 | Right stick | Turn the camera; up/down also sets the power |
