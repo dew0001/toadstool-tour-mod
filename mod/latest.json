@@ -1,9 +1,9 @@
 {
     "name":  "Toadstool Tour Mod",
-    "version":  5,
-    "patch":  "mod/patches/v5.json",
-    "patch_sha256":  "ca623086317c89bea0fcddd3d8c3682086294244c2240db2d41821b517dfde22",
-    "result_sha1":  "d7758fe9080b43bacb96fbada7e3062dab081c9d",
+    "version":  6,
+    "patch":  "mod/patches/v6.json",
+    "patch_sha256":  "43e6389773e76ac69ee3900db3780b8e0880c610da4e7a7ec0495ca45f8db603",
+    "result_sha1":  "b01965f3eab391f05edd6d40074c20dd9e38538f",
     "app_version":  3,
     "app_files":  {
                       "app/play.ps1":  "ee233b04815026d7bcb84fc858c45eebce097b62f581e8a160ecc91017f6ed5b",

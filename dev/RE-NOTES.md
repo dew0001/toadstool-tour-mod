@@ -30,11 +30,12 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x800411B8 | 1076 | FUN_800411b8 | v4 quarter-step power |
 | 0x8003CA40 | 684 | FUN_8003ca40 | v4 See-Through setting and pause-menu row |
 | 0x800757BC | 704 | FUN_800757bc | v5 zoom view camera |
+| 0x80093938 | 648 | FUN_80093938 | v6 yardage box (rounded, fitted to the number) |
 
 Still free (DEAD in `find_dead_code.py`): 0x80040CE8 (600), 0x8003CDE4 (540), 0x80053528 (476),
 0x80054EFC (424), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug
 patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
-0x80093938 (648), 0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
+0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
 
 ## Gotchas
 
@@ -98,6 +99,15 @@ patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
   w..w+32 ("R" wing), then texture 0x10 (the pointer below, own matrix), then the number. `FUN_8000c900(set,
   index, 0)` binds a texture; `FUN_8006967c(0x80, 0, 4)` is GXBegin(quads, 4 vertices) followed by FIFO
   writes to 0xCC008000. v5 removes the wings by making both quads zero-wide (`YARDS_WING_EDITS`).
+  - The box itself: body quad x -w..w (w = 0x20 yards, 0x2B/0x2E putts) with texture 0x10, u 0.625..0.6875,
+    plus 14-px end pieces (u 0..0.3125 left, 0.2916..0.5625 right), all y r27 (-26) .. r29 (0), vertex format
+    0 = s16 x, s16 y, f32 u, f32 v. Drawn before the number is formatted.
+  - The number: sprintf "%3dy" (yards) or "%3.1fy" (putts; 'y' becomes the ft glyph) into r1+0x1B0; the loop at
+    0x8046CA50 draws 16-px cells at x = r21 (-32) + r29 (r29 starts 0, ±16 for putt decimals, += advance).
+  - v6 (cave 8, yards only): `box_hide` (at 0x8046C608) sets r27 = 0 so the game's box pieces are zero-high;
+    `box_text` (at 0x8046CA40, right before the loop) shifts r29 left half a cell per leading space, binds texture
+    0x10 and the box's TEV alpha (0x82FF8), draws a rounded box round the visible cells as a triangle fan, then
+    rebinds the digit set (`*0x804DFA4C`, 0) and the digits' TEV alpha (0x8FC8F). `tools/box_sim.py` checks it.
 
 ## Cameras
 

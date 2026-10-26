@@ -40,10 +40,14 @@ Changes (v5):
     (cave 7, ZOOM_TUNING)
   - Power bar yardage box without the L / R button wings (YARDS_WING_EDITS)
 
+Changes (v6):
+  - Yardage box fitted to the number, centred on it, with rounded corners (cave 8, BOX)
+
 Patch code lives over dead functions (cave 1-6 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
+import math
 import os
 import struct
 import sys
@@ -278,6 +282,29 @@ ZOOM_TUNING = {             # feet; "share" = fraction of the shot's length, for
 # HUD set, quads from x = -w-32..-w and w..w+32). v5 makes both quads zero-wide: a clean box with the number.
 YARDS_WING_EDITS = [(0x8046C7B4, 0x3809FFE0, 0x38090000),   # left wing: subi r0,r9,0x20 -> addi r0,r9,0
                     (0x8046C80C, 0x381F0020, 0x381F0000)]   # right wing: addi r0,r31,0x20 -> addi r0,r31,0
+
+# ---- v6: the yardage box fits the number, with rounded corners (cave 8)
+# The box is drawn before the number exists: a body quad x -w..w (HUD texture 0x10, u 0.625..0.6875) and 14-px end
+# pieces, all y r27 (-26) .. r29 (0). The number is "%3dy" (16-px cells from x -32: digits, then the 'y'), so short
+# distances get leading spaces and sit right of centre. For yards (not putts), v6 gives the game's box pieces zero
+# height, then just before the digit loop centres the number (half a cell per leading space) and draws a rounded
+# box around it as a triangle fan with the box's own texture strip.
+CAVE8 = 0x80093938          # dead FUN_80093938 (find_dead_code.py: DEAD)
+CAVE8_SIZE = 648
+CAVE8_FIRST = 0x9421FFE0
+BOX_HIDE_HOOK = 0x8046C608  # li r4,0 before the box body's GXBegin (r1 = HUD frame: +0x18C nonzero = putt)
+BOX_HIDE_WORD = 0x38800000
+BOX_TEXT_HOOK = 0x8046CA40  # lbz r0,0x1b0(r1): first character of the label, right before the digit loop
+BOX_TEXT_WORD = 0x880101B0
+HUD_PUTT, HUD_TEXT = 0x18C, 0x1B0  # power bar HUD frame: putt flag, the formatted label
+HUD_TEXTURES, DIGIT_TEXTURES = 0x804DFA48, 0x804DFA4C  # pointers to the HUD and digit texture sets
+BIND_TEXTURE = 0x8000C900   # (set, index, 0)
+GX_BEGIN = 0x8006967C       # (primitive, vertex format, vertices)
+GX_SET_TEV_ALPHA_IN = 0x8006DD40
+TEV_ALPHA_BOX, TEV_ALPHA_DIGITS = 0x82FF8, 0x8FC8F  # what the game sets for the box and for the digits
+GX_TRIANGLEFAN = 0xA0
+BOX = {"top": -26, "bottom": 0, "radius": 9, "corner_steps": 3, "pad": 6, "nudge": 1, "u": 0.65625}
+# pad: box edge beyond the outer digit cells; nudge: digits right by this much (the 'y' is narrower than its cell)
 
 
 def normalize_xz(a, x, z, n2):
@@ -535,6 +562,88 @@ def cave5_code():
     blob = a.assemble()
     if len(blob) > CAVE5_SIZE:
         raise SystemExit(f"cave 5 code is {len(blob)} bytes; only {CAVE5_SIZE} available")
+    return blob, dict(a.labels)
+
+
+def box_fan():
+    """Rounded box as a triangle fan: (side, x offset, y, v) per vertex; x = side * inner + offset at runtime."""
+    top, bottom, r, k = BOX["top"], BOX["bottom"], BOX["radius"], BOX["corner_steps"]
+    mid = (top + bottom) / 2
+    rim = []
+    for side, cy, a0 in ((1, top + r, -90), (1, bottom - r, 0), (-1, bottom - r, 90), (-1, top + r, 180)):
+        for i in range(k + 1):
+            a = math.radians(a0 + 90 * i / k)
+            rim.append((side, round(r * math.cos(a)), round(cy + r * math.sin(a))))
+    verts = [(0, 0, round(mid))] + rim + [rim[0]]
+    return [(s, ox, y, (y - top) / (bottom - top)) for s, ox, y in verts]
+
+
+def cave8_code():
+    """Assemble the fitted, rounded yardage box. Returns (bytes, labels)."""
+    a = ppc.Asm(CAVE8)
+    fan = box_fan()
+    a.float("box_u", BOX["u"])
+    a.label("box_fan")
+    for side, ox, y, v in fan:
+        a(side & 0xFFFFFFFF, ox & 0xFFFFFFFF, y & 0xFFFFFFFF, struct.unpack(">I", struct.pack(">f", v))[0])
+
+    # Replaces `li r4,0` before the box body is drawn. For yards, the game's box pieces get zero height (top = 0).
+    a.label("box_hide")
+    a(ppc.li(4, 0), ppc.lwz(0, HUD_PUTT, 1), ppc.cmpwi(0, 0))
+    a.br("bne", "box_hide_done")
+    a(ppc.li(27, 0))
+    a.label("box_hide_done")
+    a(ppc.BLR)
+
+    # Replaces `lbz r0,0x1b0(r1)` right before the digit loop (label at r1+0x1b0, r29 = x adjust). For yards:
+    # move the digits left half a cell per leading space (plus the nudge) and draw the rounded box round them.
+    a.label("box_text")
+    a(ppc.stwu(1, -32, 1), ppc.mflr(0), ppc.stw(0, 36, 1))
+    a(ppc.lwz(0, 32 + HUD_PUTT, 1), ppc.cmpwi(0, 0))
+    a.br("bne", "box_text_done")
+    a(ppc.addi(9, 1, 32 + HUD_TEXT), ppc.li(10, 0), ppc.li(11, 0))  # r10 = leading spaces, r11 = length
+    a.label("box_count")
+    a(ppc.add(12, 9, 11), ppc.lbz(0, 0, 12), ppc.cmpwi(0, 0))
+    a.br("beq", "box_counted")
+    a(ppc.cmpwi(0, 0x20))
+    a.br("bne", "box_char")
+    a(ppc.cmpw(10, 11))
+    a.br("bne", "box_char")
+    a(ppc.addi(10, 10, 1))
+    a.label("box_char")
+    a(ppc.addi(11, 11, 1))
+    a.br("b", "box_count")
+    a.label("box_counted")
+    a(ppc.mulli(0, 10, -8), ppc.add(29, 29, 0), ppc.addi(29, 29, BOX["nudge"]))   # centre the digits
+    a(ppc.mulli(0, 10, -1), ppc.add(12, 11, 0), ppc.slwi(12, 12, 3),                # half width of the cells ...
+      ppc.addi(12, 12, BOX["pad"] - BOX["radius"]), ppc.stw(12, 8, 1))             # ... + pad - radius = inner
+    hi, lo = ppc.hi_lo(HUD_TEXTURES)
+    a(ppc.lis(3, hi), ppc.lwz(3, lo, 3), ppc.li(4, 0x10), ppc.li(5, 0))
+    a.bl(BIND_TEXTURE)
+    a(ppc.li(3, 0), ppc.lis(4, TEV_ALPHA_BOX >> 16), ppc.ori(4, 4, TEV_ALPHA_BOX & 0xFFFF))
+    a.bl(GX_SET_TEV_ALPHA_IN)
+    a(ppc.li(3, GX_TRIANGLEFAN), ppc.li(4, 0), ppc.li(5, len(fan)))
+    a.bl(GX_BEGIN)
+    a(ppc.lwz(12, 8, 1), ppc.lis(10, 0xCC01))
+    a.la(9, "box_fan")
+    a.la(8, "box_u")
+    a(ppc.lfs(1, 0, 8), ppc.li(8, len(fan)))
+    a.label("box_vertex")                                         # x = side * inner + offset, y, u, v
+    a(ppc.lwz(0, 0, 9), ppc.mullw(0, 0, 12), ppc.lwz(7, 4, 9), ppc.add(0, 0, 7), ppc.sth(0, -0x8000, 10),
+      ppc.lwz(0, 8, 9), ppc.sth(0, -0x8000, 10), ppc.stfs(1, -0x8000, 10), ppc.lfs(0, 12, 9),
+      ppc.stfs(0, -0x8000, 10), ppc.addi(9, 9, 16), ppc.addi(8, 8, -1), ppc.cmpwi(8, 0))
+    a.br("bne", "box_vertex")
+    a(ppc.li(3, 0), ppc.lis(4, TEV_ALPHA_DIGITS >> 16), ppc.ori(4, 4, TEV_ALPHA_DIGITS & 0xFFFF))
+    a.bl(GX_SET_TEV_ALPHA_IN)
+    hi, lo = ppc.hi_lo(DIGIT_TEXTURES)
+    a(ppc.lis(3, hi), ppc.lwz(3, lo, 3), ppc.li(4, 0), ppc.li(5, 0))
+    a.bl(BIND_TEXTURE)
+    a.label("box_text_done")
+    a(ppc.lwz(12, 36, 1), ppc.mtlr(12), ppc.addi(1, 1, 32), ppc.lbz(0, HUD_TEXT, 1), ppc.BLR)
+
+    blob = a.assemble()
+    if len(blob) > CAVE8_SIZE:
+        raise SystemExit(f"cave 8 code is {len(blob)} bytes; only {CAVE8_SIZE} available")
     return blob, dict(a.labels)
 
 
@@ -1081,7 +1190,7 @@ def check_matrix_site(buf, base, hook):
         raise SystemExit(f"0x{hook:08X}: no GXSetProjection call right after the hook")
 
 
-def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7):
+def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1089,7 +1198,7 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
 
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
                               (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
-                              (CAVE7, CAVE7_FIRST, cave7)):
+                              (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8)):
         if word(data, base, addr) != first:  # still the original (dead) function
             raise SystemExit(f"0x{addr:08X}: expected first instruction {first:08X}")
         data[addr - base:addr - base + len(code)] = code
@@ -1153,6 +1262,8 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4):
         put(buf, OVERLAY_BASE, PAUSE_RUN, ppc.bl(PAUSE_RUN, v4["ghost_select"]), ppc.bl(PAUSE_RUN, PAUSE_RUN_TARGET))
         for site, old, new in YARDS_WING_EDITS:
             put(buf, OVERLAY_BASE, site, new, old)
+        for site, old, stub in ((BOX_HIDE_HOOK, BOX_HIDE_WORD, "box_hide"), (BOX_TEXT_HOOK, BOX_TEXT_WORD, "box_text")):
+            put(buf, OVERLAY_BASE, site, ppc.bl(site, v4[stub]), old)
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -1185,7 +1296,9 @@ def main():
     cave5, v4 = cave5_code()
     cave6, v6 = cave6_code()
     cave7, v7 = cave7_code()
+    cave8, v8 = cave8_code()
     v4.update(v6)
+    v4.update(v8)
     cave3, v3 = cave3_code(v7["zoom"], v6)
     cave, stubs = build_cave()
     cave2, v2 = cave2_code(v3["aim_place"])
@@ -1199,8 +1312,9 @@ def main():
     print(f"cave 6: {len(cave6)} of {CAVE6_SIZE} bytes at 0x{CAVE6:08X} (see-through setting 0x{v6['ghost_mode']:08X},"
           f" pause menu row 0x{v6['ghost_menu']:08X})")
     print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
+    print(f"cave 8: {len(cave8)} of {CAVE8_SIZE} bytes at 0x{CAVE8:08X} (yardage box 0x{v8['box_text']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8)
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4)
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
