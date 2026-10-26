@@ -7,9 +7,11 @@ compressed files) plus the SHA-1 the patched file must have. A compressed file t
 relocation table (Shy Guy's models) becomes a "rebuild" op instead: its new decoded size, runs of the
 original moved elsewhere ("copies", so the patch carries no game data), edits on top, and the
 relocation table's edits; "base" names another file of the game to start from instead (Shy Guy's files are
-built from Koopa Troopa's). publish.ps1 then adds the clean-game hash list and the SHA-1 of the whole
+built from Koopa Troopa's). An uncompressed file that changes size (Shy Guy's voice samples) becomes a "replace"
+op with the new file in base64. publish.ps1 then adds the clean-game hash list and the SHA-1 of the whole
 rebuilt disc, using the same C# code friends run.
 """
+import base64
 import hashlib
 import json
 import os
@@ -33,6 +35,8 @@ FILES = [  # (disc path, compressed?) - every file build_mod.py touches
     ("files/B/V/K", True),
     ("files/B/U/P", True),
     ("files/B/U/M", True),
+    ("files/C/Y/S", False),   # golfer 16's voice set: sample directory and samples (--shyguy-voice)
+    ("files/C/Y/T", False),
 ]
 MIN_COPY = 64   # shorter matches with the original stay as edits
 # Files the build makes from another file of the game: the patch starts from that one ("base"), so what they share
@@ -146,10 +150,15 @@ def main():
                     entry["relocs"] = {"count": len(new_table) // 8, "edits": runs(padded, new_table)}
             else:
                 entry["edits"] = runs(old, new)
+        elif len(a) != len(b):   # a new uncompressed file of the mod's own (Shy Guy's voice samples)
+            entry.update(op="replace", data=base64.b64encode(b).decode("ascii"))
         else:
             entry["edits"] = runs(a, b)
         patch["files"].append(entry)
         moved = sum(c["len"] for c in entry.get("copies", []))
+        if entry["op"] == "replace":
+            print(f"{rel}: replace, {len(b)} bytes")
+            continue
         print(f"{rel}: {entry['op']}, {len(entry['edits'])} edit runs, {sum(len(e['hex']) // 2 for e in entry['edits'])} bytes"
               + (f", {len(entry['copies'])} copies ({moved} bytes)" if "copies" in entry else ""))
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)

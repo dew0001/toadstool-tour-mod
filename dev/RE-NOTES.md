@@ -164,23 +164,56 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   texture 25 (1024x64 RGB5A3, 64x64 each, used for the 1P badge). Each character has a group like this
   (Mario: `C/R/T`, `C/S/A`, `C/R/U`..`Z`, face `C/R/V`).
 - **Golfer 16's files:** models `C/W/B` and `C/W/E`, bank `C/W/A`, face `C/W/D`, emblem `C/W/C`, select-screen
-  model `B/V/K`; on the extra page `B/U/P` texture 1 (cell 0) and `B/U/M` texture 39 (slot 0).
+  model `B/V/K`; on the extra page `B/U/P` texture 1 (cell 0) and `B/U/M` texture 39 (slot 0). The extra page's
+  "Game Boy Advance" label is `B/U/M` texture 2 (140x30 CMPR) and the Game Boy over each record texture 38 (90x54);
+  the stats card's words are textures 0 and 17-27.
 - **Link records** (the save data's Game Boy Advance golfers): 4 at 0x80234040 + 0x284 x slot, each two golfer
   entries of 0x2C (golfer 16 + 2 x slot + entry +0x1C) and the record name at +0x268 (non-empty = present;
-  +0x27C a version byte). Entry: +0x00/+0x10 name, +0x1A drive (u16, yards), +0x1C body, +0x1F..+0x24 the six
-  stats, +0x28 voice (Koopa 15). The select screen lists them on an extra page, Down from the grid's bottom row
+  +0x27C a version byte). Entry: +0x00/+0x10 name, +0x1A drive (u16, yards), +0x1C body, +0x1D handedness,
+  +0x1F..+0x24 the six stats, +0x28 the golfer code it borrows per-character effects from in a round
+  (`FUN_80459128` uses it when the golfer code is over 15; Koopa 15). The select screen lists them on an extra page,
+  Down from the grid's bottom row
   (`_DAT_8044bab0` = 1): `FUN_8040aad4` fills its 8-golfer list at 0x80445B2C (-1 = none) between
   `bl FUN_80410000` at 0x8040AB98 and `bl FUN_80410140` at 0x8040ACC4, and `FUN_80405b30` draws its cards
   (`cmpwi r31,1` at 0x80405F8C: two cells per record). v7 writes Shy Guy's record into slot 0 before the fill
-  (cave 9, `shyguy.RECORD`: his name, Koopa's 200-yard drive, stats and voice), hides its second golfer after
-  it, and draws one cell per record. A round copies the chosen golfer's data to 0x8017573C and 0x804E5D74; the
-  drive comes from entry +0x1A (`FUN_8044c344`).
+  (cave 9, `shyguy.RECORD`: his name, drive and stats), hides its second golfer after it, and draws one cell per
+  record. A round copies the chosen golfer's data to 0x8017573C and 0x804E5D74; the drive comes from entry +0x1A
+  (`FUN_8044c344`).
+- **Stats:** the 16 golfers' (and their Star versions') are in the select screen overlay at 0x80445B50, 32 entries
+  of 10 bytes: index, character code, drive (u16), then the six stats in the link entry's order: height (-6..6,
+  the card's trajectory picture in 5 bands), curve direction (0/1, mirrored by handedness), curve (0..6: straight,
+  slight, big), impact, control, spin. The bars (the card is drawn by `FUN_80406ec8`) show value + 10 of 20 segments;
+  the roster runs impact 0..4, control -5..4, spin -6..6, and longer drives come with narrower impact and less
+  control. Character codes: 0 Mario, 1 Peach, 2 DK, 3 Yoshi, 4 Waluigi, 5 Koopa Troopa, 6 Wario, 7 Daisy, 8 Luigi,
+  9 Petey, 10 Boo, 11 Diddy, 12 Birdo, 13 Bowser, 14 Bowser Jr, 15 "nisemario" (the sound group names);
+  0x80445D34 maps them to golfer codes (Koopa 5 -> 15).
 - **Golfer objects in a round:** `FUN_804074a8(code)` makes each golfer: Koopa (15) in `FUN_804bd45c`, vtable
   0x804CA3C8; golfer 16 in `FUN_804c7220`'s default case, vtable 0x804CC948. Both are 0x1E4 bytes on the same
   base constructor `FUN_80407590`. The vtables have 47 methods; [22], [23] and [24] return the file IDs of the
   golfer model, the bank and the second model, [25] the character data. Golfer 16's own methods are a child's
   (with Koopa's files they draw see-through and give a 30-step meter), so v7 copies Koopa's 47 into golfer 16's
-  vtable except [22]-[24] (`GOLFER16_VTABLE` in `build_mod.py`).
+  vtable except [22]-[24] (`GOLFER16_VTABLE` in `build_mod.py`). The voice methods start fixed sound IDs of the
+  golfer's own voice set: [42] ball near the hole (`FUN_80420404`), [43] swing (power gauge at the top,
+  `FUN_80421154` / `FUN_80423bbc`), [44] nice impact (state 6, inside the impact window), [46] chirp 0-7 (another
+  player presses a button while the shooter lines up, `FUN_8041e438`). Koopa's ask for his set (0xCC-0xD6), which
+  isn't loaded for golfer 16, so v8 keeps golfer 16's own four (0xAF, 0xB1, 0xBB-0xC2, 0xC3: its set, "neil").
+
+## Sound
+
+- **MusyX** (Factor 5): main.dol's group table at 0x80137308, 37 entries of 0x14: name, first file ID, sfx count,
+  first sfx ID, group ID. 0-15 the golfers by character code, 16 "neil" and 17 "ella" (Game Boy Advance golfers),
+  18 "menu", 19-36 "sh" + name (power shot sounds). `JVoiceLoad1` (`FUN_80012844`, group index) loads a group's
+  four files, ID, ID + 2, +4, +6: pool, project, sample directory, sample data (e.g. Koopa Troopa "nokonoko"
+  `C/V/V`-`Y`, golfer 16 "neil" `C/Y/Q`-`T`). A round loads each player's group by golfer code (golfer 16 -> 16).
+  File ID = 2 x (676 a + 26 b + c) for path a/b/c (letters from 0), +1 for some.
+- Sounds play through `FUN_80011b88(id, ...)`, `FUN_80011c40(x, y, z, id, ...)` and `FUN_80011d74`; an ID in no
+  loaded group (and not a common sound, `FUN_80011a48`) is dropped silently; then MusyX's sfx start `FUN_8007337c`.
+  `voiceFXcall` `FUN_800120a8(group, id)` is another path (not used by the golfers' voices).
+- File formats and DSP ADPCM: `musyx.py`. Neil's set: 21 sounds 0xAF-0xC3, one macro and one sample each,
+  22050 Hz.
+- Find what plays: `tools/debug_patch.py` `plays` (every ID asked of the three calls, `sfxlog.ps1 -Pairs -At
+  0x80057A14`), `sfx` (every ID MusyX starts), `voices`; Dolphin's `[DSP] DumpAudio = True` records the mix to
+  `Dump/Audio/*_dspdump.wav` for checking a sound by correlation.
 - **Model format** (`model.py`): type-2 module; root (magic 0x0131A313) found through the code stub's HA16/LO16
   relocations at +20/+24. Meshes (0x3C): +6 texcoord sets, +7 textures, +8 texture entries (4 bytes: flag short,
   texture, material), +0x28 groups, +0x2C -> groups, +0x34 shader, +0x38 part (1 = body, 3..11 = clubs). Groups

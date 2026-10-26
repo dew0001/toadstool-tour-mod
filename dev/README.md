@@ -10,7 +10,8 @@ Everything here runs on the maintainer's PC against a clean, extracted GFTE01 di
 | `make_patch.py` | Diffs the build into `mod/patches/vN.json` (format 2: decoded-level edits plus result hashes; `rebuild` ops for files that grow or change relocations, with runs of the original moved by copy instructions so no game data goes in) |
 | `publish.ps1` | Builds, writes the patch, does a reference build with the friends' C# code, and updates `mod/latest.json` |
 | `ppc.py` | Tiny PowerPC encoder for patch stubs, self-tested against known machine code |
-| `shyguy.py` | Shy Guy as a 17th golfer (`build_mod.py --shyguy <folder>`): builds golfer 16's models from Koopa Troopa's around the OBJ, encodes its texture, renders the menu pictures |
+| `shyguy.py` | Shy Guy as a 17th golfer (`build_mod.py --shyguy <folder> --shyguy-voice <zip>`): builds golfer 16's models from Koopa Troopa's around the OBJ, encodes its texture, renders the menu pictures and the "More" label, sets his stats, builds his voice set |
+| `musyx.py` | MusyX sound groups (pool, project, sample directory, samples) and a GameCube DSP ADPCM encoder and decoder |
 | `model.py`, `textures.py` | Read character models (meshes, groups, display lists, bones) and texture files (decode RGB5A3, CMPR, I and IA formats; encode RGB5A3) |
 | `find_dead_code.py` | Confirms a `main.dol` function is referenced nowhere on the disc, so it's safe to reuse for patch code |
 | `dol2elf.py`, `ghidra_export.ps1`, `ghidra_scripts/` | Ghidra headless analysis: `main.dol` plus overlays as one ELF, then exported C and disassembly helpers |
@@ -37,4 +38,4 @@ git push
 
 If you change anything in `app\`, bump `app\version.txt` before publishing. `Play.bat` then updates its own scripts on everyone's PC before installing the new mod.
 
-From v7 the build needs Shy Guy's source model: `Shy Guy.obj` and `heyho_body_alb.png` from the Sketchfab download, in `assets\shy-guy` next to the repo (or pass `-ShyGuy <folder>`). Only the converted model goes into the patch: golfer 16's files are built from Koopa's (named as each file's `base` in the patch), and Koopa's data in them goes in as copy instructions, never as bytes.
+From v7 the build needs Shy Guy's source model: `Shy Guy.obj` and `heyho_body_alb.png` from the Sketchfab download, in `assets\shy-guy` next to the repo (or pass `-ShyGuy <folder>`). Only the converted model goes into the patch: golfer 16's files are built from Koopa's (named as each file's `base` in the patch), and Koopa's data in them goes in as copy instructions, never as bytes. From v8 it also needs his voice clips (`-ShyGuyVoice`, default `assets\shy-guy\mario-power-tennis-shy-guy-voice.zip`: the Sounds Resource's Mario Power Tennis "Shy Guy's Voice"); `shyguy.VOICE` says which clip plays for each of his lines, and the encoded samples go into the patch as a `replace` op.

@@ -8,6 +8,14 @@
             put the text on screen. (v4 found the pause menu this way.)
   files:    log every distinct file ID the game opens, in order (FUN_8001bbf0 turns an ID into the disc path
             "A/B/C"; ID = 2 * (26*26*a + 26*b + c)). Read with filelog.ps1 (-Reset to start over).
+  sfx:      log every distinct sound effect ID started, in order (MusyX sfx start FUN_8007337c, r3 = ID; each
+            golfer's voice group owns a range of IDs, see RE-NOTES Sound). Read with sfxlog.ps1 (-Reset).
+            Uses the messages log's cave.
+  voices:   log every distinct (sfx ID, voice group) asked of voiceFXcall FUN_800120a8 (r3 = group, r4 = ID), even
+            when the group isn't loaded and nothing plays. Read with sfxlog.ps1 -Pairs. Uses the messages log's cave.
+  plays:    log every distinct (sfx ID, entry) asked of the game's sound calls FUN_80011b88 (entry 0), the positional
+            FUN_80011c40 (1) and FUN_80011d74 (2), which drop voice IDs of groups that aren't loaded. r3 = ID in all
+            three. Read with sfxlog.ps1 -Pairs -At 0x80057A14. Uses the files log's cave.
 
 Both chain to whatever the build already hooked there, so the mod still works.
 
@@ -26,6 +34,10 @@ FILE_PATH = 0x8001BBF0       # file ID (r3) -> disc path
 FILE_LOG = 0x80057A14        # shares the draws log's cave: use one or the other
 FILE_MAX = 140
 MSG_LOOKUP = 0x80022CD0      # message id -> string
+SFX_START = 0x8007337C       # MusyX sfx start (r3 = sfx ID)
+SFX_MAX = 90
+VOICE_FX = 0x800120A8        # voiceFXcall(group, sfx ID, ...)
+SOUND_CALLS = (0x80011B88, 0x80011C40, 0x80011D74)
 DRAW_LOG = 0x80057A14        # dead FUN_80057a14 (712 bytes): table at +0, skip words, then code
 MSG_LOG = 0x8005DAFC         # dead FUN_8005dafc (444 bytes)
 DEAD_FIRST = 0x7C0802A6
@@ -118,8 +130,47 @@ elif kind == "messages":
     log_loop(a, 12, "done")
     a.label("done")
     continue_original(a, SITE)
-elif kind == "files":
-    CAVE, SITE, MAX = FILE_LOG, FILE_PATH, FILE_MAX
+elif kind == "voices":
+    CAVE, SITE, MAX = MSG_LOG, VOICE_FX, MSG_MAX
+    a = ppc.Asm(CAVE)
+    a.word("count")
+    for i in range(MAX):
+        a.word(f"e{i}a")
+        a.word(f"e{i}b")
+    a.label("log")
+    log_loop(a, 4, "done")
+    a.label("done")
+    continue_original(a, SITE)
+elif kind == "plays":
+    CAVE, MAX = FILE_LOG, 50
+    SITE = SOUND_CALLS[0]
+    a = ppc.Asm(CAVE)
+    a.word("count")
+    for i in range(MAX):
+        a.word(f"e{i}a")
+        a.word(f"e{i}b")
+    for k, site in enumerate(SOUND_CALLS):
+        a.label(f"log{k}")
+        a.la(11, "count")
+        a(ppc.lwz(10, 0, 11), ppc.addi(9, 11, 4), ppc.li(8, 0), ppc.li(12, k))
+        a.label(f"loop{k}")
+        a(ppc.cmpw(8, 10))
+        a.br("bge", f"add{k}")
+        a(ppc.lwz(7, 0, 9), ppc.cmpw(7, 3))
+        a.br("bne", f"next{k}")
+        a(ppc.lwz(7, 4, 9), ppc.cmpw(7, 12))
+        a.br("beq", f"done{k}")
+        a.label(f"next{k}")
+        a(ppc.addi(9, 9, 8), ppc.addi(8, 8, 1))
+        a.br("b", f"loop{k}")
+        a.label(f"add{k}")
+        a(ppc.cmpwi(10, MAX))
+        a.br("bge", f"done{k}")
+        a(ppc.stw(3, 0, 9), ppc.stw(12, 4, 9), ppc.addi(10, 10, 1), ppc.stw(10, 0, 11))
+        a.label(f"done{k}")
+        continue_original(a, site)
+elif kind in ("files", "sfx"):
+    CAVE, SITE, MAX = (FILE_LOG, FILE_PATH, FILE_MAX) if kind == "files" else (MSG_LOG, SFX_START, SFX_MAX)
     a = ppc.Asm(CAVE)
     a.word("count")
     for i in range(MAX):
@@ -148,6 +199,10 @@ size = {DRAW_LOG: 712, MSG_LOG: 444, FILE_LOG: 712}[CAVE]
 if len(blob) > size or word(CAVE) != DEAD_FIRST:
     raise SystemExit(f"0x{CAVE:08X}: {len(blob)} bytes for {size}, or the cave is already used")
 data[off_of(CAVE):off_of(CAVE) + len(blob)] = blob
-struct.pack_into(">I", data, off_of(SITE), ppc.b(SITE, a.labels["log"]))
+if kind == "plays":
+    for k, site in enumerate(SOUND_CALLS):
+        struct.pack_into(">I", data, off_of(site), ppc.b(site, a.labels[f"log{k}"]))
+else:
+    struct.pack_into(">I", data, off_of(SITE), ppc.b(SITE, a.labels["log"]))
 open(path, "wb").write(data)
 print(f"{kind} log: table at 0x{CAVE:08X} ({len(blob)} bytes), hook 0x{SITE:08X}")

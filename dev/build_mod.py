@@ -1,7 +1,7 @@
 """Build the modded Toadstool Tour tree from a clean extracted disc.
 
 Usage: python -I build_mod.py <clean disc dir> <build dir> [--version N] [--no-unlock] [--no-aspect-write] [--keep-id]
-                              [--shyguy <folder with Shy Guy.obj and its texture>]
+                              [--shyguy <folder with Shy Guy.obj and its texture>] [--shyguy-voice <zip of WAV clips>]
 The build dir must already hold a copy of the clean tree (robocopy); this script only rewrites
 the files it changes, reading every original from <clean disc dir>.
 
@@ -51,6 +51,11 @@ Changes (v7, with --shyguy):
     Troopa's golfer methods apart from its file names (GOLFER16_VTABLE), and shyguy.py builds its files from
     Koopa's with the OBJ in place of his body, so Shy Guy swings like Koopa and keeps his own shape.
 
+Changes (v8, with --shyguy and --shyguy-voice):
+  - Shy Guy's own stats (205 yards, high, narrowest impact, best control, strong spin) and voice: golfer 16 keeps
+    its own voice methods (VOICE_METHODS), whose voice set gets his clips (swing, nice impact, near the hole, 8
+    chirps); the extra page's label says "More" and has no Game Boy pictures.
+
 Patch code lives over dead functions (cave 1-6 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -86,6 +91,7 @@ VERSION = sys.argv[sys.argv.index("--version") + 1] if "--version" in sys.argv e
 BANNER_TITLE = f"Mario Golf: Toadstool Tour (Mod v{VERSION})".encode("ascii")
 
 SHYGUY = sys.argv[sys.argv.index("--shyguy") + 1] if "--shyguy" in sys.argv else None
+SHYGUY_VOICE = sys.argv[sys.argv.index("--shyguy-voice") + 1] if "--shyguy-voice" in sys.argv else None
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
 
@@ -310,11 +316,17 @@ GBA_ROW_CELLS = 0x80405F8C  # cmpwi r31,1 in FUN_80405b30: the extra page draws 
 GBA_ROW_CELLS_WORD = 0x2C1F0001
 # In rounds each golfer is an object made by FUN_804074a8(code) with a vtable of 47 methods in the golf overlay.
 # Golfer 16 (code 0x10, made by FUN_804c7220's default case) gets Koopa Troopa's methods (code 15, FUN_804bd45c;
-# same object size and base constructor) except the three that name its files, which shyguy.py builds from Koopa's.
+# same object size and base constructor) except the three that name its files, which shyguy.py builds from Koopa's,
+# and the four that play its voice: those start sounds of its own voice set, the one the game loads for golfer 16
+# (Koopa's would ask for his, which isn't loaded, so Shy Guy would be silent).
 GOLFER16_VTABLE = 0x804CC948
 KOOPA_VTABLE = 0x804CA3C8
 VTABLE_METHODS = 47
 FILE_METHODS = {22: 0x804CCABC, 23: 0x804CCAB0, 24: 0x804CCAC8}   # golfer 16's: C/W/B, C/W/A, C/W/E
+VOICE_METHODS = {42: 0x804C7C00,   # ball near the hole (sfx 0xC3)
+                 43: 0x804C7AE4,   # swing (0xAF)
+                 44: 0x804C7AA8,   # nice impact (0xB1)
+                 46: 0x804C7B34}   # chirp 0-7 while someone else lines up (0xBB-0xC2)
 
 
 def cave9_code(record):
@@ -1331,9 +1343,10 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None):
             for k in range(VTABLE_METHODS):
                 koopa = word(buf, OVERLAY_BASE, KOOPA_VTABLE + 4 * k)
                 old = word(buf, OVERLAY_BASE, GOLFER16_VTABLE + 4 * k)
-                if k in FILE_METHODS and old != FILE_METHODS[k]:
-                    raise SystemExit(f"golfer 16's vtable entry {k} isn't its file method")
-                if k not in FILE_METHODS:
+                own = FILE_METHODS.get(k, VOICE_METHODS.get(k))
+                if own is not None and old != own:
+                    raise SystemExit(f"golfer 16's vtable entry {k} isn't the method this build keeps")
+                if own is None:
                     put(buf, OVERLAY_BASE, GOLFER16_VTABLE + 4 * k, koopa, old)
     if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record
         put(buf, OVERLAY_BASE, GBA_FILL_HOOK, ppc.bl(GBA_FILL_HOOK, v9["link_record"]),
@@ -1366,7 +1379,7 @@ def patch_ids(clean_sys, build_sys, clean_files, build_files):
 
 def main():
     args = [a for i, a in enumerate(sys.argv[1:], 1)
-            if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy")]
+            if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy", "--shyguy-voice")]
     clean, build = args[:2]
     ppc.selftest()
     proj_sites = projection_call_sites(clean)
@@ -1404,7 +1417,7 @@ def main():
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
               os.path.join(clean, "files"), os.path.join(build, "files"))
     if SHYGUY:
-        for rel, data in shyguy.build(os.path.join(clean, "files"), SHYGUY).items():
+        for rel, data in shyguy.build(os.path.join(clean, "files"), SHYGUY, SHYGUY_VOICE).items():
             open(os.path.join(build, "files", *rel.split("/")), "wb").write(data)
 
 

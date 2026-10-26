@@ -6,6 +6,7 @@
 #   powershell -ExecutionPolicy Bypass -File dev\publish.ps1 -Version 2 -CleanGame <clean .ciso/.iso>
 #     -CleanDisc <extracted clean disc dir> -BuildDir <scratch dir> [-ReferenceIso <path>] [-SkipBuild]
 #     [-ShyGuy <folder with Shy Guy.obj and heyho_body_alb.png; default: assets\shy-guy next to the repo>]
+#     [-ShyGuyVoice <zip of his WAV clips; default: assets\shy-guy\mario-power-tennis-shy-guy-voice.zip>]
 param(
 	[Parameter(Mandatory)] [int] $Version,
 	[Parameter(Mandatory)] [string] $CleanGame,
@@ -14,7 +15,8 @@ param(
 	[string] $ReferenceIso,
 	[string] $DolphinExe,
 	[switch] $SkipBuild,
-	[string] $ShyGuy = (Join-Path $PSScriptRoot '..\..\assets\shy-guy')
+	[string] $ShyGuy = (Join-Path $PSScriptRoot '..\..\assets\shy-guy'),
+	[string] $ShyGuyVoice = (Join-Path $PSScriptRoot '..\..\assets\shy-guy\mario-power-tennis-shy-guy-voice.zip')
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -27,7 +29,9 @@ if (-not $SkipBuild) {
 	robocopy $CleanDisc $BuildDir /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 	if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
 	if (-not (Test-Path (Join-Path $ShyGuy 'Shy Guy.obj'))) { throw "Shy Guy's model isn't in $ShyGuy" }
-	python -I (Join-Path $PSScriptRoot 'build_mod.py') $CleanDisc $BuildDir --version $Version --shyguy (Resolve-Path $ShyGuy).Path
+	if (-not (Test-Path $ShyGuyVoice)) { throw "Shy Guy's voice clips aren't at $ShyGuyVoice" }
+	python -I (Join-Path $PSScriptRoot 'build_mod.py') $CleanDisc $BuildDir --version $Version --shyguy (Resolve-Path $ShyGuy).Path `
+		--shyguy-voice (Resolve-Path $ShyGuyVoice).Path
 	if ($LASTEXITCODE) { throw 'build_mod.py failed' }
 	python -I (Join-Path $PSScriptRoot 'make_patch.py') $CleanDisc $BuildDir $patchPath $Version
 	if ($LASTEXITCODE) { throw 'make_patch.py failed' }

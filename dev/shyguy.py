@@ -6,8 +6,9 @@ screen lists them on an extra page (Down from the grid's bottom row), each with 
 Shy Guy, built like Koopa Troopa so he keeps his own short-legged shape:
 
   - build_mod.py hooks the select screen (cave 9) to write a link record for him into slot 0 each time it opens
-    (`RECORD`: his name, Koopa's drive and stats, Koopa's voice) and to hide that record's second golfer, and gives
-    golfer 16 Koopa's golfer methods (the vtable in the golf overlay) apart from the three that name his files,
+    (`RECORD`: his name, drive and stats) and to hide that record's second golfer, and gives golfer 16 Koopa's
+    golfer methods (the vtable in the golf overlay) apart from the three that name his files and the four that
+    play his voice,
   - his files become Koopa's (`SOURCES`: C/W/B golfer <- C/V/S, C/W/E <- C/V/Z, bank C/W/A <- C/V/R, select-screen
     model B/V/K <- B/V/D) rebuilt around an OBJ mesh: every body mesh (part 1 at mesh +0x38) gets an empty display
     list, one body mesh draws the OBJ as rigid groups (model-space positions, one bone per vertex: robe, hood and mask
@@ -15,20 +16,25 @@ Shy Guy, built like Koopa Troopa so he keeps his own short-legged shape:
     rigid arrays move to the end of the module (the clubs keep their indices),
   - the OBJ's texture (256x256 CMPR, 9 levels) replaces body texture 0 in his copies (the bank, and inside B/V/K),
   - his pictures are renders of the OBJ: the extra page's faces (B/U/P texture 1, B/U/M texture 39), the in-round face
-    C/W/D and the emblem C/W/C.
+    C/W/D and the emblem C/W/C; the extra page's "Game Boy Advance" label (B/U/M texture 2) says "More" and its Game
+    Boy pictures (texture 38) are clear,
+  - with voice clips, the voice set golfer 16 loads ("neil", C/Y/Q-T) plays them instead (`VOICE`; musyx.py).
 
-The model layout is in model.py and RE-NOTES.md (Characters). build_mod.py --shyguy <folder> calls `build`, with a
-folder holding the OBJ and its albedo texture (Sketchfab "Shy Guy" by Jakob Henerey, CC BY).
+The model layout is in model.py and RE-NOTES.md (Characters, Sound). build_mod.py --shyguy <folder> calls `build`,
+with a folder holding the OBJ and its albedo texture (Sketchfab "Shy Guy" by Jakob Henerey, CC BY), and
+--shyguy-voice <zip or folder of WAVs> adds his voice.
 """
 import os
 import struct
+import zipfile
 from collections import defaultdict
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 import camelot_lz as lz
 import model as mdl
+import musyx
 import textures as tx
 
 OBJ, ALBEDO = "Shy Guy.obj", "heyho_body_alb.png"
@@ -40,14 +46,36 @@ PLATES = "C/W/C"                        # emblem (texture 0); the game writes th
 ROW, ROW_TEX = "B/U/P", 1               # extra page: 8 faces 58x58 on white in one 464x58 CMPR picture; his is 1st
 FACES, FACES_TEX = "B/U/M", 39          # extra page: 8 faces 64x64 in a 512x64 CMPR row (the 1P badge); his is 1st
 PORTRAIT = (20, -8, (0, 7.4, 0), 3.4)   # face pictures: turn, tilt, centre and half-size of the view (OBJ units)
+LABEL_TEX = 2                           # B/U/M: the extra page's "Game Boy Advance" label (140x30 CMPR)
+LABEL, LABEL_FONT = "More", ("C:/Windows/Fonts/comicbd.ttf", 23, 1.6)   # text, and font, size and outline (pixels)
+GAME_BOY_TEX = 38                       # B/U/M: the Game Boy picture over each link record (90x54 CMPR)
+
+# His voice: the voice set the game loads for golfer 16 (main.dol's MusyX group 16, "neil": pool, project, sample
+# directory, sample data), and the clip each of its sounds plays. Golfer 16's voice methods start 0xAF (swing),
+# 0xB1 (nice impact), 0xC3 (ball near the hole) and 0xBB-0xC2 (chirps 0-7, while someone else lines up a shot);
+# the rest are played elsewhere (by their lengths in Neil's set: short ones more shot shouts, 0xB6/0xB7 the 7-8 s
+# win and lose lines, 0xB8-0xBA 3-6 s lines). The clips are Shy Guy's Mario Power Tennis voice (named as the
+# Sounds Resource rip names them).
+VOICE_SET = ("C/Y/Q", "C/Y/R", "C/Y/S", "C/Y/T")
+VOICE = {0xAF: "Fore.wav",                 # swing
+         0xB0: "Serve.wav", 0xB1: "ForeBackSmash.wav",     # nice impact
+         0xB2: "ServeA.wav", 0xB3: "Back.wav", 0xB4: "Tobitsuki.wav", 0xB5: "ChrSel Swing.wav",
+         0xB6: "GameGet.wav", 0xB7: "GameLose.wav", 0xB8: "SsHit.wav", 0xB9: "SpSkill2.wav", 0xBA: "SpSkill1.wav",
+         0xBB: "Provoke.wav", 0xBC: "PointGetA.wav", 0xBD: "PointGetB.wav", 0xBE: "PointLoseA.wav",   # chirps 0-3
+         0xBF: "PointLoseB.wav", 0xC0: "Damage1.wav", 0xC1: "Shine.wav", 0xC2: "Damage2.wav",          # chirps 4-7
+         0xC3: "ChrSel Ok.wav"}            # ball near the hole
+VOICE_RMS, VOICE_PEAK = 0.12, 0.95      # level of each clip (the game's own lines are about 0.1 RMS)
 
 # The link record the select screen hook writes (offset in the record -> word). Two golfers of 0x2C: +0x1A drive
-# (yards), +0x1C body (0 = golfer 16), +0x1F..+0x24 the six stats (the order of the golf overlay's table at
-# 0x804D2980: these are Koopa's), +0x28 voice (Koopa = 15); +0x268 the name (non-empty = the record is there).
+# (yards), +0x1C body (0 = golfer 16), +0x1F..+0x24 the six stats: height (-6..6), curve direction (0/1), curve
+# (0..6), impact, control, spin (the bars show value + 10 of 20; the 16 golfers run impact 0..4, control -5..4,
+# spin -6..6; the select screen's table at 0x80445B50), +0x28 the golfer code it borrows per-character effects
+# from in rounds (FUN_80459128; Koopa = 15); +0x268 the name (non-empty = the record is there).
+# Shy Guy: 205 yards, high (4), slight curve (1, 2), the narrowest impact (0), the best control (4), strong spin (5).
 NAME = b"Shy Guy\x00"
 RECORD = {0x00: NAME[:4], 0x04: NAME[4:], 0x10: NAME[:4], 0x14: NAME[4:],
-          0x18: bytes([0, 0, 0, 200]), 0x1C: bytes([0, 0, 0, 1]), 0x20: bytes([0, 1, 4, 4]),
-          0x24: bytes([0xFE, 0, 0, 0]), 0x28: bytes([15, 0, 0, 0]),
+          0x18: bytes([0, 0, 0, 205]), 0x1C: bytes([0, 0, 0, 4]), 0x20: bytes([1, 2, 0, 4]),
+          0x24: bytes([5, 0, 0, 0]), 0x28: bytes([15, 0, 0, 0]),
           0x2C + 0x1C: bytes([1, 0, 0, 0]),                  # second golfer: body 1 (hidden by the hook)
           0x268: NAME[:4], 0x26C: NAME[4:]}
 
@@ -657,13 +685,49 @@ def extra_row(raw, obj, tex):
     return lz.pack(raw[0], bytes(blob))
 
 
-def extra_faces(raw, icon):
-    """B/U/M texture 39: his face, first of the extra page's 8 (64x64, clear background)."""
+def label(old):
+    """The extra page's label with LABEL on it: the pill's colours across the middle (from its two ends, row by
+    row), then the text white to yellow with a dark outline like the game's, drawn 4x and scaled down."""
+    h, w = old.shape[:2]
+    pill = old.astype(np.float64)
+    for y in range(h):
+        if old[y, 5, 3] < 128:
+            continue
+        right = old[y, w - 4, :3] if old[y, w - 4, 3] > 127 else old[y, w - 6, :3]
+        t = ((np.arange(6, w - 4) - 5) / (w - 9))[:, None]
+        inside = old[y, 6:w - 4, 3:4] > 127
+        pill[y, 6:w - 4, :3] = np.where(inside, old[y, 5, :3] * (1 - t) + right * t, pill[y, 6:w - 4, :3])
+    font, size, stroke = LABEL_FONT
+    k = 4
+    big = (w * k, h * k)
+    f = ImageFont.truetype(font, size * k)
+    box = ImageDraw.Draw(Image.new("L", big)).textbbox((0, 0), LABEL, font=f, stroke_width=int(stroke * k))
+    at = ((big[0] - (box[2] - box[0])) // 2 - box[0], (big[1] - (box[3] - box[1])) // 2 - box[1])
+    fill, edge = Image.new("L", big, 0), Image.new("L", big, 0)
+    ImageDraw.Draw(fill).text(at, LABEL, font=f, fill=255)
+    ImageDraw.Draw(edge).text(at, LABEL, font=f, fill=255, stroke_width=int(stroke * k), stroke_fill=255)
+    t = np.clip((np.linspace(0, 1, big[1])[:, None, None] - 0.35) / 0.4, 0, 1)
+    colour = np.array([255, 255, 240.0]) * (1 - t) + np.array([245, 225, 30.0]) * t
+    m = np.asarray(fill)[..., None] / 255.0
+    rgba = np.concatenate([colour * m + np.array([16, 12, 16.0]) * (1 - m), np.asarray(edge)[..., None] * 1.0], 2)
+    text = Image.fromarray(rgba.astype(np.uint8)).convert("RGBa").resize((w, h), Image.LANCZOS).convert("RGBA")
+    out = Image.fromarray(np.clip(np.round(pill), 0, 255).astype(np.uint8))
+    out.alpha_composite(text)
+    return np.asarray(out, np.float64)
+
+
+def extra_page(raw, icon):
+    """B/U/M: his face first of the extra page's 8 (texture 39, 64x64, clear background), "More" on its label
+    (texture 2) and its Game Boy pictures clear (texture 38)."""
     blob = bytearray(tx.load_bytes(raw))
     (w, ht, fmt), old, at = picture(blob, FACES_TEX, (512, 64, 14))
     new = old.astype(np.float64)
     new[:, :64] = icon
     put_cmpr(blob, at, old, new)
+    (w, ht, fmt), old, at = picture(blob, LABEL_TEX, (140, 30, 14))
+    put_cmpr(blob, at, old, label(old))
+    (w, ht, fmt), old, at = picture(blob, GAME_BOY_TEX, (90, 54, 14))
+    put_cmpr(blob, at, old, np.zeros(old.shape))
     return lz.pack(raw[0], bytes(blob))
 
 
@@ -695,10 +759,44 @@ def emblem(raw, obj, tex):
     return lz.pack(raw[0], bytes(blob))
 
 
+# ---------------------------------------------------------------- voice
+
+def clip_reader(source):
+    """name -> WAV bytes, from a zip (any folder inside it) or a folder."""
+    if os.path.isdir(source):
+        return lambda name: open(os.path.join(source, name), "rb").read()
+    z = zipfile.ZipFile(source)
+    names = {os.path.basename(n): n for n in z.namelist()}
+    return lambda name: z.read(names[name])
+
+
+def voice(clean_files, source):
+    """{disc path: new file} for golfer 16's voice set: every sound's sample replaced by its clip in VOICE, at the
+    sample's rate and VOICE_RMS loudness (peaks held under VOICE_PEAK), in DSP ADPCM."""
+    read = lambda rel: open(os.path.join(clean_files, *rel.split("/")), "rb").read()
+    pool, proj, sdir, _ = (read(rel) for rel in VOICE_SET)
+    sample_of = musyx.sfx_samples(pool, proj)
+    if set(sample_of) != set(VOICE):
+        raise SystemExit(f"Shy Guy: the voice set's sounds are {sorted(map(hex, sample_of))}, not VOICE's")
+    rates = {sid: rate for _, sid, _, rate, _, _ in musyx.sdir_entries(sdir)}
+    clip = clip_reader(source)
+    sounds = {}
+    for sfx, name in VOICE.items():
+        pcm, rate = musyx.read_wav(clip(name))
+        sid = sample_of[sfx]
+        x = musyx.resample(pcm, rate, rates[sid])
+        gain = min(VOICE_RMS / max(np.sqrt((x * x).mean()), 1e-6), VOICE_PEAK / max(np.abs(x).max(), 1e-6))
+        sounds[sid] = np.clip(np.round(x * gain * 32767), -32768, 32767).astype(np.int64)
+    new_sdir, samp = musyx.rebuild(sdir, sounds)
+    print(f"Shy Guy: voice {len(VOICE)} clips -> {VOICE_SET[2]}, {VOICE_SET[3]} ({len(samp):,} bytes of ADPCM)")
+    return {VOICE_SET[2]: new_sdir, VOICE_SET[3]: samp}
+
+
 # ---------------------------------------------------------------- build
 
-def build(clean_files, folder):
-    """{disc path: new packed file} for golfer 16's models, texture bank and pictures (built from Koopa's)."""
+def build(clean_files, folder, voice_clips=None):
+    """{disc path: new file} for golfer 16's models, texture bank and pictures (built from Koopa's), and its voice
+    set when voice_clips names the clips."""
     read = lambda rel: open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     obj_pos, uv, nrm, tris = load_obj(os.path.join(folder, OBJ))
     ref = mdl.Model(read(SOURCES[GOLFER_MODEL]))
@@ -733,8 +831,10 @@ def build(clean_files, folder):
     obj = (obj_pos, uv, nrm, tris)
     icon = portrait(obj, full, 64)
     out[ROW] = extra_row(read(ROW), obj, full)
-    out[FACES] = extra_faces(read(FACES), icon)
+    out[FACES] = extra_page(read(FACES), icon)
     out[FACE] = face_file(read(FACE), icon)
     out[PLATES] = emblem(read(PLATES), obj, full)
     print(f"Shy Guy: pictures in {ROW}, {FACES}, {FACE}, {PLATES}")
+    if voice_clips:
+        out.update(voice(clean_files, voice_clips))
     return out
