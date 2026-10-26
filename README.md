@@ -7,7 +7,8 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 - **TV-style cameras:** after you hit, the camera cuts to behind and above the ball and follows it all the way. Putts are aimed, stroked and followed from behind the ball, down the line.
 - **Power to the yard:** the left stick moves the landing spot and the power gauge in quarter steps (1 yard with a 240-yard driver; finer with shorter clubs) instead of 4-yard jumps. Putts keep the game's own steps.
 - **See-through golfer when putting:** your golfer turns see-through from lining up the putt until the ball rolls, so the line, the grid and the cup stay in view. Turn it off and on with **Start → See-Through**; it's on every time the game starts.
-- **Steady zoom view:** the view that flies out along your shot toward the hole now glides high over the course and looks down, instead of skimming the ground, bobbing over bumps and ending up behind trees.
+- **Zoom view that shows where you're going:** it starts behind your ball looking down the line, and as you hold it the camera glides up and along the line until it's high behind your landing spot, always looking at the landing spot. Let go to stop partway; no more skimming the ground or ending up behind trees.
+- **Clean yardage box:** the power bar's distance is a plain box with the number, without the L/R button wings.
 - **Hold A to fast-forward** the ball after you hit (about 3× speed). The ball ends up exactly where it would have.
 - **No intro movie** and no shattered-glass screen effect.
 - **Replays ask first:** B after a shot opens *Continue / Watch Replay* instead of replaying straight away. Only the player who hit can open it.

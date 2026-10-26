@@ -31,8 +31,14 @@ Changes (v3):
 Changes (v4):
   - Power in quarter steps (1 yd with a 240-yd driver): the stick moves a quarter step, the shot builder adds
     it (real shots) or blends two steps' launch speeds (previews), and the power bar label counts it
-  - Zoom view rides high over the ground along the aim line and looks down, instead of hugging the terrain
+  - Zoom view rides high over the ground along the aim line and looks down (replaced in v5)
   - See-through golfer while putting (aim to stroke), with a See-Through On/Off row in the pause menu
+
+Changes (v5):
+  - Zoom view rebuilt: starts behind the ball looking down the aim line, then rises and moves up the line to
+    high behind the landing spot, looking at the landing spot the whole way, gliding from the normal view
+    (cave 7, ZOOM_TUNING)
+  - Power bar yardage box without the L / R button wings (YARDS_WING_EDITS)
 
 Patch code lives over dead functions (cave 1-6 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
@@ -206,8 +212,7 @@ HUD_SETUP = 0x34            # power bar HUD object: the shot setup it shows
 RANGE_MIN = 5               # the game's lowest aimable step
 VIEW_ZOOM = 6
 # Zoom view: past amount 1 the game flies its camera out along the aim line a few feet over the ground (terrain
-# checks every frame), so it bobs over every bump and ends up behind trees and hills. v4 keeps the game's path
-# along the line but rides high over the ground and looks down at it.
+# checks every frame), so it bobs over every bump and ends up behind trees and hills. Replaced in v5 (cave 7).
 # See-through golfer: while the shooter putts (aim to stroke), their golfer model is drawn see-through. Characters
 # are drawn by MODEL_DRAW (model instance in r3; the shooter's is player +PLAYER_GOLFER). Their materials take
 # alpha from the channel material colour (TEV alpha = raster alpha x texture alpha, alpha test only drops 0),
@@ -248,12 +253,31 @@ MSG_GHOST_ITEM, MSG_GHOST_HELP = 0x10D + GHOST_ITEM, 0x118 + GHOST_ITEM
 GHOST_TEXT_ON = b"\x074\x094See-Through: On\x00"
 GHOST_TEXT_OFF = b"\x074\x094See-Through: Off\x00"
 GHOST_TEXT_HELP = b"\x074\x094See through your golfer\x01while putting.\x00"
-ZOOM_TUNING = {
-    "height": 65.0,       # feet above the ground the camera rides on (clears most tree tops)
-    "pitch": 0.5,         # looks down this much per foot ahead (about 27 degrees)
-    "ground_ease": 0.05,  # how fast that ground height follows the game's camera (per frame)
-    "blend": 1 / 0.3,     # takes over from the game's camera by zoom amount 0.3
+# ---- v5: the zoom view goes up the aim line to the landing spot (cave 7)
+# The zoom amount (setup +0x16C) grows while the view's stick is held (about 1.15 a second; the first press jumps
+# it to about 0.13) and stays when let go. v4 kept the game's path and looked at the ground; v5 builds its own:
+# behind the ball looking down the line, rising first, then up the line to high behind the landing spot, looking
+# at the landing spot the whole way. The camera eases toward that spot from wherever it was (the normal view on
+# the first frame), so the first press doesn't jump.
+CAVE7 = 0x800757BC          # dead FUN_800757bc (find_dead_code.py: DEAD)
+CAVE7_SIZE = 704
+CAVE7_FIRST = 0x9421FF90
+ZOOM_TUNING = {             # feet; "share" = fraction of the shot's length, for short shots
+    "start_back": 25.0,     # start: this far behind the ball on the aim line ...
+    "start_up": 12.0,       # ... and this high above it
+    "end_back": 90.0,       # end: this far short of the landing spot (or end_back_share of the shot) ...
+    "end_back_share": 0.35,
+    "end_up": 75.0,         # ... and this high above it (end_up_share of the shot, at least end_up_min)
+    "end_up_share": 0.3,
+    "end_up_min": 20.0,
+    "full": 1.2,            # zoom amount that reaches the end (about a second of holding); along the line the
+                            # camera eases in and out (smoothstep), its height rises early (t * (2 - t))
+    "ease": 0.2,            # fraction of the way to its spot the camera moves each frame
 }
+# Power bar yardage box: the game draws grey L / R button wings either side of it (textures 0x20 / 0x21 of the
+# HUD set, quads from x = -w-32..-w and w..w+32). v5 makes both quads zero-wide: a clean box with the number.
+YARDS_WING_EDITS = [(0x8046C7B4, 0x3809FFE0, 0x38090000),   # left wing: subi r0,r9,0x20 -> addi r0,r9,0
+                    (0x8046C80C, 0x381F0020, 0x381F0000)]   # right wing: addi r0,r31,0x20 -> addi r0,r31,0
 
 
 def normalize_xz(a, x, z, n2):
@@ -399,15 +423,7 @@ def cave5_code():
     a.word("fine_quarter")
     for i in range(4):
         a.float(f"quarter{i}", i / 4)
-    a.word("zoom_on")
-    a.float("ground", 0.0)
-    a.float("zero", 0.0)
-    a.float("one", 1.0)
-    a.float("tiny", 1e-12)
-    for name, value in ZOOM_TUNING.items():
-        a.float(name, value)
     F_CLUB, F_STEP, F_QUARTER, F_TABLE = 4, 8, 12, 16
-    Z_GROUND, Z_ZERO, Z_ONE, Z_TINY, Z_HEIGHT, Z_PITCH, Z_EASE, Z_BLEND = (4 * i for i in range(1, 9))
     hi_t, lo_t = ppc.hi_lo(RANGE_TARGET)
 
     # Replaces `lbz r0,0x184(r31)` just before the range adjust adds its step (r10 = -1, 0 or +1; r31 = setup):
@@ -516,55 +532,92 @@ def cave5_code():
     a(ppc.slwi(9, 9, 2), ppc.add(9, 9, 8), ppc.mullw(9, 9, 0), ppc.srwi(9, 9, 2))
     a(ppc.lwz(8, 8, 1), ppc.addi(1, 1, 16), ppc.BLR)
 
-    # Zoom view, called after the game's aim camera (r3 = shot setup). Out along the aim line the camera keeps
-    # the game's spot on the line but rides ZOOM_TUNING height over an eased ground height and looks down ahead.
-    # From zoom 0 to 0.3 it blends in from the game's camera. Leaf; uses r0, r4, r7-r11, f0-f10.
-    a.label("zoom")
-    a.la(8, "zoom_on")
-    a(ppc.lwz(4, SETUP_VIEW, 3), ppc.cmpwi(4, VIEW_ZOOM))
-    a.br("bne", "zoom_off")
-    a(ppc.lfs(2, SETUP_ZOOM, 3), ppc.lfs(0, Z_ZERO, 8), ppc.fcmpu(2, 0))
-    a.br("ble", "zoom_off")
-    hi, lo = ppc.hi_lo(CAMERA_PTR)
-    a(ppc.lis(10, hi), ppc.lwz(10, lo, 10))
-    a(ppc.lfs(3, 0xC, 10), ppc.lfs(0, 0x0, 10), ppc.fsubs(3, 3, 0),     # the game's view direction, level
-      ppc.lfs(4, 0x14, 10), ppc.lfs(0, 0x8, 10), ppc.fsubs(4, 4, 0))
-    a(ppc.fmuls(5, 3, 3), ppc.fmuls(6, 4, 4), ppc.fadds(5, 5, 6), ppc.lfs(6, Z_TINY, 8), ppc.fcmpu(5, 6))
-    a.br("blt", "zoom_done")
-    hi, lo = ppc.hi_lo(CAVE2)
-    a(ppc.lis(7, hi), ppc.addi(7, 7, lo))
-    normalize_xz(a, 3, 4, 5)
-    hi, lo = ppc.hi_lo(AIM_BALL)
-    a(ppc.lis(9, hi), ppc.lfs(1, lo + 4, 9))                           # ball height
-    a(ppc.lwz(11, 0, 8), ppc.cmpwi(11, 0))
-    a.br("bne", "zoom_ground")
-    a(ppc.stfs(1, Z_GROUND, 8), ppc.li(11, 1), ppc.stw(11, 0, 8))      # zoom just started: ground = ball
-    a.label("zoom_ground")
-    a(ppc.lfs(0, Z_ONE, 8), ppc.fcmpu(2, 0))
-    a.br("ble", "zoom_rising")
-    a(ppc.lfs(1, 0x4, 10))              # out along the line the game keeps its camera just over the ground
-    a.label("zoom_rising")
-    a(ppc.lfs(0, Z_GROUND, 8), ppc.fsubs(1, 1, 0), ppc.lfs(6, Z_EASE, 8), ppc.fmadds(0, 1, 6, 0),
-      ppc.stfs(0, Z_GROUND, 8))
-    a(ppc.lfs(6, Z_HEIGHT, 8), ppc.fadds(6, 0, 6))                      # f6 = our eye height
-    a(ppc.lfs(7, Z_BLEND, 8), ppc.fmuls(7, 2, 7), ppc.lfs(0, Z_ONE, 8), ppc.fcmpu(7, 0))
-    a.br("ble", "zoom_weight")
-    a(ppc.fmr(7, 0))
-    a.label("zoom_weight")                                              # f7 = how much is ours
-    a(ppc.lfs(8, 0x4, 10), ppc.fsubs(6, 6, 8), ppc.fmadds(6, 6, 7, 8), ppc.stfs(6, 0x4, 10))
-    for off, d in ((0x0, 3), (0x8, 4)):                                 # look one foot ahead, level ...
-        a(ppc.lfs(8, off, 10), ppc.fadds(9, 8, d), ppc.lfs(10, off + 0xC, 10), ppc.fsubs(9, 9, 10),
-          ppc.fmadds(9, 9, 7, 10), ppc.stfs(9, off + 0xC, 10))
-    a(ppc.lfs(9, Z_PITCH, 8), ppc.fsubs(9, 6, 9), ppc.lfs(10, 0x10, 10), ppc.fsubs(9, 9, 10),
-      ppc.fmadds(9, 9, 7, 10), ppc.stfs(9, 0x10, 10))                   # ... and down
-    a.label("zoom_done")
-    a(ppc.BLR)
-    a.label("zoom_off")
-    a(ppc.li(0, 0), ppc.stw(0, 0, 8), ppc.BLR)
-
     blob = a.assemble()
     if len(blob) > CAVE5_SIZE:
         raise SystemExit(f"cave 5 code is {len(blob)} bytes; only {CAVE5_SIZE} available")
+    return blob, dict(a.labels)
+
+
+def cave7_code():
+    """Assemble the zoom view camera. Returns (bytes, labels)."""
+    a = ppc.Asm(CAVE7)
+    for name, value in (("zero", 0.0), ("one", 1.0), ("two", 2.0), ("three", 3.0), ("tiny", 1e-12),
+                        *ZOOM_TUNING.items()):
+        a.float(f"z_{name}", value)
+    for i in range(6):
+        a.float(f"z_prev{i}", 0.0)  # the camera last frame (eye xyz, look xyz)
+    z = {name: a.labels[f"z_{name}"] - CAVE7
+         for name in ("zero", "one", "two", "three", "tiny", "prev0", *ZOOM_TUNING)}
+
+    def fmin(d, b):  # f{d} = min(f{d}, f{b})
+        name = f"fmin_{len(a.words)}"
+        a(ppc.fcmpu(d, b))
+        a.br("ble", name)
+        a(ppc.fmr(d, b))
+        a.label(name)
+
+    def fmax(d, b):  # f{d} = max(f{d}, f{b})
+        name = f"fmax_{len(a.words)}"
+        a(ppc.fcmpu(d, b))
+        a.br("bge", name)
+        a(ppc.fmr(d, b))
+        a.label(name)
+
+    # Called after the game's aim camera (r3 = shot setup). In the zoom view with amount > 0, the camera starts
+    # behind the ball on the aim line and, as the amount grows, rises and moves up the line until it is high
+    # behind the landing spot, looking at the landing spot all the way. It eases toward that spot from last
+    # frame's camera; every other frame it just remembers the game's camera. Leaf; uses r4, r7-r10, f0-f13.
+    a.label("zoom")
+    hi, lo = ppc.hi_lo(CAVE7)
+    a(ppc.lis(8, hi), ppc.addi(8, 8, lo))
+    hi, lo = ppc.hi_lo(CAMERA_PTR)
+    a(ppc.lis(10, hi), ppc.lwz(10, lo, 10))                      # r10 = camera
+    a(ppc.lwz(4, SETUP_VIEW, 3), ppc.cmpwi(4, VIEW_ZOOM))
+    a.br("bne", "zoom_off")
+    a(ppc.lfs(13, SETUP_ZOOM, 3), ppc.lfs(0, z["zero"], 8), ppc.fcmpu(13, 0))   # f13 = zoom amount
+    a.br("ble", "zoom_off")
+    hi, lo = ppc.hi_lo(AIM_BALL)
+    a(ppc.lis(9, hi), ppc.lfs(0, lo, 9), ppc.lfs(1, lo + 4, 9), ppc.lfs(2, lo + 8, 9))   # f0-f2 = ball
+    a(ppc.lfs(3, SETUP_TARGET, 3), ppc.fsubs(3, 3, 0), ppc.lfs(4, SETUP_TARGET + 8, 3), ppc.fsubs(4, 4, 2))
+    a(ppc.fmuls(5, 3, 3), ppc.fmuls(6, 4, 4), ppc.fadds(5, 5, 6), ppc.lfs(6, z["tiny"], 8), ppc.fcmpu(5, 6))
+    a.br("blt", "zoom_off")
+    hi, lo = ppc.hi_lo(CAVE2)
+    a(ppc.lis(7, hi), ppc.addi(7, 7, lo))
+    normalize_xz(a, 3, 4, 5)                                     # f3/f4 = direction to the landing spot
+    a(ppc.fmuls(5, 5, 6))                                        # f5 = its distance (n2 / sqrt(n2))
+    a(ppc.lfs(12, z["full"], 8), ppc.fdivs(12, 13, 12), ppc.lfs(10, z["one"], 8))
+    fmin(12, 10)                                                 # f12 = t, how far along, 0..1
+    a(ppc.lfs(9, z["two"], 8), ppc.fmuls(9, 9, 12), ppc.lfs(10, z["three"], 8), ppc.fsubs(10, 10, 9),
+      ppc.fmuls(11, 12, 12), ppc.fmuls(11, 11, 10))              # f11 = along the line: t*t*(3 - 2t)
+    a(ppc.lfs(8, z["two"], 8), ppc.fsubs(8, 8, 12), ppc.fmuls(8, 8, 12))   # f8 = height: t*(2 - t)
+    a(ppc.lfs(6, z["end_back_share"], 8), ppc.fmuls(6, 6, 5), ppc.lfs(7, z["end_back"], 8))
+    fmin(6, 7)                                                   # f6 = end: distance short of the spot
+    a(ppc.lfs(7, z["end_up_share"], 8), ppc.fmuls(7, 7, 5), ppc.lfs(9, z["end_up_min"], 8))
+    fmax(7, 9)
+    a(ppc.lfs(9, z["end_up"], 8))
+    fmin(7, 9)                                                   # f7 = end: height over the spot
+    # how far up the line: from start_back behind the ball to f6 short of the spot
+    a(ppc.lfs(10, z["start_back"], 8), ppc.fsubs(9, 5, 6), ppc.fadds(9, 9, 10), ppc.fmuls(9, 9, 11),
+      ppc.fsubs(9, 9, 10))
+    a(ppc.fmadds(3, 3, 9, 0), ppc.fmadds(4, 4, 9, 2))            # f3/f4 = eye x/z
+    a(ppc.lfs(6, z["start_up"], 8), ppc.fadds(6, 1, 6),           # eye height: ball + start_up ...
+      ppc.lfs(9, SETUP_TARGET + 4, 3), ppc.fadds(9, 9, 7), ppc.fsubs(9, 9, 6), ppc.fmadds(6, 9, 8, 6))  # ... to spot + f7
+    a(ppc.lfs(10, z["ease"], 8))                                 # glide: prev += (want - prev) * ease
+    for i, f in enumerate((3, 6, 4)):
+        a(ppc.lfs(9, z["prev0"] + 4 * i, 8), ppc.fsubs(f, f, 9), ppc.fmadds(f, f, 10, 9),
+          ppc.stfs(f, z["prev0"] + 4 * i, 8), ppc.stfs(f, 4 * i, 10))
+    for i in range(3):                                           # look at the landing spot
+        a(ppc.lfs(8, SETUP_TARGET + 4 * i, 3), ppc.lfs(9, z["prev0"] + 12 + 4 * i, 8), ppc.fsubs(8, 8, 9),
+          ppc.fmadds(8, 8, 10, 9), ppc.stfs(8, z["prev0"] + 12 + 4 * i, 8), ppc.stfs(8, 12 + 4 * i, 10))
+    a(ppc.BLR)
+    a.label("zoom_off")                                          # not zooming: remember the game's camera
+    for i in range(6):
+        a(ppc.lfs(9, 4 * i, 10), ppc.stfs(9, z["prev0"] + 4 * i, 8))
+    a(ppc.BLR)
+
+    blob = a.assemble()
+    if len(blob) > CAVE7_SIZE:
+        raise SystemExit(f"cave 7 code is {len(blob)} bytes; only {CAVE7_SIZE} available")
     return blob, dict(a.labels)
 
 
@@ -1028,14 +1081,15 @@ def check_matrix_site(buf, base, hook):
         raise SystemExit(f"0x{hook:08X}: no GXSetProjection call right after the hook")
 
 
-def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6):
+def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
     base = t0_addr - t0_off  # address of file offset 0, for word()/put()
 
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
-                              (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6)):
+                              (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
+                              (CAVE7, CAVE7_FIRST, cave7)):
         if word(data, base, addr) != first:  # still the original (dead) function
             raise SystemExit(f"0x{addr:08X}: expected first instruction {first:08X}")
         data[addr - base:addr - base + len(code)] = code
@@ -1097,6 +1151,8 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4):
         for site in PAUSE_BUILD_CALLS:
             put(buf, OVERLAY_BASE, site, ppc.bl(site, v4["ghost_menu"]), ppc.bl(site, PAUSE_BUILD))
         put(buf, OVERLAY_BASE, PAUSE_RUN, ppc.bl(PAUSE_RUN, v4["ghost_select"]), ppc.bl(PAUSE_RUN, PAUSE_RUN_TARGET))
+        for site, old, new in YARDS_WING_EDITS:
+            put(buf, OVERLAY_BASE, site, new, old)
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -1128,8 +1184,9 @@ def main():
     cave4 = anchor_table(proj_sites)
     cave5, v4 = cave5_code()
     cave6, v6 = cave6_code()
+    cave7, v7 = cave7_code()
     v4.update(v6)
-    cave3, v3 = cave3_code(v4["zoom"], v6)
+    cave3, v3 = cave3_code(v7["zoom"], v6)
     cave, stubs = build_cave()
     cave2, v2 = cave2_code(v3["aim_place"])
     print(f"cave 2: {len(cave2)} of {CAVE2_SIZE} bytes at 0x{CAVE2:08X} (fast-forward 0x{v2['ff']:08X},"
@@ -1138,12 +1195,12 @@ def main():
           f" replay prompt 0x{v3['replay_check']:08X}, HUD anchors 0x{v3['anchor']:08X})")
     print(f"cave 4: {len(cave4)} of {CAVE4_SIZE} bytes at 0x{CAVE4:08X} (anchor table, {len(proj_sites)} callers,"
           f" {sum(1 for s in proj_sites if PROJ_CALLERS.get(s))} anchored)")
-    print(f"cave 5: {len(cave5)} of {CAVE5_SIZE} bytes at 0x{CAVE5:08X} (quarter steps 0x{v4['fine_step']:08X},"
-          f" zoom 0x{v4['zoom']:08X})")
+    print(f"cave 5: {len(cave5)} of {CAVE5_SIZE} bytes at 0x{CAVE5:08X} (quarter steps 0x{v4['fine_step']:08X})")
     print(f"cave 6: {len(cave6)} of {CAVE6_SIZE} bytes at 0x{CAVE6:08X} (see-through setting 0x{v6['ghost_mode']:08X},"
           f" pause menu row 0x{v6['ghost_menu']:08X})")
+    print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6)
+              cave3, v3, cave4, cave5, cave6, cave7)
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4)
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),

@@ -4,11 +4,12 @@
 param([Parameter(Mandatory, Position = 0)] [string] $Program, [Parameter(Mandatory, Position = 1)] [string] $Out,
 	[Parameter(Position = 2, ValueFromRemainingArguments)] [string[]] $Specs,
 	[string] $Root = (Join-Path $PSScriptRoot '..\..\..'))
+$Root = (Resolve-Path $Root).Path  # Ghidra refuses project paths with '..' in them
 $tools = Join-Path $Root 'tools'
 $env:JAVA_HOME = Join-Path $tools 'jdk-21.0.12.1+1'
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 $headless = Join-Path $tools 'ghidra_12.1.4_PUBLIC\support\analyzeHeadless.bat'
 & $headless (Join-Path $Root 'mod\ghidra_proj') $Program -process -noanalysis -readOnly `
-	-scriptPath (Join-Path $PSScriptRoot '..\ghidra_scripts') `
+	-scriptPath (Resolve-Path (Join-Path $PSScriptRoot '..\ghidra_scripts')).Path `
 	-postScript DumpAsm.java $Out @Specs *> "$Out.log"
 Get-Content $Out

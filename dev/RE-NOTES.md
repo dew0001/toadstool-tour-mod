@@ -27,12 +27,13 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003E86C | 1104 | `C_MTX44Concat` | v2 camera data block, fast-forward, follow camera |
 | 0x8003AE84 | 1872 | `OSCheckActiveThreads` | v2/v3/v4 putt aim view, replay prompt, message hook, HUD anchors, see-through draw |
 | 0x80021C60 | 2200 | printf-style formatter | v3 HUD anchor table (data only) |
-| 0x800411B8 | 1076 | FUN_800411b8 | v4 quarter-step power, zoom camera (almost full) |
+| 0x800411B8 | 1076 | FUN_800411b8 | v4 quarter-step power |
 | 0x8003CA40 | 684 | FUN_8003ca40 | v4 See-Through setting and pause-menu row |
+| 0x800757BC | 704 | FUN_800757bc | v5 zoom view camera |
 
 Still free (DEAD in `find_dead_code.py`): 0x80040CE8 (600), 0x8003CDE4 (540), 0x80053528 (476),
 0x80054EFC (424), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug
-patch), 0x80069F4C (560), 0x8006A834 (464), 0x800757BC (704), 0x80084B2C (464), 0x80090438 (404),
+patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
 0x80093938 (648), 0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
 
 ## Gotchas
@@ -92,6 +93,11 @@ patch), 0x80069F4C (560), 0x8006A834 (464), 0x800757BC (704), 0x80084B2C (464), 
   - `fine_yards` (replaces `mullw r9,r9,r0` at 0x8046C964 in the power bar HUD `FUN_8046bc78`): the label
     shows (4 * step + quarter) * reach / 240 yards. Putts' label is a float "%3.1f" path, left alone.
   - The quarter applies only while the target is the step it was set at, for that player and club.
+- **Yardage box** (power bar HUD `FUN_8046bc78`, around 0x8046C700): the yellow box spans x = -w..w; then
+  texture 0x20 of the HUD set (`DAT_804dfa48`) on a quad at -w-32..-w (the grey "L" wing), texture 0x21 at
+  w..w+32 ("R" wing), then texture 0x10 (the pointer below, own matrix), then the number. `FUN_8000c900(set,
+  index, 0)` binds a texture; `FUN_8006967c(0x80, 0, 4)` is GXBegin(quads, 4 vertices) followed by FIFO
+  writes to 0xCC008000. v5 removes the wings by making both quads zero-wide (`YARDS_WING_EDITS`).
 
 ## Cameras
 
@@ -104,8 +110,18 @@ patch), 0x80069F4C (560), 0x8006A834 (464), 0x800757BC (704), 0x80084B2C (464), 
   - > 0.98: flies out along the aim line, `(amount - 0.98) * 320` ft, up to the end of the hole (about 3)
   - out on the line the game keeps the camera a few feet over the ground with collision checks every frame
     (`FUN_804379b4`), hence the bobbing and the trees in the way
-  - v4 `zoom` (cave 5, called by the cave 3 aim stub after the game's camera) keeps the game's spot along
-    the line, rides `ZOOM_TUNING["height"]` above an eased ground height and looks down; blends in from 0 to 0.3
+  - the amount grows about 1.15 a second while the stick is held; the first press jumps it to about 0.13
+  - v4 kept the game's spot on the line, rode high and pitched down: Andrew found it useless (just ground).
+    What he wants (approved in v5): start behind the ball looking down the line, then go up and toward the
+    landing zone so you can see where the ball is going. A first v5 draft moved linearly in t and blended
+    from the game's camera; the first press then lurched the camera out over the fairway ("the zoom issue
+    happens at the beginning").
+  - v5 `zoom` (cave 7, called by the cave 3 aim stub after the game's camera): t = amount / 1.2; along the
+    line smoothstep(t) from 25 ft behind the ball to 90 ft short of the landing spot; height ease-out t(2-t)
+    from 12 ft over the ball to 75 ft over the spot (both scaled down for short shots); always looks at the
+    landing spot (setup +0x1EC). The camera glides there (20% a frame) from last frame's camera; on other
+    frames the stub just remembers the game's camera, so entering the view starts from the normal view.
+    `ZOOM_TUNING`; `tools/zoom_sim.py` checks the assembled code against this.
 - v2/v3 follow camera and putt views: `cave2_code`, `cave3_code` in `build_mod.py`; tuning in `CAM_TUNING`.
 
 ## Rendering (v4 see-through golfer)
@@ -183,3 +199,7 @@ with keyboard controls. Set `TTMOD_ROOT`, `TTMOD_DOL` or `TTMOD_PID` to point el
      which model (with live skip switches), which code shows which message.
    - `dumpasm.ps1 golf out.txt 0x804c6668:0x100 ref:0x804dae88`: disassembly and data references from Ghidra.
    - `dol_words.py dump|callers`, `dol_strings.py`, `find_bl.py`, `find_text.py`: static searches.
+   - `zoom_sim.py`: runs the assembled zoom camera on a tiny PowerPC interpreter and checks it against the
+     formula, no Dolphin needed (handy when the test Dolphin can't be on screen). Extend it for other stubs.
+6. Never start the test Dolphin while the player's own Dolphin is running the mod (its title shows GFTEMD):
+   the test window would pop up over their game.
