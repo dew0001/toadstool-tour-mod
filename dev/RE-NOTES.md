@@ -189,14 +189,19 @@ The maintainer's layout (paths the tools default to, relative to the folder abov
 with keyboard controls. Set `TTMOD_ROOT`, `TTMOD_DOL` or `TTMOD_PID` to point elsewhere.
 
 1. Build into the build tree: `python -I dev\build_mod.py <disc> <build> --version N`.
-2. Start a separate test Dolphin on it, never the player's own (and never let Dolphin update itself):
-   `Dolphin.exe -u <test profile> -C Dolphin.Interface.ConfirmStop=False -b -e <build>\sys\main.dol`, and
-   write its process id to `<test profile>\pid.txt`.
-3. Test-profile keys: x = A, z = B, c = X, s = Y, d = Z, i/k/j/l = C-stick, q/w = L/R (power),
-   arrows = main stick (up/down also change club there), Enter = Start. Hold each key at least 0.1 s, and
-   click the game window first.
-4. Menus to a round: Start, A, A (1 Player), A (Mario), Right, A (Character Match), A, A (Novice), A (course),
-   A (Yes), then A.
+2. Run the test Dolphin **hands-off** (never the player's own Dolphin, and never let Dolphin update itself):
+   `dev\tools\test_dolphin.ps1 start [-Image <main.dol or .iso>]`. It switches the test profile to the virtual
+   controller (`dsu_pad.py`, Dolphin's DSU Client on udp 26760), turns on background input, maps the screenshot
+   hotkey to the pad's PS button, puts the window off-screen and hands focus back. Nothing goes through the real
+   keyboard, mouse or screen, so it never gets in the way of whoever is using the PC.
+3. Drive it: `python -I dev\tools\dsu_pad.py press Cross` / `seq "Share 200; wait 3000; Cross 200"` /
+   `stick L 0 1 300` / `status`. Mapping: A = Cross, B = Circle, X = Square, Y = Triangle, Z = R1,
+   Start = Share, L/R = L2/R2, main stick = left stick, C-stick = right stick, D-pad = Pad N/S/E/W.
+   Look: `test_dolphin.ps1 shot` prints a screenshot path (a 960-wide `.small.png` copy). `stop` closes it.
+   To hand the test game to a person: `test_dolphin.ps1 keyboard`, then `start` (keys: x = A, z = B, c = X,
+   s = Y, d = Z, i/k/j/l = C-stick, q/w = L/R, arrows = main stick, Enter = Start).
+4. Menus to a round: Start, A, A (1 Player), A (Mario; Pad E five times = Koopa Troopa), Pad E, A (Character
+   Match), A, A (Novice), A (course), A (Yes), then A. About 3 s between menu steps, 8 s for the course to load.
 5. Tools in `dev\tools` (PowerShell 7 or 5.1):
    - `gcmem.ps1` (dot-source): `[GCMem]::Open(pid, 'GFTEMD')`, `U8/U32/F32/W32(address)`, `ReadGC(address, n)`;
      finds Dolphin's emulated RAM by the game ID and the 0x01800000 size at +0x28.
@@ -205,11 +210,13 @@ with keyboard controls. Set `TTMOD_ROOT`, `TTMOD_DOL` or `TTMOD_PID` to point el
    - `memfind.ps1 <hex word>`, `memstr.ps1 <text>`, `memseq.ps1 <hex bytes>`: search all of RAM.
    - `msgids.ps1`: message ids whose string is at given addresses.
    - `hud.ps1`, `hudcrop.ps1`: the v3 HUD anchor table (list, reset, pin a caller and crop screenshots).
-   - `debug_patch.py <build>\sys\main.dol draws|messages`, then `drawlog.ps1` / `msglog.ps1`: which code draws
-     which model (with live skip switches), which code shows which message.
+   - `debug_patch.py <build>\sys\main.dol draws|messages|files`, then `drawlog.ps1` / `msglog.ps1` /
+     `filelog.ps1`: which code draws which model (with live skip switches), which code shows which message,
+     which disc files get opened (in order).
    - `dumpasm.ps1 golf out.txt 0x804c6668:0x100 ref:0x804dae88`: disassembly and data references from Ghidra.
    - `dol_words.py dump|callers`, `dol_strings.py`, `find_bl.py`, `find_text.py`: static searches.
    - `zoom_sim.py`: runs the assembled zoom camera on a tiny PowerPC interpreter and checks it against the
      formula, no Dolphin needed (handy when the test Dolphin can't be on screen). Extend it for other stubs.
-6. Never start the test Dolphin while the player's own Dolphin is running the mod (its title shows GFTEMD):
-   the test window would pop up over their game.
+6. Don't drive tests with screen clicks or key presses (computer use): the player asked that tests never take
+   over their PC, and everything above works in the background. `test_dolphin.ps1 stop` only closes the test
+   Dolphin (by the pid in the test profile), never the player's own.

@@ -6,6 +6,8 @@
   messages: log every distinct (caller, message id) looked up with LO <= id <= HI. Read with msglog.ps1.
             The caller is the message formatter's caller's caller (two frames up), i.e. the code that
             put the text on screen. (v4 found the pause menu this way.)
+  files:    log every distinct file ID the game opens, in order (FUN_8001bbf0 turns an ID into the disc path
+            "A/B/C"; ID = 2 * (26*26*a + 26*b + c)). Read with filelog.ps1 (-Reset to start over).
 
 Both chain to whatever the build already hooked there, so the mod still works.
 
@@ -20,6 +22,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import ppc  # noqa: E402
 
 MODEL_DRAW = 0x800072C8      # model draw entry (r3 = model instance)
+FILE_PATH = 0x8001BBF0       # file ID (r3) -> disc path
+FILE_LOG = 0x80057A14        # shares the draws log's cave: use one or the other
+FILE_MAX = 140
 MSG_LOOKUP = 0x80022CD0      # message id -> string
 DRAW_LOG = 0x80057A14        # dead FUN_80057a14 (712 bytes): table at +0, skip words, then code
 MSG_LOG = 0x8005DAFC         # dead FUN_8005dafc (444 bytes)
@@ -113,11 +118,33 @@ elif kind == "messages":
     log_loop(a, 12, "done")
     a.label("done")
     continue_original(a, SITE)
+elif kind == "files":
+    CAVE, SITE, MAX = FILE_LOG, FILE_PATH, FILE_MAX
+    a = ppc.Asm(CAVE)
+    a.word("count")
+    for i in range(MAX):
+        a.word(f"e{i}")
+    a.label("log")
+    a.la(11, "count")
+    a(ppc.lwz(10, 0, 11), ppc.addi(9, 11, 4), ppc.li(8, 0))
+    a.label("loop")
+    a(ppc.cmpw(8, 10))
+    a.br("bge", "add")
+    a(ppc.lwz(7, 0, 9), ppc.cmpw(7, 3))
+    a.br("beq", "done")
+    a(ppc.addi(9, 9, 4), ppc.addi(8, 8, 1))
+    a.br("b", "loop")
+    a.label("add")
+    a(ppc.cmpwi(10, MAX))
+    a.br("bge", "done")
+    a(ppc.stw(3, 0, 9), ppc.addi(10, 10, 1), ppc.stw(10, 0, 11))
+    a.label("done")
+    continue_original(a, SITE)
 else:
     raise SystemExit(__doc__)
 
 blob = a.assemble()
-size = {DRAW_LOG: 712, MSG_LOG: 444}[CAVE]
+size = {DRAW_LOG: 712, MSG_LOG: 444, FILE_LOG: 712}[CAVE]
 if len(blob) > size or word(CAVE) != DEAD_FIRST:
     raise SystemExit(f"0x{CAVE:08X}: {len(blob)} bytes for {size}, or the cave is already used")
 data[off_of(CAVE):off_of(CAVE) + len(blob)] = blob
