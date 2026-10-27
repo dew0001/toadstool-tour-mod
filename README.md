@@ -4,7 +4,7 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 
 - **Widescreen built in:** real 16:9 with the HUD out at the screen edges, every piece in its proper shape. No cheats or special Dolphin settings needed.
 - **Everything unlocked:** every course and character from the start.
-- **Shy Guy joins the roster** as a 17th golfer, with everyone else unchanged: on the character select screen, press Down from the bottom row to the *More* page. He has his own model, pictures, name, stats (205 yards, high shots, a narrow impact window, top control, strong spin) and voice, including chirps while others line up their shots, and swings with Koopa Troopa's animations.
+- **Shy Guy joins the roster** as a 17th golfer, with everyone else unchanged: on the character select screen, press Down from the bottom row to the *More* page. He's the Shy Guy from *Mario Power Tennis*, with his own pictures, name, stats (205 yards, high shots, the narrowest impact window, top control, strong spin), voice (his call on the select screen, cheers and groans at the end of each hole, chirps while others line up their shots) and power shot: a burst of red and white stars with his special-shot shout. He swings with Koopa Troopa's animations.
 - **TV-style cameras:** after you hit, the camera cuts to behind and above the ball and follows it all the way. Putts are aimed, stroked and followed from behind the ball, down the line.
 - **Power to the yard:** the left stick moves the landing spot and the power gauge in quarter steps (1 yard with a 240-yard driver; finer with shorter clubs) instead of 4-yard jumps. Putts keep the game's own steps.
 - **See-through golfer when putting:** your golfer turns see-through from lining up the putt until the ball rolls, so the line, the grid and the cup stay in view. Turn it off and on with **Start → See-Through**; it's on every time the game starts.
@@ -73,8 +73,9 @@ If a player shows as not having the game, their mod version or Dolphin version d
 ## Credits
 
 - **Widescreen:** based on gamemasterplc's 16:9 Gecko code from the Dolphin wiki, rebuilt as a permanent patch.
-- **Cameras, fast-forward, no intro, yard-by-yard power, see-through golfer:** written for this mod.
-- **Shy Guy:** "[Shy Guy](https://sketchfab.com/3d-models/shy-guy-ed5356a5ee384034acc3145079d25fe4)" by Jakob Henerey, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changed for this mod: converted to the game's model format, fitted to Koopa Troopa's skeleton so he moves with Koopa's animations, made a little smaller with the arms moved onto Koopa's, and rendered for the menu pictures.
+- **Cameras, fast-forward, no intro, yard-by-yard power, see-through golfer, Shy Guy's power shot:** written for this mod.
+- **Shy Guy's model (v9 on):** his model and textures from *Mario Power Tennis* (Nintendo / Camelot). Changed for this mod: converted to this game's model format, fitted to Koopa Troopa's skeleton so he moves with Koopa's animations, and rendered for the menu pictures.
+- **Shy Guy's model (v7-v8):** "[Shy Guy](https://sketchfab.com/3d-models/shy-guy-ed5356a5ee384034acc3145079d25fe4)" by Jakob Henerey, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changed for this mod: converted to the game's model format, fitted to Koopa Troopa's skeleton so he moves with Koopa's animations, made a little smaller with the arms moved onto Koopa's, and rendered for the menu pictures.
 - **Shy Guy's voice:** his clips from *Mario Power Tennis* (Nintendo / Camelot), ripped by RatchetMario for [The Sounds Resource](https://sounds.spriters-resource.com/gamecube/mariopowertennis/asset/395349/).
 - **HD UI textures:** "Toadstool Tour 4x" by NickPancakes ([Dolphin forum thread](https://forums.dolphin-emu.org/Thread-mario-golf-toadstool-tour-gcn-4x-ui-texture-pack)). Downloaded from the author's own link, not re-hosted here.
 

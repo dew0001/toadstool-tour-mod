@@ -37,6 +37,8 @@ FILES = [  # (disc path, compressed?) - every file build_mod.py touches
     ("files/B/U/M", True),
     ("files/C/Y/S", False),   # golfer 16's voice set: sample directory and samples (--shyguy-voice)
     ("files/C/Y/T", False),
+    ("files/B/T/O", False),   # the common sound set: his call on the select screen, one sample in place
+    ("files/B/T/P", False),
 ]
 MIN_COPY = 64   # shorter matches with the original stay as edits
 # Files the build makes from another file of the game: the patch starts from that one ("base"), so what they share

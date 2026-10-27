@@ -12,6 +12,9 @@ MODEL_DRAW (0x800072C8) and FUN_80006524 read as:
 Rigid groups (flag bit 0) index +0x08/+0x1C directly; their positions are in model space (bind pose) and each
 vertex is drawn with its bone's skin matrix (animated bone x inverse bind, the bone's +0x04 matrix). Skinned groups
 index a per-instance buffer the CPU fills from +0x10/+0x24 every frame.
+Mario Power Tennis (also Camelot) uses a later revision, root magic 0x0131A5B5: the same root and groups, meshes
+of 0x40 bytes, bones of 0x6C, and format words without the top bit (same packing as the 0x8xxxxxxx ones).
+Model() reads both.
 Usage: python -I model.py <packed disc file>
 """
 import os
@@ -22,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import camelot_lz as lz  # noqa: E402
 
 COMP = {0: ("B", 1), 1: ("b", 1), 2: ("H", 2), 3: ("h", 2), 4: ("f", 4)}  # GX_U8, S8, U16, S16, F32
+MAGIC_TT, MAGIC_MPT = 0x0131A313, 0x0131A5B5   # Toadstool Tour, Mario Power Tennis
 
 
 def load(source):
@@ -43,6 +47,16 @@ class Model:
         self.blob, relocs = load(source)
         self.ptr = {off: val for kind, ext, off, val in relocs if kind == 0 and not ext}
         self.root = root_offset(self.blob, relocs)
+        self.mpt = self.root is not None and u32(self.blob, self.root) == MAGIC_MPT
+        self.mesh_size = 0x40 if self.mpt else 0x3C
+        self.bone_size = 0x6C if self.mpt else 0x60   # MPT's have 12 more bytes at the end
+
+    def fmt(self, at):
+        """(component type, fraction bits) of the format word at root + at, or None."""
+        word = self.u32(self.root + at)
+        if self.mpt:
+            return None if word == 0xFF else ((word >> 5) & 7, word & 0x1F)
+        return fmt(word, self.blob[self.root + at + 3])
 
     def u32(self, o):
         return u32(self.blob, o)
@@ -97,7 +111,7 @@ def meshes(m):
     r = m.root
     count, base = m.u32(r + 0x3C), m.p(r + 0x40)
     for i in range(count):
-        mo = base + 0x3C * i
+        mo = base + m.mesh_size * i
         groups, gbase = m.u32(mo + 0x28), m.p(mo + 0x2C)
         for g in range(groups):
             go = gbase + 0x38 * g
@@ -173,7 +187,7 @@ def bones(m):
     base, count = m.p(m.root + 0x64), m.u32(m.root + 0x60)
     out = []
     for i in range(count):
-        o = base + 0x60 * i
+        o = base + m.bone_size * i
         parent = m.u32(o)
         out.append((-1 if parent == 0xFFFFFFFF else parent, struct.unpack_from(">12f", m.blob, o + 4)))
     return out
@@ -204,7 +218,7 @@ def world_bind(m):
     base, count = m.p(m.root + 0x64), m.u32(m.root + 0x60)
     world = []
     for i in range(count):
-        o = base + 0x60 * i
+        o = base + m.bone_size * i
         parent = m.u32(o)
         s = struct.unpack_from(">3f", m.blob, o + 0x34)
         t = struct.unpack_from(">3f", m.blob, o + 0x40)
@@ -221,13 +235,32 @@ def apply34(mtx, p):
     return [mtx[4 * i] * p[0] + mtx[4 * i + 1] * p[1] + mtx[4 * i + 2] * p[2] + mtx[4 * i + 3] for i in range(3)]
 
 
-def positions(m, skinned=False):
-    """Rigid positions (root +0x08) or skinned ones (root +0x10); both in model space, bind pose."""
-    (comp, frac) = fmt(m.u32(m.root + 4), m.blob[m.root + 7])
-    base, count = (m.p(m.root + 0x10), m.u32(m.root + 0x14)) if skinned else (m.p(m.root + 8), m.u32(m.root + 0xC))
+def array(m, at_fmt, at_base, count, comps):
+    (comp, frac) = m.fmt(at_fmt)
     code, size = COMP[comp]
     scale = 1 / (1 << frac)
-    return [[v * scale for v in struct.unpack_from(">3" + code, m.blob, base + 3 * size * i)] for i in range(count)]
+    base = m.p(m.root + at_base)
+    return [[v * scale for v in struct.unpack_from(f">{comps}{code}", m.blob, base + comps * size * i)]
+            for i in range(count)]
+
+
+def positions(m, skinned=False):
+    """Rigid positions (root +0x08) or skinned ones (root +0x10); both in model space, bind pose."""
+    return array(m, 4, 0x10 if skinned else 8, m.u32(m.root + (0x14 if skinned else 0xC)), 3)
+
+
+def normals(m, skinned=False):
+    """Rigid normals (root +0x1C) or skinned ones (+0x24, count +0x28)."""
+    return array(m, 0x18, 0x24 if skinned else 0x1C, m.u32(m.root + (0x28 if skinned else 0x20)), 3)
+
+
+def texcoords(m):
+    """Texture coordinates (root +0x30), as many as the display lists index (up to the next array)."""
+    base = m.p(m.root + 0x30)
+    later = [v for v in m.ptr.values() if v > base]
+    comp, _ = m.fmt(0x2C)
+    count = (min(later) - base) // (2 * COMP[comp][1]) if later else 0
+    return array(m, 0x2C, 0x30, count, 2)
 
 
 def rigid_triangles(m):

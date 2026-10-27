@@ -31,9 +31,10 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003CA40 | 684 | FUN_8003ca40 | v4 See-Through setting and pause-menu row |
 | 0x800757BC | 704 | FUN_800757bc | v5 zoom view camera |
 | 0x80093938 | 648 | FUN_80093938 | v6 yardage box (rounded, fitted to the number) |
-| 0x80040CE8 | 600 | FUN_80040ce8 | v7 Shy Guy's link record for the select screen (`--shyguy` only) |
+| 0x80040CE8 | 600 | FUN_80040ce8 | v7 Shy Guy's link record for the select screen, v9 his animation sound list (`--shyguy` only) |
+| 0x8003CDE4 | 540 | FUN_8003cde4 | v9 Shy Guy's power shot: sound, star burst, star colours (`--shyguy` only) |
 
-Still free (DEAD in `find_dead_code.py`): 0x8003CDE4 (540), 0x80053528 (476),
+Still free (DEAD in `find_dead_code.py`): 0x80053528 (476),
 0x80054EFC (424), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug
 patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
 0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
@@ -197,12 +198,49 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   `FUN_80421154` / `FUN_80423bbc`), [44] nice impact (state 6, inside the impact window), [46] chirp 0-7 (another
   player presses a button while the shooter lines up, `FUN_8041e438`). Koopa's ask for his set (0xCC-0xD6), which
   isn't loaded for golfer 16, so v8 keeps golfer 16's own four (0xAF, 0xB1, 0xBB-0xC2, 0xC3: its set, "neil").
+  These four slots are the only per-golfer voice events in every class; nobody has a voice for a bad shot (an
+  out-of-bounds shot only plays common sounds, 0x251 / 0x231 from `FUN_804c4b40`).
+- **Animation sounds:** method [18] returns (r3) the number of 8-byte entries and (*r4) a list of (u16 animation,
+  u16 frame, u16 sfx, u8 0, u8 volume); `FUN_8040bee4` plays an entry's sound when the golfer's current animation
+  (object +0x194) passes that frame. Animations 0-4 are the end-of-hole reactions, best to worst (a birdie is 1,
+  +5 is 4), carrying the golfer's own voice lines (Koopa: 0xCC-0xD6 in 0x804D8A90, 42 entries; golfer 16: one
+  long line per reaction, 0xB6-0xBA, in 0x804D95F4, 26 entries). Animation 5 (Koopa's runs about 6 seconds) plays
+  sounds from the golfer's special shot set (Koopa's "shnokonoko" 0x165-0x168, see Sound); a power shot doesn't
+  play it.
+  Shy Guy moves with Koopa's animations, so v9 gives golfer 16 a method in cave 9 returning Koopa's list with his
+  voice IDs in place of Koopa's (`shyguy.ANIM_SOUNDS`).
+- **Select screen call:** `FUN_8040b56c` plays one common-set sound per golfer when picked (0x26F Koopa ... by
+  character code), and on the extra page 0x270 for even link golfers (golfer 16), 0x271 for odd ones.
+- **Power shot effect:** shot type (setup +0x1CC; B steps through the types the shot allows, e.g. 1 Normal and 0
+  Power off the tee, 2 Approach near the green, while power shots last: player +0x5200 byte) 0 is a power shot.
+  At impact `FUN_804598c8` sets `_DAT_8050f1ac`: 2 when the launch speed is over `DAT_804def78` and setup +0x22D
+  is set (`FUN_80412f6c`: power within a step of the top and an impact error, setup +0x1AC copied to
+  `_DAT_80523cac`, under 2), 1 for the speed alone, else 0. Then by golfer code (`_DAT_8050f1b0`; link golfers
+  their record's +0x28, `FUN_80459128`, which also loads an effect model `C/O/C`-`G` for codes 1, 2, 3, 12, 13):
+  an impact sound from the common set at 2 only (jump table 0x804DF01C for codes 0-15: Mario 0x217, Koopa 0x21F;
+  over 15 none), and always a particle burst (jump table 0x804DF05C: codes 7, 8, 15 and over 15 the plain type-1
+  glow at 0x80459DD4; 0 and 6 128 stars at 0x8045AB94, type 0x14 for 0, 0x29 for any other); `FUN_8045bb30` adds
+  more at 2. Nothing else that reads the code tests for 15 or 16.
+- **Effect particles:** 0x400 of 0x3C at 0x8050F1B8 (+0 position, +0xC velocity, +0x28 spin, +0x30 type, -1 =
+  free, +0x34 age), handed out by `FUN_8045975c`; their textures are `C/N/W` (42, loaded by `FUN_80459254`).
+  `FUN_8045e8c0` draws types 1 (texture 0x19, an orange glow), 0x23 (0x28), 8 and 0x19 (0x11 tinted red), 0x11 and
+  0x12. `FUN_8045f6c4` (called by `FUN_8046108c`, which sets additive blending, `GXSetBlendMode` 1, 4, 1) draws
+  stars, types 0x14, 0x18, 0x28 and 0x29, with texture 0x13 (RGB565: red and green, no blue); colour = the texture
+  through TEV swap table 1 (`GXSetTevSwapModeTable` at 0x8045F9DC, r31 = the particle, r27 = its index: 0x14 R G B,
+  0x28 R R G, 0x29 G G R, 0x18 eight mixes by index), alpha = the texture's (255) x the fade.
+- **v9 Shy Guy's power shot** (cave 10, `build_mod.py`): his record's +0x28 is 16, his own code. The two switches'
+  `bgt` (codes over 15) go to the cave: at 2 he plays his "SsHit" line (0xBA, his voice set) and Mario's 0x217;
+  his burst is Mario's stars (so type 0x29). The star draw's swap call goes through the cave too: on golfer 16's
+  shots every star sets its blend first, and his stars come out white (R R R, additive) at odd indices and red
+  (R B B with the red channel as alpha, blended over with 1, 4, 5) at even ones: red added to the grass turns
+  orange.
 
 ## Sound
 
 - **MusyX** (Factor 5): main.dol's group table at 0x80137308, 37 entries of 0x14: name, first file ID, sfx count,
   first sfx ID, group ID. 0-15 the golfers by character code, 16 "neil" and 17 "ella" (Game Boy Advance golfers),
-  18 "menu", 19-36 "sh" + name (power shot sounds). `JVoiceLoad1` (`FUN_80012844`, group index) loads a group's
+  18 "menu", 19-36 "sh" + name (each golfer's special shot set, golfer 16's "shneil"; a power shot plays none of
+  them). `JVoiceLoad1` (`FUN_80012844`, group index) loads a group's
   four files, ID, ID + 2, +4, +6: pool, project, sample directory, sample data (e.g. Koopa Troopa "nokonoko"
   `C/V/V`-`Y`, golfer 16 "neil" `C/Y/Q`-`T`). A round loads each player's group by golfer code (golfer 16 -> 16).
   File ID = 2 x (676 a + 26 b + c) for path a/b/c (letters from 0), +1 for some.
@@ -211,9 +249,13 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   `voiceFXcall` `FUN_800120a8(group, id)` is another path (not used by the golfers' voices).
 - File formats and DSP ADPCM: `musyx.py`. Neil's set: 21 sounds 0xAF-0xC3, one macro and one sample each,
   22050 Hz.
-- Find what plays: `tools/debug_patch.py` `plays` (every ID asked of the three calls, `sfxlog.ps1 -Pairs -At
-  0x80057A14`), `sfx` (every ID MusyX starts), `voices`; Dolphin's `[DSP] DumpAudio = True` records the mix to
-  `Dump/Audio/*_dspdump.wav` for checking a sound by correlation.
+- The common set (`B/T/M`-`P`, sfx 0x19D-0x27F) is loaded everywhere: menus, select-screen calls, swing, ball,
+  crowd and result sounds.
+- Find what plays: `tools/debug_patch.py` `plays` (every ID asked of the three calls and who asked, `sfxlog.ps1
+  -Pairs -At 0x80057A14`), `sfx` (every ID MusyX starts), `voices`; Dolphin's `[DSP] DumpAudio = True` records the
+  mix to `Dump/Audio/*_dspdump.wav` for checking a sound by correlation. `tools/swing.ps1` swings on the meter's
+  own target (reads counter 0x80523CB8 and target 0x80523CBC), so hands-off tests can putt out;
+  `tools/power_swing.ps1` swings a power shot and lists the burst's particles as the ball leaves.
 - **Model format** (`model.py`): type-2 module; root (magic 0x0131A313) found through the code stub's HA16/LO16
   relocations at +20/+24. Meshes (0x3C): +6 texcoord sets, +7 textures, +8 texture entries (4 bytes: flag short,
   texture, material), +0x28 groups, +0x2C -> groups, +0x34 shader, +0x38 part (1 = body, 3..11 = clubs). Groups
@@ -241,6 +283,28 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   hands 2 units in front of his hips, inside Shy Guy's robe; the arms are moved onto Koopa's arm line. Golfer
   16's files grow by about 60 KB each (`C/W/B` 504 KB packed, Koopa's `C/V/S` 443 KB). The patch names Koopa's
   file as each one's `base` (`make_patch.py BASE`), so Koopa's data goes in as copies.
+
+## Mario Power Tennis (v9 Shy Guy's model)
+
+- **Disc:** GOME01, the maintainer's own (`mpt.Disc` reads .iso and .ciso). Also Camelot's: the same A/A/A file
+  names, LZSS types 1 and 2, relocatable modules and texture sets. The characters' names are in `default.dol`
+  (about 0x212F38: mario, luigi, peach, daisy, yoshi, wario, waluigi, donkey, koopa, didy, heiho, ...); their
+  models are `B/G/F` onwards in that order, so Shy Guy ("heiho") is `B/G/P` (132 bones, 26 meshes, 24 textures).
+  His voice set is `B/W/D`-`G`.
+- **Model format revision:** root magic 0x0131A5B5 (Toadstool Tour's 0x0131A313), the same root layout, but meshes
+  are 0x40 bytes and bones 0x6C, and the array format words lack the top bit (comp = (w >> 5) & 7, frac = w &
+  0x1F). Mesh +0x30 is the RGBA colour of untextured meshes. `model.py` reads both (`Model.mpt`).
+- **His arrays:** the rigid positions (+0x08) hold fewer entries than the count field says (1,136 of 2,450): read
+  up to the next array the module points at. Skinned groups index the skinned positions (+0x10) up to the last
+  skin block's end (root +0x54, blocks of 0x20, +0 = end; bone list at root +0x4C), past the count field. Entries
+  2,123-2,206 (his mouth) are zero in the file: the game fills them every frame from the face table at root +0x5C
+  (4 bytes, then positions in the same format), checked against a RAM dump.
+- **Meshes:** body 3-16 (mask, eyes, robe, belt, legs, hood, hem, shoes); the rest are his racket, a ball, and a
+  leaf skirt and feathers for his special shots. Mario Power Tennis draws his eye whites black; `mpt.py` sorts mesh
+  4 by position into eyes, blush and the inside of his mouth.
+- **The port** (`mpt.shy_guy`, `shyguy.rig_mpt`): one 256x256 atlas of his textures at their own size; legs and
+  shoes stay where they are on Koopa's leg bones, the arms move onto Koopa's arm line with the hand on Koopa's,
+  and the rest rides the pelvis, 90% size and set back 1.2 units like the OBJ was.
 
 ## Menus
 

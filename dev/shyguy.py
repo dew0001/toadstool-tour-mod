@@ -34,6 +34,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import camelot_lz as lz
 import model as mdl
+import mpt
 import musyx
 import textures as tx
 
@@ -53,29 +54,53 @@ GAME_BOY_TEX = 38                       # B/U/M: the Game Boy picture over each 
 # His voice: the voice set the game loads for golfer 16 (main.dol's MusyX group 16, "neil": pool, project, sample
 # directory, sample data), and the clip each of its sounds plays. Golfer 16's voice methods start 0xAF (swing),
 # 0xB1 (nice impact), 0xC3 (ball near the hole) and 0xBB-0xC2 (chirps 0-7, while someone else lines up a shot);
-# the rest are played elsewhere (by their lengths in Neil's set: short ones more shot shouts, 0xB6/0xB7 the 7-8 s
-# win and lose lines, 0xB8-0xBA 3-6 s lines). The clips are Shy Guy's Mario Power Tennis voice (named as the
-# Sounds Resource rip names them).
+# the other ten play from his animations (ANIM_SOUNDS) and his power shot. The clips are Shy Guy's Mario Power Tennis
+# voice (named as the Sounds Resource rip names them).
 VOICE_SET = ("C/Y/Q", "C/Y/R", "C/Y/S", "C/Y/T")
 VOICE = {0xAF: "Fore.wav",                 # swing
-         0xB0: "Serve.wav", 0xB1: "ForeBackSmash.wav",     # nice impact
-         0xB2: "ServeA.wav", 0xB3: "Back.wav", 0xB4: "Tobitsuki.wav", 0xB5: "ChrSel Swing.wav",
-         0xB6: "GameGet.wav", 0xB7: "GameLose.wav", 0xB8: "SsHit.wav", 0xB9: "SpSkill2.wav", 0xBA: "SpSkill1.wav",
+         0xB1: "ForeBackSmash.wav",        # nice impact
          0xBB: "Provoke.wav", 0xBC: "PointGetA.wav", 0xBD: "PointGetB.wav", 0xBE: "PointLoseA.wav",   # chirps 0-3
          0xBF: "PointLoseB.wav", 0xC0: "Damage1.wav", 0xC1: "Shine.wav", 0xC2: "Damage2.wav",          # chirps 4-7
-         0xC3: "ChrSel Ok.wav"}            # ball near the hole
+         0xC3: "ChrSel Ok.wav",            # ball near the hole
+         # reactions (end-of-hole animations) and animation 5, played from his animations (ANIM_SOUNDS)
+         0xB2: "PointGetB.wav",            # happy (Koopa's 0xD2: birdie and better, a few times over)
+         0xB3: "PointGetA.wav",            # triumphant (0xD5: end of the biggest celebration)
+         0xB4: "Tobitsuki.wav",            # effort grunt (0xCE: in good and bad reactions alike)
+         0xB5: "Back.wav",                 # short "hm" (0xCC: par)
+         0xB6: "PointLoseA.wav",           # sad (0xCD: double bogey and worse)
+         0xB7: "Damage1.wav",              # very sad (0xD6)
+         0xB8: "PointLoseB.wav",           # disappointed (0xD3: bogey)
+         0xB9: "SpSkill1 Rear.wav",        # animation 5 (Koopa's special shot set 0x167)
+         0xB0: "ServeB.wav",               # animation 5 (0x168)
+         0xBA: "SsHit.wav"}                # animation 5 (0x165), and his power shot's hit (build_mod.py cave 10)
 VOICE_RMS, VOICE_PEAK = 0.12, 0.95      # level of each clip (the game's own lines are about 0.1 RMS)
+# The select screen calls out each golfer from the common sound set (B/T/M-P, sfx 0x19D-0x27F, always loaded):
+# the 16 by character, the extra page's even golfers (golfer 16 = Shy Guy) 0x270, a boy's line, the odd ones 0x271.
+# His replaces the boy's sample where it is (the rest of the set is the game's own and stays as it is).
+COMMON_SET = ("B/T/M", "B/T/N", "B/T/O", "B/T/P")
+MENU_VOICE = {0x270: "ChrSel Ok.wav"}
+
+# Animation sounds: each golfer class's method 18 returns a list of 8-byte entries (animation, frame, sfx, 0,
+# volume) that FUN_8040bee4 plays as its animations pass those frames. Animations 0-4 are the end-of-hole
+# reactions (best to worst; a birdie is 1) and 5 the power shot. Shy Guy moves with Koopa's animations, so his list
+# is Koopa's (golf overlay 0x804D8A90, 42 entries) with Koopa's voice and power shot sounds, which aren't loaded
+# for golfer 16, turned into his (None drops the entry); the common sounds (footsteps and such) stay.
+KOOPA_ANIM_SOUNDS, KOOPA_ANIM_SOUND_COUNT = 0x804D8A90, 42
+ANIM_SOUNDS = {0xD2: 0xB2, 0xD5: 0xB3, 0xCE: 0xB4, 0xCC: 0xB5, 0xCD: 0xB6, 0xD6: 0xB7, 0xD3: 0xB8,
+               0x167: 0xB9, 0x168: 0xB0, 0x165: 0xBA, 0x166: None}
 
 # The link record the select screen hook writes (offset in the record -> word). Two golfers of 0x2C: +0x1A drive
 # (yards), +0x1C body (0 = golfer 16), +0x1F..+0x24 the six stats: height (-6..6), curve direction (0/1), curve
 # (0..6), impact, control, spin (the bars show value + 10 of 20; the 16 golfers run impact 0..4, control -5..4,
-# spin -6..6; the select screen's table at 0x80445B50), +0x28 the golfer code it borrows per-character effects
-# from in rounds (FUN_80459128; Koopa = 15); +0x268 the name (non-empty = the record is there).
-# Shy Guy: 205 yards, high (4), slight curve (1, 2), the narrowest impact (0), the best control (4), strong spin (5).
+# spin -6..6; the select screen's table at 0x80445B50), +0x28 the golfer code of its power shot effects in rounds
+# (FUN_80459128; Koopa = 15, Shy Guy his own 16: build_mod.py's cave 10); +0x268 the name (non-empty = the record
+# is there).
+# Shy Guy: 205 yards, high (4), slight curve (1, 2), the best control (4), strong spin (5), and to even that out an
+# impact window narrower than anyone's (-3): impact + control + spin = 6, the same as Koopa's at 200 yards.
 NAME = b"Shy Guy\x00"
 RECORD = {0x00: NAME[:4], 0x04: NAME[4:], 0x10: NAME[:4], 0x14: NAME[4:],
-          0x18: bytes([0, 0, 0, 205]), 0x1C: bytes([0, 0, 0, 4]), 0x20: bytes([1, 2, 0, 4]),
-          0x24: bytes([5, 0, 0, 0]), 0x28: bytes([15, 0, 0, 0]),
+          0x18: bytes([0, 0, 0, 205]), 0x1C: bytes([0, 0, 0, 4]), 0x20: bytes([1, 2, 0xFD, 4]),
+          0x24: bytes([5, 0, 0, 0]), 0x28: bytes([16, 0, 0, 0]),
           0x2C + 0x1C: bytes([1, 0, 0, 0]),                  # second golfer: body 1 (hidden by the hook)
           0x268: NAME[:4], 0x26C: NAME[4:]}
 
@@ -97,6 +122,15 @@ UPPER, FORE = 3.3, 3.9   # |x| on Koopa's arm line where upper arm -> forearm ->
 # everything but the shoes is made a little smaller and set back over the feet to let the mittens show.
 BODY_SCALE = 0.9
 BODY_BACK = 1.2
+
+# Mario Power Tennis' Shy Guy (mpt.py, --shyguy-mpt) comes with his own skeleton: each position's bone there picks
+# Koopa's. Arms (his bone -> 0 upper arm, 1 forearm, 2 wrist, 3 hand) move onto Koopa's arm line like the OBJ's, his
+# hand on Koopa's; legs and shoes (-> 0 hip, 1 knee, 2 ankle, 3 ball of the foot) stay where they are on Koopa's leg
+# bones; the rest (hood, mask, robe, belt, his shoulders 14/21) rides the pelvis, scaled and set back as above.
+MPT_ARM = {14: 0, 15: 0, 16: 1, 17: 2, 18: 3, 19: 3, 20: 3, 21: 0, 22: 0, 23: 1, 24: 2, 25: 3, 26: 3}
+MPT_LEG = {45: 0, 46: 0, 47: 1, 48: 2, 49: 3, 50: 3, 53: 0, 54: 0, 55: 1, 56: 2, 57: 3, 58: 3}
+MPT_ELBOW, MPT_WRIST, MPT_HAND = {1: 16, -1: 23}, {1: 17, -1: 24}, {1: 18, -1: 25}
+MPT_ARM_ROOT = 2.4    # |x| (after BODY_SCALE) where his sleeves leave the robe
 
 
 def u32(b, o):
@@ -235,6 +269,31 @@ def rig(pos, tris, joints):
         pos[arm] += w[:, None] * shift
         ax = side * pos[arm, 0]
         bone[arm] = np.where(ax < UPPER, upper, np.where(ax < FORE, fore, wrist))
+    return pos, bone
+
+
+def rig_mpt(model, joints):
+    """Fit Mario Power Tennis' Shy Guy (mpt.shy_guy) to Koopa's skeleton: (new positions, C/V/S bone of each).
+    joints: C/V/S bone -> bind-pose position (see rig)."""
+    pos, theirs, their_joints = model["pos"].copy(), model["bone"], model["joints"]
+    bone = np.full(len(pos), PELVIS)
+    side = np.where(their_joints[theirs][:, 0] >= 0, 1, -1)
+    leg = np.array([b in MPT_LEG for b in theirs])
+    arm = np.array([b in MPT_ARM for b in theirs])
+    for k in np.nonzero(leg)[0]:
+        bone[k] = LEG[side[k]][MPT_LEG[theirs[k]]]
+    pos[~leg] *= BODY_SCALE
+    pos[~leg, 2] -= BODY_BACK
+    moved = lambda j: j * BODY_SCALE - np.array([0, 0, BODY_BACK])
+    for s in (-1, 1):
+        sel = np.nonzero(arm & (side == s))[0]
+        upper, fore, wrist, middle = ARM[s]
+        shift = np.array(joints[middle]) - moved(their_joints[MPT_HAND[s]])
+        w = smoothstep((s * pos[sel, 0] - MPT_ARM_ROOT) / ARM_RAMP)
+        pos[sel] += w[:, None] * shift
+        elbow, wrist_x = (s * (moved(their_joints[j[s]])[0] + shift[0]) for j in (MPT_ELBOW, MPT_WRIST))
+        ax = s * pos[sel, 0]
+        bone[sel] = np.where(ax < elbow, upper, np.where(ax < wrist_x, fore, wrist))
     return pos, bone
 
 
@@ -780,27 +839,61 @@ def voice(clean_files, source):
         raise SystemExit(f"Shy Guy: the voice set's sounds are {sorted(map(hex, sample_of))}, not VOICE's")
     rates = {sid: rate for _, sid, _, rate, _, _ in musyx.sdir_entries(sdir)}
     clip = clip_reader(source)
-    sounds = {}
-    for sfx, name in VOICE.items():
-        pcm, rate = musyx.read_wav(clip(name))
-        sid = sample_of[sfx]
-        x = musyx.resample(pcm, rate, rates[sid])
-        gain = min(VOICE_RMS / max(np.sqrt((x * x).mean()), 1e-6), VOICE_PEAK / max(np.abs(x).max(), 1e-6))
-        sounds[sid] = np.clip(np.round(x * gain * 32767), -32768, 32767).astype(np.int64)
+    sounds = {sample_of[sfx]: clip_pcm(clip, name, rates[sample_of[sfx]]) for sfx, name in VOICE.items()}
     new_sdir, samp = musyx.rebuild(sdir, sounds)
     print(f"Shy Guy: voice {len(VOICE)} clips -> {VOICE_SET[2]}, {VOICE_SET[3]} ({len(samp):,} bytes of ADPCM)")
-    return {VOICE_SET[2]: new_sdir, VOICE_SET[3]: samp}
+    out = {VOICE_SET[2]: new_sdir, VOICE_SET[3]: samp}
+    # his call on the select screen
+    pool, proj, sdir, samp = (read(rel) for rel in COMMON_SET)
+    sample_of = musyx.sfx_samples(pool, proj)
+    rates = {sid: rate for _, sid, _, rate, _, _ in musyx.sdir_entries(sdir)}
+    for sfx, name in MENU_VOICE.items():
+        sid = sample_of[sfx]
+        sdir, samp = musyx.replace_in_place(sdir, samp, sid, clip_pcm(clip, name, rates[sid]))
+    out[COMMON_SET[2]], out[COMMON_SET[3]] = sdir, samp
+    print(f"Shy Guy: select screen call -> {COMMON_SET[2]}, {COMMON_SET[3]} (sound 0x270 in place)")
+    return out
+
+
+def anim_sound_table(golf):
+    """His animation sound list (bytes) from the decoded golf overlay: Koopa's with ANIM_SOUNDS applied."""
+    at = KOOPA_ANIM_SOUNDS - 0x80400000
+    out = b""
+    for k in range(KOOPA_ANIM_SOUND_COUNT):
+        anim, frame, sfx, pad, vol = struct.unpack_from(">HHHBB", golf, at + 8 * k)
+        if 0xCC <= sfx <= 0xD6 or 0x165 <= sfx <= 0x169:   # Koopa's voice set and power shot sounds
+            if sfx not in ANIM_SOUNDS:
+                raise SystemExit(f"Shy Guy: Koopa's animation {anim} plays 0x{sfx:X}, which ANIM_SOUNDS doesn't map")
+            sfx = ANIM_SOUNDS[sfx]
+            if sfx is None:
+                continue
+        out += struct.pack(">HHHBB", anim, frame, sfx, pad, vol)
+    return out
+
+
+def clip_pcm(clip, name, rate):
+    """A clip at the sample rate and VOICE_RMS loudness (peaks under VOICE_PEAK), as int16 values."""
+    pcm, src = musyx.read_wav(clip(name))
+    x = musyx.resample(pcm, src, rate)
+    gain = min(VOICE_RMS / max(np.sqrt((x * x).mean()), 1e-6), VOICE_PEAK / max(np.abs(x).max(), 1e-6))
+    return np.clip(np.round(x * gain * 32767), -32768, 32767).astype(np.int64)
 
 
 # ---------------------------------------------------------------- build
 
-def build(clean_files, folder, voice_clips=None):
+def build(clean_files, folder, voice_clips=None, mpt_disc=None):
     """{disc path: new file} for golfer 16's models, texture bank and pictures (built from Koopa's), and its voice
-    set when voice_clips names the clips."""
+    set when voice_clips names the clips. With mpt_disc (a Mario Power Tennis disc) his model is Mario Power
+    Tennis' Shy Guy instead of the OBJ in folder."""
     read = lambda rel: open(os.path.join(clean_files, *rel.split("/")), "rb").read()
-    obj_pos, uv, nrm, tris = load_obj(os.path.join(folder, OBJ))
+    if mpt_disc:
+        theirs = mpt.shy_guy(mpt_disc)
+        obj_pos, uv, nrm, tris, full = (theirs[k] for k in ("pos", "uv", "nrm", "tris", "image"))
+        print(f"Shy Guy: Mario Power Tennis {mpt.MODEL}, {len(obj_pos)} positions, {len(tris)} triangles")
+    else:
+        obj_pos, uv, nrm, tris = load_obj(os.path.join(folder, OBJ))
+        full = albedo(folder, uv, tris)
     ref = mdl.Model(read(SOURCES[GOLFER_MODEL]))
-    full = albedo(folder, uv, tris)
     tex = texture(full, 256, 9)
 
     out = {}
@@ -817,7 +910,8 @@ def build(clean_files, folder, voice_clips=None):
             raise SystemExit(f"Shy Guy: {SOURCES[rel]} uses the start of the bank for more than its body")
         bones = bone_map(ref, m)
         world = bind_positions(m)
-        pos, bone = rig(obj_pos, tris, {b: world[t] for b, t in bones.items()})
+        joints = {b: world[t] for b, t in bones.items()}
+        pos, bone = rig_mpt(theirs, joints) if mpt_disc else rig(obj_pos, tris, joints)
         missing = sorted(set(int(b) for b in bone) - set(bones))
         if missing:
             raise SystemExit(f"Shy Guy: {SOURCES[rel]} has no bones matching C/V/S {missing}")

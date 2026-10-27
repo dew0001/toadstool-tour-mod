@@ -19,7 +19,7 @@ for ($i = 0; $i -lt $n; $i++) {
 	if ($Pairs) {
 		$id = [GCMem]::U32($log + 4 + 8 * $i); $asked = [GCMem]::U32($log + 8 + 8 * $i)
 		$g = $groups | Where-Object { $id -ge $_.First -and $id -lt $_.First + $_.Count } | Select-Object -First 1
-		'{0,3} 0x{1:X3} asked of {2} {3}' -f $i, $id, $(if ($asked -lt 37) { "$asked ($($groups[$asked].Name))" } else { $asked }), $(if ($g) { "= $($g.Name) +$($id - $g.First)" } else { '' })
+		'{0,3} 0x{1:X3} asked {2} {3}' -f $i, $id, $(if ($asked -lt 37) { "of $asked ($($groups[$asked].Name))" } else { 'from 0x{0:X8}' -f $asked }), $(if ($g) { "= $($g.Name) +$($id - $g.First)" } else { '' })
 		continue
 	}
 	$id = [GCMem]::U32($log + 4 + 4 * $i)

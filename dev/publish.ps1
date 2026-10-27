@@ -7,6 +7,8 @@
 #     -CleanDisc <extracted clean disc dir> -BuildDir <scratch dir> [-ReferenceIso <path>] [-SkipBuild]
 #     [-ShyGuy <folder with Shy Guy.obj and heyho_body_alb.png; default: assets\shy-guy next to the repo>]
 #     [-ShyGuyVoice <zip of his WAV clips; default: assets\shy-guy\mario-power-tennis-shy-guy-voice.zip>]
+#     [-ShyGuyMpt <Mario Power Tennis disc for his model; default: gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso
+#      two folders above the repo; '' builds him from the OBJ in -ShyGuy instead>]
 param(
 	[Parameter(Mandatory)] [int] $Version,
 	[Parameter(Mandatory)] [string] $CleanGame,
@@ -16,7 +18,8 @@ param(
 	[string] $DolphinExe,
 	[switch] $SkipBuild,
 	[string] $ShyGuy = (Join-Path $PSScriptRoot '..\..\assets\shy-guy'),
-	[string] $ShyGuyVoice = (Join-Path $PSScriptRoot '..\..\assets\shy-guy\mario-power-tennis-shy-guy-voice.zip')
+	[string] $ShyGuyVoice = (Join-Path $PSScriptRoot '..\..\assets\shy-guy\mario-power-tennis-shy-guy-voice.zip'),
+	[string] $ShyGuyMpt = (Join-Path $PSScriptRoot '..\..\..\gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso')
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -28,10 +31,15 @@ $patchPath = Join-Path $repo $patchRel
 if (-not $SkipBuild) {
 	robocopy $CleanDisc $BuildDir /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 	if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
-	if (-not (Test-Path (Join-Path $ShyGuy 'Shy Guy.obj'))) { throw "Shy Guy's model isn't in $ShyGuy" }
+	$mpt = @()
+	if ($ShyGuyMpt) {
+		if (-not (Test-Path $ShyGuyMpt)) { throw "No Mario Power Tennis disc at $ShyGuyMpt (pass -ShyGuyMpt '' for the OBJ)" }
+		$mpt = @('--shyguy-mpt', (Resolve-Path $ShyGuyMpt).Path)
+	}
+	elseif (-not (Test-Path (Join-Path $ShyGuy 'Shy Guy.obj'))) { throw "Shy Guy's model isn't in $ShyGuy" }
 	if (-not (Test-Path $ShyGuyVoice)) { throw "Shy Guy's voice clips aren't at $ShyGuyVoice" }
 	python -I (Join-Path $PSScriptRoot 'build_mod.py') $CleanDisc $BuildDir --version $Version --shyguy (Resolve-Path $ShyGuy).Path `
-		--shyguy-voice (Resolve-Path $ShyGuyVoice).Path
+		--shyguy-voice (Resolve-Path $ShyGuyVoice).Path @mpt
 	if ($LASTEXITCODE) { throw 'build_mod.py failed' }
 	python -I (Join-Path $PSScriptRoot 'make_patch.py') $CleanDisc $BuildDir $patchPath $Version
 	if ($LASTEXITCODE) { throw 'make_patch.py failed' }

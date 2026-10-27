@@ -191,3 +191,20 @@ def rebuild(sdir, sounds):
         samp += data
     samp += bytes((-len(samp)) % 32)
     return bytes(sdir), bytes(samp)
+
+
+def replace_in_place(sdir, samp, sid, pcm):
+    """(sdir, samp) with one sample re-encoded where it is, so nothing else moves. Its new frames must fit before
+    the next sample's data."""
+    sdir, samp = bytearray(sdir), bytearray(samp)
+    entries = sdir_entries(sdir)
+    at, _, off, _, _, block = next(e for e in entries if e[1] == sid)
+    room = min([e[2] for e in entries if e[2] > off] + [len(samp)]) - off
+    data, coefs = encode(pcm)
+    if len(data) > room:
+        raise ValueError(f"sample 0x{sid:X}: {len(data)} bytes, room for {room}")
+    samp[off:off + len(data)] = data
+    struct.pack_into(">I", sdir, at + 0x10, len(pcm))
+    struct.pack_into(">II", sdir, at + 0x14, 0, 0)
+    struct.pack_into(">HBBHH16h", sdir, block, 8, data[0], 0, 0, 0, *(int(c) for c in coefs))
+    return bytes(sdir), bytes(samp)

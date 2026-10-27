@@ -2,6 +2,7 @@
 
 Usage: python -I build_mod.py <clean disc dir> <build dir> [--version N] [--no-unlock] [--no-aspect-write] [--keep-id]
                               [--shyguy <folder with Shy Guy.obj and its texture>] [--shyguy-voice <zip of WAV clips>]
+                              [--shyguy-mpt <Mario Power Tennis disc: his model from there instead of the OBJ>]
 The build dir must already hold a copy of the clean tree (robocopy); this script only rewrites
 the files it changes, reading every original from <clean disc dir>.
 
@@ -56,7 +57,15 @@ Changes (v8, with --shyguy and --shyguy-voice):
     its own voice methods (VOICE_METHODS), whose voice set gets his clips (swing, nice impact, near the hole, 8
     chirps); the extra page's label says "More" and has no Game Boy pictures.
 
-Patch code lives over dead functions (cave 1-6 below; checked with find_dead_code.py). Low memory at
+Changes (v9, with --shyguy and --shyguy-voice):
+  - Shy Guy's impact window down to -3 (narrower than anyone's) to even out his stats; his own call on the select
+    screen (the extra page's even golfers' line in the common sound set); his own reaction and power shot sounds:
+    golfer 16's animation sound list (method 18, ANIM_SOUNDS_METHOD) is Koopa's with his lines in place of
+    Koopa's, in cave 9.
+  - His own power shot (cave 10): golfer code 16 of his own, with a burst of red and white stars.
+  - With --shyguy-mpt, his model from Mario Power Tennis (shyguy.py, mpt.py).
+
+Patch code lives over dead functions (caves 1-10 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
@@ -92,6 +101,7 @@ BANNER_TITLE = f"Mario Golf: Toadstool Tour (Mod v{VERSION})".encode("ascii")
 
 SHYGUY = sys.argv[sys.argv.index("--shyguy") + 1] if "--shyguy" in sys.argv else None
 SHYGUY_VOICE = sys.argv[sys.argv.index("--shyguy-voice") + 1] if "--shyguy-voice" in sys.argv else None
+SHYGUY_MPT = sys.argv[sys.argv.index("--shyguy-mpt") + 1] if "--shyguy-mpt" in sys.argv else None
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
 
@@ -323,14 +333,117 @@ GOLFER16_VTABLE = 0x804CC948
 KOOPA_VTABLE = 0x804CA3C8
 VTABLE_METHODS = 47
 FILE_METHODS = {22: 0x804CCABC, 23: 0x804CCAB0, 24: 0x804CCAC8}   # golfer 16's: C/W/B, C/W/A, C/W/E
+ANIM_SOUNDS_METHOD = 18   # returns the animation sound list: his own, in cave 9 (shyguy.anim_sound_table)
 VOICE_METHODS = {42: 0x804C7C00,   # ball near the hole (sfx 0xC3)
                  43: 0x804C7AE4,   # swing (0xAF)
                  44: 0x804C7AA8,   # nice impact (0xB1)
                  46: 0x804C7B34}   # chirp 0-7 while someone else lines up (0xBB-0xC2)
 
 
-def cave9_code(record):
-    """Assemble the select screen's link record for Shy Guy. record: offset -> 4 bytes. Returns (bytes, labels)."""
+# ---- v9: Shy Guy's own power shot (cave 10; only with --shyguy)
+# FUN_804598c8 starts a power shot's effects by golfer code (GOLFER_CODE; for link golfers their record's +0x28):
+# an impact sound from the common set (a jump table for codes 0-15; Koopa 15 0x21F) and a particle burst (another
+# jump table; Koopa 15 shares the plain type-1 glow with 7 and 8). Shy Guy's record gives him a code of his own,
+# 16, which nothing else that reads the code tests for. Cave 10 gives 16 his Mario Power Tennis special shot line
+# (POWER_VOICE, from his own voice set) with the impact sound, and Mario's star burst (case 0: 128
+# stars, type STAR_TYPE for every code but Mario's), and while the shot is golfer 16's, the star draw
+# (FUN_8045f6c4) makes those stars white and red by turns. It draws stars (texture 0x13 of C/N/W: RGB565, red and
+# green, no blue) additively, colour = the texture through TEV swap table 1, alpha = its alpha (255) x the fade:
+# white is the red channel in all three (R R R), still additive; red (R B B) would turn orange over the grass, so
+# red stars blend over what's behind them (GXSetBlendMode 1, 4, 5) with the red channel as their alpha.
+CAVE10 = 0x8003CDE4         # dead FUN_8003cde4 (find_dead_code.py: DEAD)
+CAVE10_SIZE = 540
+CAVE10_FIRST = 0x7C0802A6
+GOLFER_CODE = 0x8050F1B0    # golf: golfer code of this shot's effects (FUN_80459128)
+SHYGUY_CODE = 16
+POWER_SOUND_HOOK = 0x80459D28   # bgt (code > 15: no sound), right after cmplwi r0,15
+POWER_SOUND_WORD = 0x41810080
+POWER_SOUND_TABLE = 0x80459D2C  # 0-15: the sound jump table
+POWER_SOUND_PLAY = 0x80459DA4   # bl FUN_80011b88 (r3 sfx, r4 volume)
+POWER_SOUND_SKIP = 0x80459DA8
+POWER_SOUND = 0x217             # Mario's, which comes with his stars
+POWER_VOICE = 0xBA              # shyguy.VOICE: "SsHit"
+SOUND_PLAY = 0x80011B88
+POWER_BURST_HOOK = 0x80459DB4   # bgt (code > 15: the plain glow), right after cmplwi r0,15
+POWER_BURST_WORD = 0x41810020
+POWER_BURST_TABLE = 0x80459DB8  # 0-15: the burst jump table (POWER_BURST_JUMPS, offsets from its start)
+POWER_BURST_JUMPS = 0x804DF05C
+POWER_BURST_GLOW = 0x80459DD4
+POWER_BURST_STARS = 0x8045AB94  # case 0 (Mario) and 6
+STAR_SWAP_HOOK = 0x8045F9DC     # bl GXSetTevSwapModeTable(1, r, g, b, 3); r31 = the particle, r27 = its index
+GX_SET_SWAP = 0x8006DA8C
+BLEND_ADD, BLEND_OVER = 1, 5    # GXSetBlendMode(1 blend, 4 source alpha, this, 0xF): the star draw's caller sets 1
+PARTICLE_TYPE = 0x30
+STAR_TYPE = 0x29
+
+
+def cave10_code():
+    """Assemble Shy Guy's power shot hooks. Returns (bytes, labels)."""
+    a = ppc.Asm(CAVE10)
+    # Replaces the sound switch's `bgt` (cr0 = the code against 15): 0-15 as before, 16 plays POWER_VOICE and
+    # POWER_SOUND (the switch's own call; FUN_804598c8 has saved its LR and keeps nothing in volatile registers
+    # across that call, so the extra one is safe).
+    a.label("power_sound")
+    a.br("bgt", "sound_over")
+    a.b(POWER_SOUND_TABLE)
+    a.label("sound_over")
+    a(ppc.cmpwi(0, SHYGUY_CODE))
+    a.br("beq", "sound_own")
+    a.b(POWER_SOUND_SKIP)
+    a.label("sound_own")
+    a(ppc.li(3, POWER_VOICE), ppc.li(4, 0xFF))
+    a.bl(SOUND_PLAY)
+    a(ppc.li(3, POWER_SOUND), ppc.li(4, 0xFF))
+    a.b(POWER_SOUND_PLAY)
+    # Replaces the burst switch's `bgt`: 0-15 as before, 16 Mario's stars, the rest the plain glow.
+    a.label("power_burst")
+    a.br("bgt", "burst_over")
+    a.b(POWER_BURST_TABLE)
+    a.label("burst_over")
+    a(ppc.cmpwi(0, SHYGUY_CODE))
+    a.br("beq", "burst_own")
+    a.b(POWER_BURST_GLOW)
+    a.label("burst_own")
+    a.b(POWER_BURST_STARS)
+    # Replaces the star draw's swap table call (r3 = 1, r4-r7 the channels red, green, blue and alpha come from):
+    # other golfers' shots go straight on to it. On golfer 16's every star sets its blend first (stars of other
+    # types additive, as the caller set it), then his stars swap white (R R R, additive) at odd indices and red
+    # (R B B, alpha R, blended over) at even ones.
+    a.label("star_swap")
+    hi, lo = ppc.hi_lo(GOLFER_CODE)
+    a(ppc.lis(9, hi), ppc.lwz(0, lo, 9), ppc.cmpwi(0, SHYGUY_CODE))
+    a.br("bne", "swap_go")
+    a(ppc.stwu(1, -0x20, 1), ppc.mflr(0), ppc.stw(0, 0x24, 1),
+      ppc.stw(4, 0x08, 1), ppc.stw(5, 0x0C, 1), ppc.stw(6, 0x10, 1), ppc.stw(7, 0x14, 1),
+      ppc.lwz(0, PARTICLE_TYPE, 31), ppc.cmpwi(0, STAR_TYPE), ppc.li(5, BLEND_ADD))
+    a.br("bne", "star_blend")
+    a(ppc.andi_(0, 27, 1))
+    a.br("bne", "star_blend")
+    a(ppc.li(5, BLEND_OVER))
+    a.label("star_blend")
+    a(ppc.li(3, 1), ppc.li(4, 4), ppc.li(6, 0xF))
+    a.bl(GX_SET_BLEND)
+    a(ppc.lwz(4, 0x08, 1), ppc.lwz(5, 0x0C, 1), ppc.lwz(6, 0x10, 1), ppc.lwz(7, 0x14, 1),
+      ppc.lwz(0, PARTICLE_TYPE, 31), ppc.cmpwi(0, STAR_TYPE))
+    a.br("bne", "star_swap_call")
+    a(ppc.andi_(0, 27, 1), ppc.li(4, 0), ppc.li(5, 0), ppc.li(6, 0))
+    a.br("bne", "star_swap_call")
+    a(ppc.li(5, 2), ppc.li(6, 2), ppc.li(7, 0))
+    a.label("star_swap_call")
+    a(ppc.li(3, 1))
+    a.bl(GX_SET_SWAP)
+    a(ppc.lwz(0, 0x24, 1), ppc.mtlr(0), ppc.addi(1, 1, 0x20), 0x4E800020)   # blr
+    a.label("swap_go")
+    a.b(GX_SET_SWAP)
+    code = a.assemble()
+    if len(code) > CAVE10_SIZE:
+        raise SystemExit(f"cave 10 code is {len(code)} bytes; only {CAVE10_SIZE} fit")
+    return code, a.labels
+
+
+def cave9_code(record, anim_sounds):
+    """Assemble the select screen's link record for Shy Guy (record: offset -> 4 bytes) and golfer 16's animation
+    sound list method. Returns (bytes, labels)."""
     a = ppc.Asm(CAVE9)
     # Replaces the `bl FUN_80410000` before the fill loop: record 0 is cleared and becomes golfer 16's, then on to
     # FUN_80410000 (r3-r10 untouched, so its arguments pass through).
@@ -350,6 +463,12 @@ def cave9_code(record):
     hi, lo = ppc.hi_lo(LINK_GOLFERS + 4)
     a(ppc.li(0, -1), ppc.lis(12, hi), ppc.stw(0, lo, 12))
     a.b(GBA_DONE_TARGET)
+    # Golfer 16's method 18: *r4 = his animation sound list, r3 = its length.
+    a.label("anim_sounds")
+    a.la(9, "anim_table")
+    a(ppc.li(3, len(anim_sounds) // 8), ppc.stw(9, 0, 4), 0x4E800020)   # blr
+    a.label("anim_table")
+    a(*struct.unpack(f">{len(anim_sounds) // 4}I", anim_sounds))
     code = a.assemble()
     if len(code) > CAVE9_SIZE:
         raise SystemExit(f"cave 9 code is {len(code)} bytes; only {CAVE9_SIZE} fit")
@@ -1263,7 +1382,8 @@ def check_matrix_site(buf, base, hook):
         raise SystemExit(f"0x{hook:08X}: no GXSetProjection call right after the hook")
 
 
-def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None):
+def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None,
+              cave10=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1271,7 +1391,8 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
 
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
                               (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
-                              (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9)):
+                              (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9),
+                              (CAVE10, CAVE10_FIRST, cave10)):
         if code is None:
             continue
         if word(data, base, addr) != first:  # still the original (dead) function
@@ -1346,8 +1467,17 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None):
                 own = FILE_METHODS.get(k, VOICE_METHODS.get(k))
                 if own is not None and old != own:
                     raise SystemExit(f"golfer 16's vtable entry {k} isn't the method this build keeps")
-                if own is None:
+                if k == ANIM_SOUNDS_METHOD:
+                    put(buf, OVERLAY_BASE, GOLFER16_VTABLE + 4 * k, v9["anim_sounds"], old)
+                elif own is None:
                     put(buf, OVERLAY_BASE, GOLFER16_VTABLE + 4 * k, koopa, old)
+            stars = POWER_BURST_JUMPS + struct.unpack(">i", buf[POWER_BURST_JUMPS - OVERLAY_BASE:][:4])[0]
+            if stars != POWER_BURST_STARS:
+                raise SystemExit(f"power shot burst case 0 is at 0x{stars:08X}, not 0x{POWER_BURST_STARS:08X}")
+            put(buf, OVERLAY_BASE, POWER_SOUND_HOOK, ppc.b(POWER_SOUND_HOOK, v9["power_sound"]), POWER_SOUND_WORD)
+            put(buf, OVERLAY_BASE, POWER_BURST_HOOK, ppc.b(POWER_BURST_HOOK, v9["power_burst"]), POWER_BURST_WORD)
+            put(buf, OVERLAY_BASE, STAR_SWAP_HOOK, ppc.bl(STAR_SWAP_HOOK, v9["star_swap"]),
+                ppc.bl(STAR_SWAP_HOOK, GX_SET_SWAP))
     if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record
         put(buf, OVERLAY_BASE, GBA_FILL_HOOK, ppc.bl(GBA_FILL_HOOK, v9["link_record"]),
             ppc.bl(GBA_FILL_HOOK, GBA_FILL_TARGET))
@@ -1379,7 +1509,8 @@ def patch_ids(clean_sys, build_sys, clean_files, build_files):
 
 def main():
     args = [a for i, a in enumerate(sys.argv[1:], 1)
-            if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy", "--shyguy-voice")]
+            if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy", "--shyguy-voice",
+                                                                    "--shyguy-mpt")]
     clean, build = args[:2]
     ppc.selftest()
     proj_sites = projection_call_sites(clean)
@@ -1404,20 +1535,25 @@ def main():
           f" pause menu row 0x{v6['ghost_menu']:08X})")
     print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
     print(f"cave 8: {len(cave8)} of {CAVE8_SIZE} bytes at 0x{CAVE8:08X} (yardage box 0x{v8['box_text']:08X})")
-    cave9 = v9 = None
+    cave9 = v9 = cave10 = None
     if SHYGUY:
         import shyguy
-        cave9, v9 = cave9_code(shyguy.RECORD)
+        golf = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
+        cave9, v9 = cave9_code(shyguy.RECORD, shyguy.anim_sound_table(golf))
         print(f"cave 9: {len(cave9)} of {CAVE9_SIZE} bytes at 0x{CAVE9:08X} (Shy Guy's link record"
               f" 0x{v9['link_record']:08X})")
+        cave10, v10 = cave10_code()
+        v9.update(v10)
+        print(f"cave 10: {len(cave10)} of {CAVE10_SIZE} bytes at 0x{CAVE10:08X} (Shy Guy's power shot"
+              f" 0x{v10['power_burst']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10)
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9)
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
               os.path.join(clean, "files"), os.path.join(build, "files"))
     if SHYGUY:
-        for rel, data in shyguy.build(os.path.join(clean, "files"), SHYGUY, SHYGUY_VOICE).items():
+        for rel, data in shyguy.build(os.path.join(clean, "files"), SHYGUY, SHYGUY_VOICE, SHYGUY_MPT).items():
             open(os.path.join(build, "files", *rel.split("/")), "wb").write(data)
 
 

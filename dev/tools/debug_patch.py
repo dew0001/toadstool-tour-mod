@@ -13,9 +13,9 @@
             Uses the messages log's cave.
   voices:   log every distinct (sfx ID, voice group) asked of voiceFXcall FUN_800120a8 (r3 = group, r4 = ID), even
             when the group isn't loaded and nothing plays. Read with sfxlog.ps1 -Pairs. Uses the messages log's cave.
-  plays:    log every distinct (sfx ID, entry) asked of the game's sound calls FUN_80011b88 (entry 0), the positional
-            FUN_80011c40 (1) and FUN_80011d74 (2), which drop voice IDs of groups that aren't loaded. r3 = ID in all
-            three. Read with sfxlog.ps1 -Pairs -At 0x80057A14. Uses the files log's cave.
+  plays:    log every distinct (sfx ID, caller) asked of the game's sound calls FUN_80011b88, the positional
+            FUN_80011c40 and FUN_80011d74, which drop voice IDs of groups that aren't loaded. r3 = ID in all three;
+            the caller is the return address. Read with sfxlog.ps1 -Pairs -At 0x80057A14. Uses the files log's cave.
 
 Both chain to whatever the build already hooked there, so the mod still works.
 
@@ -152,7 +152,7 @@ elif kind == "plays":
     for k, site in enumerate(SOUND_CALLS):
         a.label(f"log{k}")
         a.la(11, "count")
-        a(ppc.lwz(10, 0, 11), ppc.addi(9, 11, 4), ppc.li(8, 0), ppc.li(12, k))
+        a(ppc.lwz(10, 0, 11), ppc.addi(9, 11, 4), ppc.li(8, 0), ppc.mflr(12))
         a.label(f"loop{k}")
         a(ppc.cmpw(8, 10))
         a.br("bge", f"add{k}")
