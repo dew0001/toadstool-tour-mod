@@ -33,11 +33,13 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x80093938 | 648 | FUN_80093938 | v6 yardage box (rounded, fitted to the number) |
 | 0x80040CE8 | 600 | FUN_80040ce8 | v7 Shy Guy's link record for the select screen, v9 his animation sound list (`--shyguy` only) |
 | 0x8003CDE4 | 540 | FUN_8003cde4 | v9 Shy Guy's power shot: sound, star burst, star colours (`--shyguy` only) |
+| 0x80069F4C | 560 | FUN_80069f4c | v11 8th course: hole info, file IDs, golf lookup and resolver stubs (`--course8` only) |
+| 0x8006A834 | 464 | FUN_8006a834 | v11 8th course: the course select list (8 entries) and the menu lookup stubs |
+| 0x80084B2C | 464 | FUN_80084b2c | v11 8th course: list append, music, sky, name, hole-in-one guard |
 
 Still free (DEAD in `find_dead_code.py`): 0x80053528 (476),
 0x80054EFC (424), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug
-patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
-0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
+patch), 0x80090438 (404), 0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
 
 ## Gotchas
 
@@ -323,6 +325,59 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   except the flare where they meet the robe (|x| under `MPT_SLEEVE`, 2.5 units tall), which rides the pelvis: on
   Koopa's upper arm it swung far out through the body in the swing; the rest rides the pelvis, 90% size and set
   back 1.2 units like the OBJ was.
+
+## Courses (v11 8th course)
+
+Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus, saves, text), `holedata.md`
+(the hole table and the camera, ring and coin files), `collision.md` (the collision file and surface codes).
+
+- **Course codes:** 1-7 the seven courses, 8 and 9 cut 3-hole sets no menu reaches, 10 the practice holes. The
+  menu's course index is code - 1; the code goes to the round through the setup block (main.dol 0x80176079).
+  v11 makes the new course code 8.
+- **Hole info** (par, yards, back-tee yards, course, hole number, Ring Attack group; 141 x 12 bytes): golf
+  0x804CCD60, an identical copy in the menu at 0x80444E60. `FUN_80406f90(id)` finds an entry by hole ID,
+  `FUN_80407048(course, hole0)` gives the hole ID (the hole order); the menu's copies are `FUN_8040094c` and
+  `FUN_80400a04`. Neither table can grow, so v11 keeps its 18 entries (IDs 1101-1118) in cave 11 and hooks the
+  four lookups' first instruction.
+- **Hole files:** golf 0x804DCF18, 9 rows x 18 x 0x20: +0 model, +4 collision, +8 texture bank (unused),
+  +C flyover camera, +10 Ring Attack rings, +14 Coin Attack coins, +18 hole ID, +1C debug name. The resolver
+  `FUN_80443e14` searches it by ID right after `bl FUN_80407048` (0x80443E68); v11's stub copies its hole's entry
+  into row 8 col 17 (0x804DE338, never used) and sets row 8 / col 17.
+- **Hole model** (+0, type 2): header stubs +8 terrain root, +C object count, +10 object table (0x10 each: model
+  root, instance count, instances of 0x2C, name). Roots are 0xD0 bytes like a character's; course models have
+  colours instead of normals, and each mesh record's +0x38 is the surface code it shows, +0x34 the draw pass.
+  Props (trees, tee markers) are whole models with their own texture sets. One model may hold at most about 300
+  prop instances in all (retail tops out at 321; 772 hung the game). Positions are s16; a game unit is 32 ft.
+- **Water in hole models:** mesh record +0 is the layer (0 ground, 1 water and plants), +4 the flags (0x40000101
+  opaque, 0xC0000101 blended by vertex alpha). The sea's surface is surface code 0x18 on layer 1, pass 3, and is
+  always see-through: Blooper Bay's has vertex colour (111,183,159) with alpha 0 at the shore up to 95 offshore
+  (Cheep Cheep Falls': (159,159,159), alpha 95), over a seabed on layer 0 (code 0x05, beach sand, tinted the same
+  teal in the shallows and black out deep). An opaque grey-vertex 0x18 mesh shows as a flat grey plane on either
+  layer. Foam is code 0x19 on layer 1, pass 3: white (255,255,255) vertices, blended (0xC0000101), alpha fading out
+  to sea. Pond and river beds are code 0x05 on layer 0 (plain ground drawing).
+- **Collision** (+4): see `collision.md`; per-triangle surface code (bits 0-7) and zone (bits 13-14: 2 OB,
+  3 penalty). At most 65535 triangles per mesh. The layout block holds the two tees (regular, back), four pins and
+  the light direction.
+- **Course select** (menu `FUN_80413910`): the list is 7 x 0x2C at 0x8044BC40 with live screen state right after
+  it; v11 moves it to cave 12 (27 lis/addi pairs, two of the lis serving two addi each; 0x80412658's r20 is reused
+  at 0x80412DB8 by the icon draw) and appends index 7 at 0x804140B0 in Stroke, Match (not Character Match), Skins
+  and Practice. Icons: textures 0-6 of `B/W/R`; index 7 shows texture 7, the 106x106 star medallion, which v11
+  redraws as the course's icon. Preview movie: indexes past 6 play the file at 0x8041445C (now Blooper Bay's).
+- **Course name:** message 0xA8 + index (0xAF "Shot Practice" for index 7). v11 swaps 0xAF for its own message
+  0x7FF0 at the six places that add the base: menu 0x80414D14, golf 0x8048C77C, 0x804B57B0, 0x804B5814,
+  0x804B5BC8, 0x804B5E04 (the hole intro banner), and the message hook answers 0x7FF0.
+- **Sky:** the hole loader picks the sky dome and backdrop by the hole's course byte (0x804462E8..); course 8
+  fell through to Lakitu Valley's. v11 sends it to Blooper Bay's (0x804463B4) from the test at 0x804463AC.
+- **Emblem** (the medallion on the hole intro banner and the pause menu): golf table 0x804D5F9C, file IDs by course
+  code 0-11 (entry 8 was Lakitu Valley's C/O/U, 3473). v11 points entry 8 at its own `E/S/B`, a copy of C/O/U's
+  106x106 RGB5A3 texture set holding the course select icon. `FUN_8048c354` loads it by the round's course byte
+  (0x804E68F4) into 0x80523E4C; Shot Practice's three lessons load 0x12BB/D/F instead. The square icon at the top left
+  of the hole intro is not the emblem: it is the mode's icon, file IDs at 0x804D5FF8[mode slot 4-15].
+- **Music:** main.dol `FUN_80011a94(situation, course)`, a 16 x 7 song table; v11 plays Blooper Bay's for 8.
+- **Saves:** the hole-in-one mask store (golf 0x804682F4) would wrap course 8 onto Lakitu Valley's; v11 skips it.
+- **New disc files:** the game builds a file's path from its ID (`FUN_8001bbf0`: ID / 2 in base 26 as "X/Y/Z"),
+  so the course's files live under a new top-level folder `E` (IDs from 5408). `TTMod.Build` appends them to the
+  file table (0x20440, free space up to 0x28000) and updates boot.bin's FST size.
 
 ## Menus
 

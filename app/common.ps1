@@ -254,8 +254,18 @@ function Install-ModHotkeys($userDir, $device) {
 	return "Fullscreen on/off: $how.$stop"
 }
 
-# Turn a patch (parsed JSON) into { disc path -> new bytes }, checking every result hash.
-function Get-PatchChanges($src, $disc, $patch) {
+# A patch's data file (from v11: the bytes of the files the game doesn't have), checked and unpacked; $null when the
+# patch has none.
+function Get-PatchData($patch, $file) {
+	if ($null -eq $patch.data) { return $null }
+	if ([TTMod]::Sha256File($file) -ne $patch.data.sha256) { throw 'The course data download was corrupted; try again.' }
+	$bytes = [TTMod]::Gunzip($file)
+	if ($bytes.Length -ne [long]$patch.data.size) { throw 'The course data download was corrupted; try again.' }
+	return , $bytes
+}
+
+# Turn a patch (parsed JSON) and its data file's bytes into { disc path -> new bytes }, checking every result hash.
+function Get-PatchChanges($src, $disc, $patch, $data) {
 	$changed = New-Object 'System.Collections.Generic.Dictionary[string,byte[]]'
 	foreach ($f in $patch.files) {
 		if ($f.op -eq 'edit') {
@@ -283,6 +293,41 @@ function Get-PatchChanges($src, $disc, $patch) {
 			[TTMod]::ApplyEdits($work, $at, $hex)
 			if ($null -ne $f.relocs) {
 				$table = [TTMod]::Resize([TTMod]::Relocations($orig), 8 * [long]$f.relocs.count)
+				[long[]]$at = @($f.relocs.edits | ForEach-Object { [long]$_.at })
+				[string[]]$hex = @($f.relocs.edits | ForEach-Object { [string]$_.hex })
+				[TTMod]::ApplyEdits($table, $at, $hex)
+				$new = [TTMod]::Pack([int]$f.type, $work, $table)
+			}
+			else { $new = [TTMod]::Pack([int]$f.type, $work) }
+		}
+		elseif ($f.op -eq 'create') {
+			# A file the game doesn't have (the 8th course): copies of runs from other game files (decoded), the
+			# mod's own bytes over zeros, then packed with its relocation table. The disc build adds it to the
+			# file table.
+			$work = New-Object byte[] ([long]$f.size)
+			$sources = @{}
+			for ($i = 0; $i -lt @($f.sources).Count; $i++) {
+				$raw = [TTMod]::ReadPart($src, $disc, @($f.sources)[$i])
+				if ($raw[0] -eq 1 -or $raw[0] -eq 2) { $sources[$i] = [TTMod]::Decompress($raw) } else { $sources[$i] = $raw }
+			}
+			foreach ($group in @($f.copies | Group-Object src)) {
+				[long[]]$from = @($group.Group | ForEach-Object { [long]$_.from })
+				[long[]]$to = @($group.Group | ForEach-Object { [long]$_.to })
+				[long[]]$len = @($group.Group | ForEach-Object { [long]$_.len })
+				[TTMod]::ApplyCopies($work, $sources[[int]$group.Name], $from, $to, $len)
+			}
+			if ($null -ne $f.data) {   # its own bytes are in the patch's data file
+				if ($null -eq $data) { throw "$($f.path): the patch's data file is missing" }
+				[TTMod]::ApplyRuns($work, [long[]]@($f.data.runs), $data, [long]$f.data.offset)
+			}
+			else {
+				[long[]]$at = @($f.edits | ForEach-Object { [long]$_.at })
+				[string[]]$hex = @($f.edits | ForEach-Object { [string]$_.hex })
+				[TTMod]::ApplyEdits($work, $at, $hex)
+			}
+			if (-not $f.compressed) { $new = $work }
+			elseif ($null -ne $f.relocs) {
+				$table = New-Object byte[] (8 * [long]$f.relocs.count)
 				[long[]]$at = @($f.relocs.edits | ForEach-Object { [long]$_.at })
 				[string[]]$hex = @($f.relocs.edits | ForEach-Object { [string]$_.hex })
 				[TTMod]::ApplyEdits($table, $at, $hex)

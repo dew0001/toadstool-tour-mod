@@ -112,13 +112,20 @@ if ($latest) {
 		Get-RepoFile $latest.patch $patchFile
 		if ([TTMod]::Sha256File($patchFile) -ne $latest.patch_sha256) { throw 'Patch download was corrupted; try again.' }
 		$patch = Get-Content -Raw $patchFile | ConvertFrom-Json
+		$data = $null
+		if ($patch.data) {
+			Say '  downloading the course data...'
+			$dataFile = Join-Path $dataDir (Split-Path -Leaf $patch.data.path)
+			Get-RepoFile $patch.data.path $dataFile
+			$data = Get-PatchData $patch $dataFile
+		}
 		$src = [TTMod]::Open($GamePath)
 		try {
 			$disc = [TTMod]::ReadDisc($src)
 			Say '  checking your game files...'
 			$bad = Compare-CleanManifest $src $disc $patch
 			if ($bad.Count) { throw "Your copy doesn't match the clean USA game ($($bad.Count) files differ, e.g. $($bad[0]))." }
-			$changed = Get-PatchChanges $src $disc $patch
+			$changed = Get-PatchChanges $src $disc $patch $data
 			Say '  building the modded game (about 1.4 GB)...'
 			try { [TTMod]::Build($src, $disc, $changed, $out) }
 			catch [System.IO.IOException] { throw "Couldn't write the modded game ($($_.Exception.InnerException.Message)). If Dolphin is running, close it and run Play again." }

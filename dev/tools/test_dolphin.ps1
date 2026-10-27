@@ -21,6 +21,7 @@ $Profile = (Resolve-Path $Profile).Path
 $config = Join-Path $Profile 'Config'
 $pidFile = Join-Path $Profile 'pid.txt'
 $pad = 'DSUClient/0/TestPad'
+$pad2 = 'DSUClient/1/TestPad'
 $desktopName = 'TTModTest'
 
 function Set-Ini([string] $Path, [string] $Section, [hashtable] $Values) {
@@ -75,7 +76,12 @@ function Write-PadProfile([bool] $Virtual) {
 		}
 	}
 	$lines = @('[GCPad1]') + ($map.Keys | ForEach-Object { "$_ = $($map[$_])" })
-	foreach ($n in 2..4) { $lines += "[GCPad$n]"; $lines += "Device = $($map['Device'])" }
+	if ($Virtual) {   # port 2: the second virtual pad (dsu_pad.py "p2 ..."), same buttons
+		$map['Device'] = $pad2
+		$lines += '[GCPad2]'; $lines += ($map.Keys | ForEach-Object { "$_ = $($map[$_])" })
+		foreach ($n in 3..4) { $lines += "[GCPad$n]"; $lines += "Device = $pad" }
+	}
+	else { foreach ($n in 2..4) { $lines += "[GCPad$n]"; $lines += "Device = $($map['Device'])" } }
 	Set-Content -Path (Join-Path $config 'GCPadNew.ini') -Value $lines -Encoding ascii
 }
 
@@ -146,6 +152,7 @@ switch ($Action) {
 		$device = Use-PlayerPad
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Input' @{ BackgroundInput = 'False' }
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'General' @{ HotkeysRequireFocus = 'True' }
+		Set-Ini (Join-Path $config 'Dolphin.ini') 'Core' @{ SIDevice1 = '0' }   # one controller
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Display' @{ RenderWindowXPos = '100'; RenderWindowYPos = '100' }
 		$p = Start-Process -FilePath $Dolphin -ArgumentList '-u', "`"$Profile`"", '-b', '-e', "`"$((Resolve-Path $Image).Path)`"" -PassThru
 		$p.Id | Set-Content $pidFile
@@ -159,6 +166,7 @@ switch ($Action) {
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Input' @{ BackgroundInput = 'True' }
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Interface' @{ PauseOnFocusLost = 'False'; ConfirmStop = 'False' }
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'General' @{ HotkeysRequireFocus = 'False' }   # the screenshot key
+		Set-Ini (Join-Path $config 'Dolphin.ini') 'Core' @{ SIDevice1 = '6' }   # port 2: the second virtual pad
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Display' @{
 			Fullscreen = 'False'; RenderToMain = 'False'; KeepWindowOnTop = 'False'; RenderWindowAutoSize = 'False'
 			RenderWindowXPos = '0'; RenderWindowYPos = '0'; RenderWindowWidth = '960'; RenderWindowHeight = '540'

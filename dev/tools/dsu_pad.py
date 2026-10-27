@@ -9,6 +9,7 @@ on a local TCP port. test_dolphin.ps1 maps the test profile's GameCube pad (and 
   python -I dsu_pad.py stick L 0 1 [ms]      left/right stick to x, y in -1..1 (for ms, then back to centre)
   python -I dsu_pad.py seq "Cross 150; wait 2000; Pad E 150; ..."   a sequence, run in order
   python -I dsu_pad.py status
+  python -I dsu_pad.py p2 press Square       any command with "p2" first goes to the second pad (DSU slot 1, port 2)
 
 Buttons: Pad N/S/E/W, Cross, Circle, Square, Triangle, L1, R1, L2, R2, L3, R3, Share, Options, PS, Touch.
 Test-profile mapping (test_dolphin.ps1): A = Cross, B = Circle, X = Square, Y = Triangle, Z = R1, Start = Share,
@@ -33,6 +34,7 @@ BUTTONS2 = {"Square": 0x80, "Cross": 0x40, "Circle": 0x20, "Triangle": 0x10, "R1
 SPECIAL = {"PS", "Touch"}
 ALL_BUTTONS = set(BUTTONS1) | set(BUTTONS2) | SPECIAL
 MAC = bytes([0x00, 0x11, 0x22, 0x33, 0x44, 0x55])
+PADS = 2   # DSU slots 0 and 1: ports 1 and 2 in the test profile
 
 
 class Pad:
@@ -55,23 +57,23 @@ def packet(server_id, msg_type, body):
 
 
 def shared(slot):
-    if slot != 0:
+    if slot >= PADS:
         return struct.pack("<BBBB6sB", slot, 0, 0, 0, bytes(6), 0)
-    return struct.pack("<BBBB6sB", 0, 2, 2, 1, MAC, 5)  # connected, full gyro, USB, battery full
+    return struct.pack("<BBBB6sB", slot, 2, 2, 1, MAC[:5] + bytes([MAC[5] + slot]), 5)  # connected, gyro, USB, full
 
 
 def axis(v):
     return max(0, min(255, int(round(128 + v * 127))))
 
 
-def data_body(pad, number):
+def data_body(pad, slot, number):
     held, sticks = pad.snapshot()
     b1 = sum(bit for name, bit in BUTTONS1.items() if name in held)
     b2 = sum(bit for name, bit in BUTTONS2.items() if name in held)
     lx, ly = sticks["L"]
     rx, ry = sticks["R"]
     analog = lambda name: 255 if name in held else 0
-    body = shared(0) + struct.pack("<BIBBBB", 1, number, b1, b2, int("PS" in held), int("Touch" in held))
+    body = shared(slot) + struct.pack("<BIBBBB", 1, number, b1, b2, int("PS" in held), int("Touch" in held))
     body += bytes([axis(lx), axis(ly), axis(rx), axis(ry)])
     body += bytes([analog("Pad W"), analog("Pad S"), analog("Pad E"), analog("Pad N")])
     body += bytes([analog("Square"), analog("Cross"), analog("Circle"), analog("Triangle")])
@@ -82,11 +84,11 @@ def data_body(pad, number):
 
 
 def serve():
-    pad = Pad()
+    pads = [Pad() for _ in range(PADS)]
     server_id = random.getrandbits(32)
     udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp.bind(("127.0.0.1", DSU_PORT))
-    clients = {}  # address -> last request time
+    clients = {}  # address -> (last request time, slots it asked for)
     number = [0]
     seen = {}  # message type -> how many requests came in (for status)
 
@@ -106,19 +108,28 @@ def serve():
                 count = struct.unpack_from("<i", data, 20)[0]
                 for slot in data[24:24 + max(0, min(count, 4))]:
                     udp.sendto(packet(server_id, MSG_PORTS, shared(slot) + b"\x00"), addr)
-            elif msg == MSG_DATA:
-                clients[addr] = time.time()
+            elif msg == MSG_DATA:   # Dolphin asks per pad (one socket each) and takes any pad's data it gets
+                flags, slot, mac = data[20], data[21], data[22:28]
+                if flags & 1:
+                    slots = {slot} & set(range(PADS))
+                elif flags & 2:
+                    slots = {k for k in range(PADS) if mac == MAC[:5] + bytes([MAC[5] + k])}
+                else:
+                    slots = set(range(PADS))
+                old = clients.get(addr, (0, set()))[1]
+                clients[addr] = (time.time(), old | slots)
 
     def stream():
         while True:
             now = time.time()
-            for addr, seen in list(clients.items()):
-                if now - seen > 5:
+            for addr, (last, slots) in list(clients.items()):
+                if now - last > 5:
                     del clients[addr]
                     continue
                 number[0] += 1
                 try:
-                    udp.sendto(packet(server_id, MSG_DATA, data_body(pad, number[0])), addr)
+                    for slot in sorted(slots):
+                        udp.sendto(packet(server_id, MSG_DATA, data_body(pads[slot], slot, number[0])), addr)
                 except OSError:
                     clients.pop(addr, None)
             time.sleep(0.004)
@@ -127,10 +138,13 @@ def serve():
         parts = line.strip().split()
         if not parts:
             return "empty"
+        pad = pads[0]
+        if parts[0].lower() == "p2" and len(parts) > 1:
+            pad, parts = pads[1], parts[1:]
         verb, args = parts[0].lower(), parts[1:]
         if verb == "status":
             held, sticks = pad.snapshot()
-            return json.dumps({"held": sorted(held), "sticks": sticks, "clients": [f"{a[0]}:{a[1]}" for a in clients],
+            return json.dumps({"held": sorted(held), "sticks": sticks, "clients": {f"{a[0]}:{a[1]}": sorted(c[1]) for a, c in clients.items()},
                                "requests": seen})
         if verb == "wait":
             time.sleep(float(args[0]) / 1000)
@@ -217,8 +231,12 @@ def main():
             step = step.strip()
             if not step:
                 continue
+            p2 = step.split()[0].lower() == "p2"
+            if p2:
+                step = step.split(None, 1)[1]
             first = step.split()[0].lower()
-            steps.append(step if first in ("wait", "stick", "hold", "release", "status", "press") else "press " + step)
+            step = step if first in ("wait", "stick", "hold", "release", "status", "press") else "press " + step
+            steps.append("p2 " + step if p2 else step)
         print(send("; ".join(steps)))
     else:
         print(send(" ".join(sys.argv[1:])))

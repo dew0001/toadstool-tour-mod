@@ -70,12 +70,19 @@ Changes (v10):
   - Shy Guy: his textures read from the right place (no black and brown corners), sleeves that stay on the robe
     where they meet it, whole shoes, and his line when the select screen's cursor lands on him (0x263).
 
+Changes (v11):
+  - Chirps: "link comments" stays off (LINK_COMMENTS_ON), so Shy Guy's link record no longer blanks everyone's
+    speech bubbles (and draws a giant blue box); his own chirp lines for every button (CHIRP_HALF).
+  - The No Wind item's red X sits on the wind gauge again (PROJ_CALLERS 0x804307D0).
+  - With --course8 <folder>: an 8th course, Pebble Beach (course8.py, caves 11-13; its files from dev/course).
+
 Patch code lives over dead functions (caves 1-10 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
 import math
 import os
+import shutil
 import struct
 import sys
 
@@ -107,6 +114,7 @@ BANNER_TITLE = f"Mario Golf: Toadstool Tour (Mod v{VERSION})".encode("ascii")
 SHYGUY = sys.argv[sys.argv.index("--shyguy") + 1] if "--shyguy" in sys.argv else None
 SHYGUY_VOICE = sys.argv[sys.argv.index("--shyguy-voice") + 1] if "--shyguy-voice" in sys.argv else None
 SHYGUY_MPT = sys.argv[sys.argv.index("--shyguy-mpt") + 1] if "--shyguy-mpt" in sys.argv else None
+COURSE8 = sys.argv[sys.argv.index("--course8") + 1] if "--course8" in sys.argv else None   # folder or "placeholder"
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
 
@@ -198,6 +206,7 @@ PROJ_CALLERS = {            # bl GX_SET_PROJECTION sites in the golf HUD -> anch
     0x80430974: ANCHOR_LEFT,    # "Hole N / PAR N" (and mode counters); the % box later in it is split off right
     0x8042C6DC: ANCHOR_RIGHT,   # wind gauge
     0x8042C954: ANCHOR_RIGHT,   # wind speed
+    0x804307D0: ANCHOR_RIGHT,   # the red X over the wind gauge while a No Wind item (Club Slots) is on (v11)
     0x8042E4AC: ANCHOR_RIGHT,   # player panel (face, score)
 }
 HUD_SPLITS = [              # bl sites inside HUD functions that draw on both sides: (site, anchor, original target)
@@ -330,6 +339,17 @@ GBA_DONE_HOOK = 0x8040ACC4  # bl FUN_80410140, just after it
 GBA_DONE_TARGET = 0x80410140
 GBA_ROW_CELLS = 0x80405F8C  # cmpwi r31,1 in FUN_80405b30: the extra page draws 2 cells per link record -> 1
 GBA_ROW_CELLS_WORD = 0x2C1F0001
+# v11: chirps (FUN_8046f2a4 shows the speech bubble). A link record also carries its golfer's 8 own chirp lines
+# (+0x58, 0x42 each); when "link comments" (0x80176093) is on, everyone's chirps 8-15 (D-pad, A, B, X, Y) show lines
+# from the link records instead of their golfer's. The main menu (FUN_80416a08) turns it on when any link record
+# has a name, and Shy Guy's does once a save holds it, with no lines: blank bubbles, and a giant blue box, for
+# everyone. Keep it off.
+LINK_COMMENTS_ON = 0x80416D94   # B/U/C: li r0,1 before stb r0,0xa93(r9) (0x80176093) -> li r0,0
+LINK_COMMENTS_WORDS = (0x38000001, 0x38000000)
+# A link golfer's own lines are messages 0x662 + 4 * (code & 1) + (chirp & 3) + 0x48 * (chirp >> 2), so chirps
+# 8-15 ran past its 8 lines into other messages (left-over Japanese text); everyone else's use chirp & 7.
+CHIRP_HALF = 0x8046F3F0          # C/L/V: srawi r0,r29,2 (r29 = chirp) -> srawi r0,r28,2 (r28 = chirp & 7)
+CHIRP_HALF_WORDS = (0x7FA01670, 0x7F801670)
 # In rounds each golfer is an object made by FUN_804074a8(code) with a vtable of 47 methods in the golf overlay.
 # Golfer 16 (code 0x10, made by FUN_804c7220's default case) gets Koopa Troopa's methods (code 15, FUN_804bd45c;
 # same object size and base constructor) except the three that name its files, which shyguy.py builds from Koopa's,
@@ -1035,7 +1055,7 @@ def cave6_code():
     return blob, dict(a.labels)
 
 
-def cave3_code(zoom, v6):
+def cave3_code(zoom, v6, texts=()):
     """Assemble the putt aim view, the replay prompt and the HUD anchors. Returns (bytes, labels)."""
     a = ppc.Asm(CAVE3)
     a.word("prompt_open")  # 1 while our Continue / Watch Replay menu is up
@@ -1121,6 +1141,12 @@ def cave3_code(zoom, v6):
     a.label("text_ghost_done")
     a(ppc.BLR)
     a.label("text_game")
+    for k, (msg, at) in enumerate(texts):   # v11: messages of our own, e.g. the 8th course's name (course8.py)
+        a(ppc.cmpwi(3, msg))
+        a.br("bne", f"text_more_{k}")
+        hi, lo = ppc.hi_lo(at)
+        a(ppc.lis(3, hi), ppc.addi(3, 3, lo), ppc.BLR)
+        a.label(f"text_more_{k}")
     a(MSG_LOOKUP_FIRST)
     a.b(MSG_LOOKUP + 4)
 
@@ -1402,7 +1428,7 @@ def check_matrix_site(buf, base, hook):
 
 
 def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None,
-              cave10=None):
+              cave10=None, course=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1411,7 +1437,7 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
                               (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
                               (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9),
-                              (CAVE10, CAVE10_FIRST, cave10)):
+                              (CAVE10, CAVE10_FIRST, cave10)) + tuple(course[0] if course else ()):
         if code is None:
             continue
         if word(data, base, addr) != first:  # still the original (dead) function
@@ -1432,6 +1458,10 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
         raise SystemExit(f"0x{MOVIE_LOOP_EXIT + 8:08X}: not the expected movie loop exit")
     put(data, base, MOVIE_LOOP, 0x2E1D0000, 0x2C1D0000)  # cmpwi cr4,r29,0: r29 = 0 here, so cr4 = "no movie"
     put(data, base, MOVIE_LOOP + 4, ppc.b(MOVIE_LOOP + 4, MOVIE_LOOP_EXIT), 0x3B9C0001)
+    if course:
+        import course8
+        for addr, new, old in course8.dol_patches(course[1]):
+            put(data, base, addr, new, old)
     open(dst, "wb").write(data)
     print(f"main.dol: aspect 1.624, {1 + len(DOL_MATRIX_HOOKS)} hooks, {len(cave)}-byte cave at 0x{CAVE:08X}"
           f" (aspect write {'on' if ASPECT_WRITE else 'off'}, unlock {'on' if UNLOCK else 'off'}), no opening movie")
@@ -1441,7 +1471,7 @@ def float_word(v):
     return struct.unpack(">I", struct.pack(">f", v))[0]
 
 
-def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None):
+def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None):
     raw = open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     kind, _ = lz.header(raw)
     blob, _ = lz.decompress(raw)
@@ -1497,12 +1527,18 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None):
             put(buf, OVERLAY_BASE, POWER_BURST_HOOK, ppc.b(POWER_BURST_HOOK, v9["power_burst"]), POWER_BURST_WORD)
             put(buf, OVERLAY_BASE, STAR_SWAP_HOOK, ppc.bl(STAR_SWAP_HOOK, v9["star_swap"]),
                 ppc.bl(STAR_SWAP_HOOK, GX_SET_SWAP))
+            put(buf, OVERLAY_BASE, CHIRP_HALF, CHIRP_HALF_WORDS[1], CHIRP_HALF_WORDS[0])
     if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record
         put(buf, OVERLAY_BASE, GBA_FILL_HOOK, ppc.bl(GBA_FILL_HOOK, v9["link_record"]),
             ppc.bl(GBA_FILL_HOOK, GBA_FILL_TARGET))
         put(buf, OVERLAY_BASE, GBA_DONE_HOOK, ppc.bl(GBA_DONE_HOOK, v9["link_hide"]),
             ppc.bl(GBA_DONE_HOOK, GBA_DONE_TARGET))
         put(buf, OVERLAY_BASE, GBA_ROW_CELLS, GBA_ROW_CELLS_WORD & ~0xFFFF, GBA_ROW_CELLS_WORD)   # cmpwi r31,0
+        put(buf, OVERLAY_BASE, LINK_COMMENTS_ON, LINK_COMMENTS_WORDS[1], LINK_COMMENTS_WORDS[0])
+    if course:   # v11: the 8th course's hooks (course8.py)
+        import course8
+        for addr, new, old in course8.overlay_patches(rel, course[1], lambda a: word(buf, OVERLAY_BASE, a)):
+            put(buf, OVERLAY_BASE, addr, new, old)
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -1529,7 +1565,7 @@ def patch_ids(clean_sys, build_sys, clean_files, build_files):
 def main():
     args = [a for i, a in enumerate(sys.argv[1:], 1)
             if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy", "--shyguy-voice",
-                                                                    "--shyguy-mpt")]
+                                                                    "--shyguy-mpt", "--course8")]
     clean, build = args[:2]
     ppc.selftest()
     proj_sites = projection_call_sites(clean)
@@ -1540,7 +1576,14 @@ def main():
     cave8, v8 = cave8_code()
     v4.update(v6)
     v4.update(v8)
-    cave3, v3 = cave3_code(v7["zoom"], v6)
+    course = course_files = None
+    if COURSE8:
+        import course8
+        golf = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
+        holes, files, course_files = course8.load(COURSE8, golf)
+        course = course8.caves(holes, files)
+        print(f"caves 11-13: the 8th course ({COURSE8}), {len(holes)} holes, {len(course_files)} files")
+    cave3, v3 = cave3_code(v7["zoom"], v6, course8.texts(course[1]) if course else ())
     cave, stubs = build_cave()
     cave2, v2 = cave2_code(v3["aim_place"])
     print(f"cave 2: {len(cave2)} of {CAVE2_SIZE} bytes at 0x{CAVE2:08X} (fast-forward 0x{v2['ff']:08X},"
@@ -1566,9 +1609,20 @@ def main():
         print(f"cave 10: {len(cave10)} of {CAVE10_SIZE} bytes at 0x{CAVE10:08X} (Shy Guy's power shot"
               f" 0x{v10['power_burst']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course)
     for rel in OVERLAY_MATRIX_HOOKS:
-        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9)
+        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course)
+    if course:
+        open(os.path.join(build, "files", "B", "W", "R"), "wb").write(course8.icons_file(os.path.join(clean, "files")))
+        card = os.path.join(build, "files", *course8.CARD_FILE.split("/"))
+        os.makedirs(os.path.dirname(card), exist_ok=True)
+        open(card, "wb").write(course8.card_file(os.path.join(clean, "files")))
+        open(os.path.join(build, "files", *course8.EMBLEM_FILE.split("/")), "wb").write(
+            course8.emblem_file(os.path.join(clean, "files")))
+    for rel, src in (course_files or {}).items():
+        dst = os.path.join(build, "files", *rel.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src, dst)
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
               os.path.join(clean, "files"), os.path.join(build, "files"))
     if SHYGUY:

@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -203,14 +204,90 @@ public static class TTMod
         throw new FileNotFoundException(path + " is not on the disc");
     }
 
+    // Files the game doesn't have (the 8th course, under files/E/): new folders and files appended to the file
+    // table after everything else, in the same depth-first order the table uses. Returns the new table and each
+    // new file's entry number.
+    static byte[] AddToFst(byte[] fst, List<string> paths, Dictionary<string, int> index)
+    {
+        int n = (int)BE32(fst, 8);
+        int strBase = n * 12;
+        List<byte> strings = new List<byte>();
+        for (int i = strBase; i < fst.Length; i++) strings.Add(fst[i]);
+        while (strings.Count > 0 && strings[strings.Count - 1] == 0 && strings.Count > 1 && strings[strings.Count - 2] == 0)
+            strings.RemoveAt(strings.Count - 1);   // keep one terminator, drop the padding
+        List<long[]> entries = new List<long[]>();   // type, name offset, word 1, word 2
+        SortedDictionary<string, object> tree = new SortedDictionary<string, object>(StringComparer.Ordinal);
+        foreach (string p in paths)
+        {
+            string[] parts = p.Substring("files/".Length).Split('/');
+            SortedDictionary<string, object> node = tree;
+            for (int k = 0; k < parts.Length - 1; k++)
+            {
+                if (!node.ContainsKey(parts[k])) node[parts[k]] = new SortedDictionary<string, object>(StringComparer.Ordinal);
+                node = (SortedDictionary<string, object>)node[parts[k]];
+            }
+            node[parts[parts.Length - 1]] = p;
+        }
+        Add(tree, 0, n, entries, strings, index);
+        int total = n + entries.Count;
+        byte[] outp = new byte[Align(total * 12 + strings.Count, 4)];
+        Array.Copy(fst, 0, outp, 0, n * 12);
+        PutBE32(outp, 8, total);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            long[] e = entries[i];
+            int at = (n + i) * 12;
+            PutBE32(outp, at, (e[0] << 24) | e[1]);
+            PutBE32(outp, at + 4, e[2]);
+            PutBE32(outp, at + 8, e[3]);
+        }
+        for (int i = 0; i < strings.Count; i++) outp[total * 12 + i] = strings[i];
+        return outp;
+    }
+
+    static void Add(SortedDictionary<string, object> node, int parent, int first, List<long[]> entries, List<byte> strings,
+                    Dictionary<string, int> index)
+    {
+        foreach (KeyValuePair<string, object> kv in node)
+        {
+            int me = first + entries.Count;
+            long name = strings.Count;
+            strings.AddRange(Encoding.ASCII.GetBytes(kv.Key)); strings.Add(0);
+            if (kv.Value is string)
+            {
+                entries.Add(new long[] { 0, name, 0, 0 });
+                index[(string)kv.Value] = me;
+            }
+            else
+            {
+                long[] dir = new long[] { 1, name, parent, 0 };
+                entries.Add(dir);
+                Add((SortedDictionary<string, object>)kv.Value, me, first, entries, strings, index);
+                dir[3] = first + entries.Count;   // the entry after this folder's last one
+            }
+        }
+    }
+
     // Write a complete disc image: Nintendo's layout kept, changed files rewritten in place or, if
-    // they grew, moved into the empty area between the file table and the first file. Everything
-    // not written is zero, so the result depends only on file contents (identical for every friend).
+    // they grew, moved into the empty area between the file table and the first file (as are new files).
+    // Everything not written is zero, so the result depends only on file contents (identical for every friend).
     public static void Build(Source s, Disc d, Dictionary<string, byte[]> changed, string outPath)
     {
         byte[] boot = changed.ContainsKey("sys/boot.bin") ? changed["sys/boot.bin"] : (byte[])d.Boot.Clone();
         byte[] dol = changed.ContainsKey("sys/main.dol") ? changed["sys/main.dol"] : d.Dol;
         byte[] fst = (byte[])d.Fst.Clone();
+        HashSet<string> known = new HashSet<string>();
+        foreach (Entry e in d.Files) known.Add(e.Path);
+        List<string> added = new List<string>();
+        foreach (string p in changed.Keys) if (p.StartsWith("files/") && !known.Contains(p)) added.Add(p);
+        added.Sort(StringComparer.Ordinal);
+        Dictionary<string, int> addedIndex = new Dictionary<string, int>();
+        if (added.Count > 0)
+        {
+            fst = AddToFst(fst, added, addedIndex);
+            PutBE32(boot, 0x428, fst.Length);
+            PutBE32(boot, 0x42C, fst.Length);
+        }
 
         long lowest = d.DolOffset;
         foreach (Entry e in d.Files) lowest = Math.Min(lowest, e.Offset);
@@ -234,6 +311,14 @@ public static class TTMod
             placed[e.Path] = off;
             PutBE32(fst, e.Index * 12 + 4, off);
             PutBE32(fst, e.Index * 12 + 8, len);
+        }
+        foreach (string p in added)
+        {
+            long len = changed[p].Length;
+            placed[p] = freeAt;
+            PutBE32(fst, addedIndex[p] * 12 + 4, freeAt);
+            PutBE32(fst, addedIndex[p] * 12 + 8, len);
+            freeAt = Align(freeAt + len, 0x20);
         }
         if (freeAt > lowest) throw new InvalidOperationException("mod files don't fit on the disc");
         PutBE32(boot, 0x420, dolOffset);
@@ -265,6 +350,7 @@ public static class TTMod
                     from += take; left -= take;
                 }
             }
+            foreach (string p in added) WriteAt(o, placed[p], changed[p]);
             WriteAt(o, dolOffset, dol);
         }
         if (File.Exists(outPath)) File.Delete(outPath);
@@ -553,6 +639,28 @@ public static class TTMod
         {
             byte[] bytes = FromHex(hexes[i]);
             Array.Copy(bytes, 0, target, offsets[i], bytes.Length);
+        }
+    }
+
+    // A patch's data file (the bytes of the files the game doesn't have, gzip): its contents.
+    public static byte[] Gunzip(string path)
+    {
+        using (FileStream f = File.OpenRead(path))
+        using (GZipStream z = new GZipStream(f, CompressionMode.Decompress))
+        using (MemoryStream m = new MemoryStream())
+        {
+            z.CopyTo(m);
+            return m.ToArray();
+        }
+    }
+
+    // runs: (offset in target, length) pairs, filled in order from data starting at offset.
+    public static void ApplyRuns(byte[] target, long[] runs, byte[] data, long offset)
+    {
+        for (int i = 0; i + 1 < runs.Length; i += 2)
+        {
+            Array.Copy(data, offset, target, runs[i], runs[i + 1]);
+            offset += runs[i + 1];
         }
     }
 }

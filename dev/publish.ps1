@@ -9,6 +9,7 @@
 #     [-ShyGuyVoice <zip of his WAV clips; default: assets\shy-guy\mario-power-tennis-shy-guy-voice.zip>]
 #     [-ShyGuyMpt <Mario Power Tennis disc for his model; default: gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso
 #      two folders above the repo; '' builds him from the OBJ in -ShyGuy instead>]
+#     [-Course8 <the 8th course's folder from dev\course\holegen.py; default: mod\course8 next to the repo; '' for none>]
 param(
 	[Parameter(Mandatory)] [int] $Version,
 	[Parameter(Mandatory)] [string] $CleanGame,
@@ -19,7 +20,8 @@ param(
 	[switch] $SkipBuild,
 	[string] $ShyGuy = (Join-Path $PSScriptRoot '..\..\assets\shy-guy'),
 	[string] $ShyGuyVoice = (Join-Path $PSScriptRoot '..\..\assets\shy-guy\mario-power-tennis-shy-guy-voice.zip'),
-	[string] $ShyGuyMpt = (Join-Path $PSScriptRoot '..\..\..\gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso')
+	[string] $ShyGuyMpt = (Join-Path $PSScriptRoot '..\..\..\gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso'),
+	[string] $Course8 = (Join-Path $PSScriptRoot '..\..\mod\course8')
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -38,21 +40,28 @@ if (-not $SkipBuild) {
 	}
 	elseif (-not (Test-Path (Join-Path $ShyGuy 'Shy Guy.obj'))) { throw "Shy Guy's model isn't in $ShyGuy" }
 	if (-not (Test-Path $ShyGuyVoice)) { throw "Shy Guy's voice clips aren't at $ShyGuyVoice" }
+	$course = @()
+	if ($Course8) {
+		if (-not (Test-Path (Join-Path $Course8 'course.json'))) { throw "No 8th course at $Course8 (run dev\course\holegen.py, or pass -Course8 '')" }
+		$course = @('--course8', (Resolve-Path $Course8).Path)
+	}
 	python -I (Join-Path $PSScriptRoot 'build_mod.py') $CleanDisc $BuildDir --version $Version --shyguy (Resolve-Path $ShyGuy).Path `
-		--shyguy-voice (Resolve-Path $ShyGuyVoice).Path @mpt
+		--shyguy-voice (Resolve-Path $ShyGuyVoice).Path @mpt @course
 	if ($LASTEXITCODE) { throw 'build_mod.py failed' }
-	python -I (Join-Path $PSScriptRoot 'make_patch.py') $CleanDisc $BuildDir $patchPath $Version
+	python -I (Join-Path $PSScriptRoot 'make_patch.py') $CleanDisc $BuildDir $patchPath $Version @course
 	if ($LASTEXITCODE) { throw 'make_patch.py failed' }
 }
 
 $patch = Get-Content -Raw $patchPath | ConvertFrom-Json
+$data = $null
+if ($patch.data) { $data = Get-PatchData $patch (Join-Path $repo $patch.data.path) }
 $src = [TTMod]::Open($CleanGame)
 try {
 	if ([TTMod]::GameId($src) -ne 'GFTE01-rev0') { throw "$CleanGame is not a clean GFTE01 rev 0 disc" }
 	$disc = [TTMod]::ReadDisc($src)
 	Write-Host 'Hashing the clean game...'
 	$man = [TTMod]::Manifest($src, $disc)
-	$changed = Get-PatchChanges $src $disc $patch
+	$changed = Get-PatchChanges $src $disc $patch $data
 	if (-not $ReferenceIso) { $ReferenceIso = Join-Path $env:TEMP "ttmod-reference-v$Version.iso" }
 	Write-Host "Reference build -> $ReferenceIso"
 	[TTMod]::Build($src, $disc, $changed, $ReferenceIso)
@@ -66,6 +75,7 @@ $full = [ordered]@{
 	format = 2; name = $patch.name; version = $Version; game_id = $patch.game_id; new_game_id = $patch.new_game_id
 	files = $patch.files; clean_manifest = $manifest; result_sha1 = $resultSha1
 }
+if ($patch.data) { $full['data'] = $patch.data }   # v11: the course's own bytes, mod/patches/vN.data.gz
 [IO.File]::WriteAllText($patchPath, ($full | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
 
 $appFiles = [ordered]@{}
