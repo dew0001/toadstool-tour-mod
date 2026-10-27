@@ -193,6 +193,13 @@ def rebuild(sdir, sounds):
     return bytes(sdir), bytes(samp)
 
 
+def room(sdir, samp, sid):
+    """How many samples fit where sample sid's data is (up to the next sample's data)."""
+    entries = sdir_entries(sdir)
+    off = next(e[2] for e in entries if e[1] == sid)
+    return (min([e[2] for e in entries if e[2] > off] + [len(samp)]) - off) // 8 * FRAME
+
+
 def replace_in_place(sdir, samp, sid, pcm):
     """(sdir, samp) with one sample re-encoded where it is, so nothing else moves. Its new frames must fit before
     the next sample's data."""

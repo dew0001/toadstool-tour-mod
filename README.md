@@ -4,7 +4,7 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 
 - **Widescreen built in:** real 16:9 with the HUD out at the screen edges, every piece in its proper shape. No cheats or special Dolphin settings needed.
 - **Everything unlocked:** every course and character from the start.
-- **Shy Guy joins the roster** as a 17th golfer, with everyone else unchanged: on the character select screen, press Down from the bottom row to the *More* page. He's the Shy Guy from *Mario Power Tennis*, with his own pictures, name, stats (205 yards, high shots, the narrowest impact window, top control, strong spin), voice (his call on the select screen, cheers and groans at the end of each hole, chirps while others line up their shots) and power shot: a burst of red and white stars with his special-shot shout. He swings with Koopa Troopa's animations.
+- **Shy Guy joins the roster** as a 17th golfer, with everyone else unchanged: on the character select screen, press Down from the bottom row to the *More* page. He's the Shy Guy from *Mario Power Tennis*, with his own pictures, name, stats (205 yards, high shots, the narrowest impact window, top control, strong spin), voice (his lines when you land on him and pick him on the select screen, cheers and groans at the end of each hole, chirps while others line up their shots) and power shot: a burst of red and white stars with his special-shot shout. He swings with Koopa Troopa's animations.
 - **TV-style cameras:** after you hit, the camera cuts to behind and above the ball and follows it all the way. Putts are aimed, stroked and followed from behind the ball, down the line.
 - **Power to the yard:** the left stick moves the landing spot and the power gauge in quarter steps (1 yard with a 240-yard driver; finer with shorter clubs) instead of 4-yard jumps. Putts keep the game's own steps.
 - **See-through golfer when putting:** your golfer turns see-through from lining up the putt until the ball rolls, so the line, the grid and the cup stay in view. Turn it off and on with **Start → See-Through**; it's on every time the game starts.
@@ -15,7 +15,7 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 - **Replays ask first:** B after a shot opens *Continue / Watch Replay* instead of replaying straight away. Only the player who hit can open it.
 - **Club Slots:** the item reel no longer has *Double the points*; its slots went to the other four items.
 - **Separate entry:** shows up in Dolphin as *Mario Golf: Toadstool Tour (Mod vN)* with its own game ID (GFTEMD) and save, next to your normal copy.
-- **Fullscreen and sharp:** starts fullscreen over the whole screen (Alt+Enter for a window) at a resolution that fits your screen, with HD UI textures by NickPancakes installed automatically.
+- **Fullscreen and sharp:** starts fullscreen over the whole screen at a resolution that fits your screen, with HD UI textures by NickPancakes installed automatically. Click both sticks in (or Alt+Enter) to switch between fullscreen and a window; Esc no longer stops the game and drops you out of fullscreen (Shift+Esc stops it). These are Dolphin's hotkeys, so they apply in other games too; `Play.bat` only changes them if you haven't set your own.
 - **Automatic updates:** `Play.bat` checks for a new version every time you start the game.
 
 ## Controls (Xbox or PlayStation-style controller on Port 1)
@@ -30,6 +30,8 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 | View / Back | Side view while held |
 | A | Swing; hold after the hit to fast-forward |
 | Start | Pause menu (Scorecard, Rules, ..., **See-Through** on/off) |
+| Click both sticks in | Fullscreen on/off (Alt+Enter on the keyboard does the same) |
+| Shift+Esc | Stop the game (Esc alone does nothing, so it can't throw you out of fullscreen) |
 
 Every way of looking around still works on putts: the camera goes back down the line when you let go. These controls are set up for the modded game only, from your own Port 1 controller settings; other games keep yours.
 

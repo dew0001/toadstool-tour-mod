@@ -37,7 +37,9 @@ MOUTH_TOP = 6.0                   # below this the inside of his mouth, and betw
 ATLAS = 256
 SCALE = 1               # textures go into the atlas at their own size (as in Mario Power Tennis); 2- and
                         # 4-pixel ones as flat 4x4 blocks per texel
-PAD = 2
+PAD = 8                 # each texture's edge repeated this far round it, and every cell on the 4x4 blocks of the
+                        # CMPR the atlas becomes; the space left over takes the nearest texture's colours too, so
+                        # the smaller mip levels don't darken textures at their edges
 
 
 class Disc:
@@ -120,14 +122,15 @@ def skinned_positions(m, used):
 def textures_of(m):
     base = m.blob.find(b"\x00\x20\xaf\x30")
     out = []
-    for h, w, ht, fmt, at, lod in tx.headers(m.blob, base):
-        out.append(tx.decode(m.blob[at:at + tx.level_size(w, ht, fmt)], w, ht, fmt))
+    for h, w, ht, fmt, at, lod in tx.headers(m.blob, base):   # data offsets count from the set's start
+        out.append(tx.decode(m.blob[base + at:base + at + tx.level_size(w, ht, fmt)], w, ht, fmt))
     return out
 
 
 def atlas(images):
     """Pack {key: RGBA array} into one ATLAS x ATLAS image: ({key: (x, y, w, h) in pixels}, image)."""
     canvas = np.zeros((ATLAS, ATLAS, 4), np.uint8)
+    used = np.zeros((ATLAS, ATLAS), bool)
     cells, x, y, row = {}, 0, 0, 0
     for key, img in sorted(images.items(), key=lambda kv: -kv[1].shape[0]):
         h, w = img.shape[:2]
@@ -136,19 +139,32 @@ def atlas(images):
         elif SCALE != 1:
             img = np.asarray(Image.fromarray(img).resize((w * SCALE, h * SCALE), Image.BICUBIC))
         h, w = img.shape[:2]
-        if x + w + 2 * PAD > ATLAS:
+        ph, pw = PAD + (-h) % 4, PAD + (-w) % 4   # whole 4x4 blocks
+        if x + w + PAD + pw > ATLAS:
             x, y, row = 0, y + row, 0
-        if y + h + 2 * PAD > ATLAS:
+        if y + h + PAD + ph > ATLAS:
             raise SystemExit("Mario Power Tennis Shy Guy: his textures don't fit the atlas")
-        padded = np.pad(img, ((PAD, PAD), (PAD, PAD), (0, 0)), mode="edge")
-        canvas[y:y + h + 2 * PAD, x:x + w + 2 * PAD] = padded
+        padded = np.pad(img, ((PAD, ph), (PAD, pw), (0, 0)), mode="edge")
+        canvas[y:y + padded.shape[0], x:x + padded.shape[1]] = padded
+        used[y:y + padded.shape[0], x:x + padded.shape[1]] = True
         cells[key] = (x + PAD, y + PAD, w, h)
-        x, row = x + w + 2 * PAD, max(row, h + 2 * PAD)
+        x, row = x + padded.shape[1], max(row, padded.shape[0])
+    while not used.all():   # the rest of the atlas: the nearest texture's colours, spread a pixel at a time
+        for axis, step in ((0, 1), (0, -1), (1, 1), (1, -1)):
+            near = np.roll(used, step, axis)
+            if step > 0:
+                (near[:step] if axis == 0 else near[:, :step])[...] = False
+            else:
+                (near[step:] if axis == 0 else near[:, step:])[...] = False
+            take = near & ~used
+            canvas[take] = np.roll(canvas, step, axis)[take]
+            used |= take
     return cells, Image.fromarray(canvas).convert("RGB")
 
 
 def shy_guy(disc_path):
-    """{"pos", "uv", "nrm", "tris", "image", "bone", "joints"} for Mario Power Tennis' Shy Guy (bind pose)."""
+    """{"pos", "uv", "nrm", "tris", "image", "bone", "joints", "mesh"} for Mario Power Tennis' Shy Guy (bind pose;
+    "mesh": each triangle's mesh)."""
     disc = Disc(disc_path)
     if disc.game != "GOME01":
         raise SystemExit(f"{disc_path} is {disc.game}, not Mario Power Tennis (GOME01)")
@@ -166,7 +182,7 @@ def shy_guy(disc_path):
     texs = textures_of(m)
 
     images = {"black": np.full((2, 2, 4), (8, 8, 8, 255), np.uint8)}
-    tris = []
+    tris, tri_mesh = [], []
     for i, mo, g, go, mtx, dls in mdl.meshes(m):
         if i not in BODY_MESHES:
             continue
@@ -197,6 +213,7 @@ def shy_guy(disc_path):
                     slot = palette[v[0]] if v[0] < len(palette) else -1
                     out.append((src, slot, key, None if key == "black" else v[3], palette))
                 tris.append(out[::-1])   # GX winding is clockwise; OBJ's (what shyguy expects) isn't
+                tri_mesh.append(i)
 
     cells, image = atlas(images)
     pos_index, uv_index, pos, bone, uv = {}, {}, [], [], []
@@ -237,4 +254,4 @@ def shy_guy(disc_path):
     nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-9)
     tris_out = [tuple((p, t, p) for p, t in tri) for tri in obj_tris]
     return {"pos": pos, "uv": np.array(uv), "nrm": nrm, "tris": tris_out, "image": image,
-            "bone": np.array(bone), "joints": joints}
+            "bone": np.array(bone), "joints": joints, "mesh": np.array(tri_mesh)}

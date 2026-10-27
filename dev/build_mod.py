@@ -65,6 +65,11 @@ Changes (v9, with --shyguy and --shyguy-voice):
   - His own power shot (cave 10): golfer code 16 of his own, with a burst of red and white stars.
   - With --shyguy-mpt, his model from Mario Power Tennis (shyguy.py, mpt.py).
 
+Changes (v10):
+  - The see-through golfer (cave 3) is drawn depth first, so only its outer surfaces show.
+  - Shy Guy: his textures read from the right place (no black and brown corners), sleeves that stay on the robe
+    where they meet it, whole shoes, and his line when the select screen's cursor lands on him (0x263).
+
 Patch code lives over dead functions (caves 1-10 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -258,6 +263,7 @@ GX_SET_ZMODE_FIRST = 0x800D0238
 PLAYER_GOLFER = 0x518C          # player record: the golfer's model instance
 STATE_AIM = 4
 GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_SET = 1, 4, 5, 15
+GX_BL_ZERO, GX_BL_ONE = 0, 1
 GHOST_ALPHA = 0x60              # golfer opacity while see-through, out of 256
 GHOST_OFF, GHOST_PUTTS, GHOST_ALWAYS = 0, 1, 2  # ghost_mode values (ALWAYS: any club; for testing)
 # Its setting is a row in the in-round pause menu (Start). FUN_80473918 fills the menu's item list (codes at
@@ -1233,7 +1239,10 @@ def cave3_code(zoom, v6):
     G_ON, G_BLEND, G_ZMODE, G_COLOR = 0, 4, 20, 32
 
     # Replaces MODEL_DRAW's first instruction (r3 = model instance). The shooter's golfer, putting (aim to
-    # stroke) with the setting on, is drawn see-through; everything else draws as normal.
+    # stroke) with the setting on, is drawn see-through; everything else draws as normal. See-through, it's drawn
+    # twice: depth only first (ghost_on 2: blended as zero x itself + one x what's there, the game's own depth
+    # modes; colour writes can't be turned off, the scene setup turns them back on), then see-through over that
+    # depth without writing it (ghost_on 1), so only its nearest surfaces show, not what's inside it.
     a.label("ghost_draw")
     hi, lo = ppc.hi_lo(v6["ghost_mode"])
     a(ppc.lis(11, hi), ppc.lwz(11, lo, 11), ppc.cmpwi(11, GHOST_OFF))
@@ -1257,6 +1266,14 @@ def cave3_code(zoom, v6):
     a.br("bne", "gd_plain")
     a.label("gd_ghost")
     a(ppc.stwu(1, -32, 1), ppc.mflr(0), ppc.stw(0, 36, 1), ppc.stw(3, 8, 1), ppc.stw(4, 12, 1), ppc.stw(5, 16, 1))
+    a(ppc.li(0, 2), ppc.stw(0, G_ON, 12))
+    a(ppc.li(3, GX_BM_BLEND), ppc.li(4, GX_BL_ZERO), ppc.li(5, GX_BL_ONE), ppc.li(6, GX_LO_SET))
+    a.br("bl", "blend_raw")
+    a(ppc.li(3, 1), ppc.li(4, 3), ppc.li(5, 1))
+    a.br("bl", "zmode_raw")
+    a(ppc.lwz(3, 8, 1), ppc.lwz(4, 12, 1), ppc.lwz(5, 16, 1))
+    a.br("bl", "gd_plain")                                               # depth only
+    a.la(12, "ghost_on")
     a(ppc.li(0, 1), ppc.stw(0, G_ON, 12))
     a(ppc.li(3, GX_BM_BLEND), ppc.li(4, GX_BL_SRCALPHA), ppc.li(5, GX_BL_INVSRCALPHA), ppc.li(6, GX_LO_SET))
     a.br("bl", "blend_raw")
@@ -1284,15 +1301,17 @@ def cave3_code(zoom, v6):
     a(ppc.stw(3, G_BLEND, 12), ppc.stw(4, G_BLEND + 4, 12), ppc.stw(5, G_BLEND + 8, 12),
       ppc.stw(6, G_BLEND + 12, 12), ppc.lwz(11, G_ON, 12), ppc.cmpwi(11, 0))
     a.br("beq", "blend_raw")
-    a(ppc.li(3, GX_BM_BLEND), ppc.li(4, GX_BL_SRCALPHA), ppc.li(5, GX_BL_INVSRCALPHA))
+    a(ppc.li(3, GX_BM_BLEND), ppc.li(4, GX_BL_ZERO), ppc.li(5, GX_BL_ONE), ppc.cmpwi(11, 2))
+    a.br("beq", "blend_raw")
+    a(ppc.li(4, GX_BL_SRCALPHA), ppc.li(5, GX_BL_INVSRCALPHA))
     a.label("blend_raw")
     a(GX_SET_BLEND_FIRST)
     a.b(GX_SET_BLEND + 4)
     a.label("zmode_hook")
     a.la(12, "ghost_on")
     a(ppc.stw(3, G_ZMODE, 12), ppc.stw(4, G_ZMODE + 4, 12), ppc.stw(5, G_ZMODE + 8, 12),
-      ppc.lwz(11, G_ON, 12), ppc.cmpwi(11, 0))
-    a.br("beq", "zmode_raw")
+      ppc.lwz(11, G_ON, 12), ppc.cmpwi(11, 1))
+    a.br("bne", "zmode_raw")
     a(ppc.li(5, 0))
     a.label("zmode_raw")
     a(GX_SET_ZMODE_FIRST)

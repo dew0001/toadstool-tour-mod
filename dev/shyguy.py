@@ -74,15 +74,20 @@ VOICE = {0xAF: "Fore.wav",                 # swing
          0xB0: "ServeB.wav",               # animation 5 (0x168)
          0xBA: "SsHit.wav"}                # animation 5 (0x165), and his power shot's hit (build_mod.py cave 10)
 VOICE_RMS, VOICE_PEAK = 0.12, 0.95      # level of each clip (the game's own lines are about 0.1 RMS)
-# The select screen calls out each golfer from the common sound set (B/T/M-P, sfx 0x19D-0x27F, always loaded):
-# the 16 by character, the extra page's even golfers (golfer 16 = Shy Guy) 0x270, a boy's line, the odd ones 0x271.
-# His replaces the boy's sample where it is (the rest of the set is the game's own and stays as it is).
+# The select screen's lines for each golfer are in the common sound set (B/T/M-P, sfx 0x19D-0x27F, always loaded):
+# an idle line when the cursor lands on a golfer (FUN_80013108 by golfer code: golfer 16 0x263) and a call when
+# one is picked (FUN_8040b56c: the extra page's even golfers 0x270, the odd ones 0x271). Golfer 16's are a boy's;
+# his clips replace those samples where they are (the rest of the set is the game's own and stays as it is), so a
+# clip longer than the boy's sample is fitted to it (fit_clip).
 COMMON_SET = ("B/T/M", "B/T/N", "B/T/O", "B/T/P")
-MENU_VOICE = {0x270: "ChrSel Ok.wav"}
+MENU_VOICE = {0x263: "ChrSel Swing.wav",     # the cursor on him (Mario Power Tennis plays it on hover too)
+              0x270: "ChrSel Ok.wav"}        # picked
+MENU_GAP = 0.04         # seconds a pause inside a fitted clip is shortened to
+MENU_SPEEDUP = 1.1      # most a fitted clip is sped up by, after that
 
 # Animation sounds: each golfer class's method 18 returns a list of 8-byte entries (animation, frame, sfx, 0,
 # volume) that FUN_8040bee4 plays as its animations pass those frames. Animations 0-4 are the end-of-hole
-# reactions (best to worst; a birdie is 1) and 5 the power shot. Shy Guy moves with Koopa's animations, so his list
+# reactions (best to worst; a birdie is 1); 5 is a long one with the golfer's special shot set (not the power shot). Shy Guy moves with Koopa's animations, so his list
 # is Koopa's (golf overlay 0x804D8A90, 42 entries) with Koopa's voice and power shot sounds, which aren't loaded
 # for golfer 16, turned into his (None drops the entry); the common sounds (footsteps and such) stay.
 KOOPA_ANIM_SOUNDS, KOOPA_ANIM_SOUND_COUNT = 0x804D8A90, 42
@@ -124,13 +129,18 @@ BODY_SCALE = 0.9
 BODY_BACK = 1.2
 
 # Mario Power Tennis' Shy Guy (mpt.py, --shyguy-mpt) comes with his own skeleton: each position's bone there picks
-# Koopa's. Arms (his bone -> 0 upper arm, 1 forearm, 2 wrist, 3 hand) move onto Koopa's arm line like the OBJ's, his
-# hand on Koopa's; legs and shoes (-> 0 hip, 1 knee, 2 ankle, 3 ball of the foot) stay where they are on Koopa's leg
-# bones; the rest (hood, mask, robe, belt, his shoulders 14/21) rides the pelvis, scaled and set back as above.
+# Koopa's. His sleeves (every vertex on his wrist bone, 17/24) move onto Koopa's arm line like the OBJ's arms, his
+# hand on Koopa's, and take Koopa's upper arm, forearm and wrist by how far out they are; where a sleeve meets the
+# robe it flares 2.5 units tall round the shoulder (inside MPT_SLEEVE), and that part stays with the robe: on Koopa's
+# upper arm it swung far out through the body as his arms came down. Legs and shoes (-> 0 hip, 1 knee, 2 ankle)
+# stay where they are on Koopa's leg bones, each shoe whole on the ankle (heel and toe on Koopa's ankle and ball of
+# the foot stretched the shoe as his foot rolled onto its toes); the rest (hood, mask, robe, belt) rides the pelvis,
+# scaled and set back as above.
 MPT_ARM = {14: 0, 15: 0, 16: 1, 17: 2, 18: 3, 19: 3, 20: 3, 21: 0, 22: 0, 23: 1, 24: 2, 25: 3, 26: 3}
-MPT_LEG = {45: 0, 46: 0, 47: 1, 48: 2, 49: 3, 50: 3, 53: 0, 54: 0, 55: 1, 56: 2, 57: 3, 58: 3}
+MPT_LEG = {45: 0, 46: 0, 47: 1, 48: 2, 49: 2, 50: 2, 53: 0, 54: 0, 55: 1, 56: 2, 57: 2, 58: 2}
 MPT_ELBOW, MPT_WRIST, MPT_HAND = {1: 16, -1: 23}, {1: 17, -1: 24}, {1: 18, -1: 25}
-MPT_ARM_ROOT = 2.4    # |x| (after BODY_SCALE) where his sleeves leave the robe
+MPT_ARM_ROOT = 2.4    # |x| (after BODY_SCALE) where his sleeves start moving onto Koopa's arm line
+MPT_SLEEVE = 3.0      # |x| (after BODY_SCALE) where a sleeve is clear of the robe: closer in, it rides the pelvis
 
 
 def u32(b, o):
@@ -290,10 +300,11 @@ def rig_mpt(model, joints):
         upper, fore, wrist, middle = ARM[s]
         shift = np.array(joints[middle]) - moved(their_joints[MPT_HAND[s]])
         w = smoothstep((s * pos[sel, 0] - MPT_ARM_ROOT) / ARM_RAMP)
+        flare = s * pos[sel, 0] < MPT_SLEEVE
         pos[sel] += w[:, None] * shift
         elbow, wrist_x = (s * (moved(their_joints[j[s]])[0] + shift[0]) for j in (MPT_ELBOW, MPT_WRIST))
         ax = s * pos[sel, 0]
-        bone[sel] = np.where(ax < elbow, upper, np.where(ax < wrist_x, fore, wrist))
+        bone[sel] = np.where(flare, PELVIS, np.where(ax < elbow, upper, np.where(ax < wrist_x, fore, wrist)))
     return pos, bone
 
 
@@ -849,9 +860,11 @@ def voice(clean_files, source):
     rates = {sid: rate for _, sid, _, rate, _, _ in musyx.sdir_entries(sdir)}
     for sfx, name in MENU_VOICE.items():
         sid = sample_of[sfx]
-        sdir, samp = musyx.replace_in_place(sdir, samp, sid, clip_pcm(clip, name, rates[sid]))
+        pcm = fit_clip(clip_pcm(clip, name, rates[sid]), musyx.room(sdir, samp, sid), rates[sid])
+        sdir, samp = musyx.replace_in_place(sdir, samp, sid, pcm)
     out[COMMON_SET[2]], out[COMMON_SET[3]] = sdir, samp
-    print(f"Shy Guy: select screen call -> {COMMON_SET[2]}, {COMMON_SET[3]} (sound 0x270 in place)")
+    print(f"Shy Guy: select screen lines -> {COMMON_SET[2]}, {COMMON_SET[3]} (sounds"
+          f" {', '.join(f'0x{s:X}' for s in MENU_VOICE)} in place)")
     return out
 
 
@@ -869,6 +882,25 @@ def anim_sound_table(golf):
                 continue
         out += struct.pack(">HHHBB", anim, frame, sfx, pad, vol)
     return out
+
+
+def fit_clip(x, room, rate):
+    """x in at most room samples: silence trimmed from both ends, pauses shortened to MENU_GAP, then sped up (by at
+    most MENU_SPEEDUP) if that's not enough."""
+    hop = rate // 100
+    level = np.array([np.sqrt(np.mean(x[i:i + hop] ** 2.0)) for i in range(0, len(x), hop)])
+    loud = np.nonzero(level >= 0.03 * level.max())[0]
+    keep, gap = [], int(MENU_GAP * 100)
+    for a, b in zip(loud[:-1], loud[1:]):
+        keep.append(a)
+        keep.extend(range(a + 1, b) if b - a - 1 <= gap else range(a + 1, a + 1 + gap))
+    keep.append(loud[-1])
+    y = np.concatenate([x[k * hop:(k + 1) * hop] for k in keep]).astype(np.float64)
+    if len(y) > room:
+        if len(y) > room * MENU_SPEEDUP:
+            raise SystemExit(f"Shy Guy: a menu clip of {len(y) / rate:.2f}s doesn't fit {room / rate:.2f}s")
+        y = musyx.resample(y, len(y), room - 1)
+    return np.round(y).astype(np.int64)[:room]
 
 
 def clip_pcm(clip, name, rate):

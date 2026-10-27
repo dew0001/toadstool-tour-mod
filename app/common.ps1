@@ -179,6 +179,81 @@ function Install-ModControllerProfile($userDir, $gameIni) {
 	return "Mod controls set for $($pad['Device'] -replace '^\w+/\d+/', ''): LB/RB clubs, LT/RT views, left stick aims and sets power."
 }
 
+# ---- Hotkeys for the mod. Fullscreen is Dolphin's, not the game's, so it's switched by a Dolphin hotkey: Alt+Enter
+# and, with an Xbox/PlayStation-style controller, clicking both sticks in (the GameCube has no stick buttons, so
+# the game never sees them). Esc no longer stops the game: Dolphin left fullscreen to ask "stop?"; Stop is
+# Shift+Esc. Dolphin's Hotkeys.ini is shared by every game, so only those two change, and only while they're still
+# Dolphin's own (or ours); a missing file is first written with Dolphin's built-in set (HotkeyManager::LoadDefaults,
+# Windows), since Dolphin leaves any hotkey the file doesn't list unbound.
+$ModHotkeysVersion = 1
+$DolphinStop = 'ESCAPE'
+$ModStop = '@(Shift+ESCAPE)'
+$DolphinFullscreen = '@(Alt+RETURN)'
+$DolphinHotkeyDefaults = [ordered]@{
+	'General/Open' = '@(Ctrl+O)'
+	'General/Toggle Pause' = 'F10'
+	'General/Stop' = $DolphinStop
+	'General/Toggle Fullscreen' = $DolphinFullscreen
+	'General/Take Screenshot' = 'F9'
+	'General/Open Achievements' = '@(Alt+A)'
+	'Emulation Speed/Disable Emulation Speed Limit' = 'TAB'
+	'Stepping/Step Into' = 'F11'
+	'Stepping/Step Over' = '@(Shift+F10)'
+	'Stepping/Step Out' = '@(Shift+F11)'
+	'Breakpoint/Toggle Breakpoint' = '@(Shift+F9)'
+	'Wii/Connect Wii Remote 1' = '@(Alt+F5)'
+	'Wii/Connect Wii Remote 2' = '@(Alt+F6)'
+	'Wii/Connect Wii Remote 3' = '@(Alt+F7)'
+	'Wii/Connect Wii Remote 4' = '@(Alt+F8)'
+	'Wii/Connect Balance Board' = '@(Alt+F9)'
+	'Other State Hotkeys/Undo Load State' = 'F12'
+	'Other State Hotkeys/Undo Save State' = '@(Shift+F12)'
+	'GBA Core/Load ROM' = '@(`Ctrl`+`Shift`+`O`)'
+	'GBA Core/Unload ROM' = '@(`Ctrl`+`Shift`+`W`)'
+	'GBA Core/Reset' = '@(`Ctrl`+`Shift`+`R`)'
+	'GBA Volume/Volume Down' = '`SUBTRACT`'
+	'GBA Volume/Volume Up' = '`ADD`'
+	'GBA Volume/Volume Toggle Mute' = '`M`'
+	'GBA Window Size/1x' = '`NUMPAD1`'
+	'GBA Window Size/2x' = '`NUMPAD2`'
+	'GBA Window Size/3x' = '`NUMPAD3`'
+	'GBA Window Size/4x' = '`NUMPAD4`'
+	'USB Emulation Devices/Show Skylanders Portal' = '@(Ctrl+P)'
+	'USB Emulation Devices/Show Infinity Base' = '@(Ctrl+I)'
+}
+foreach ($i in 1..8) {
+	$DolphinHotkeyDefaults["Load State/Load State Slot $i"] = "F$i"
+	$DolphinHotkeyDefaults["Save State/Save State Slot $i"] = "@(Shift+F$i)"
+}
+
+# Sets the mod's two hotkeys (see above) for the controller on Port 1. Returns a short status for the player.
+function Install-ModHotkeys($userDir, $device) {
+	$path = Join-Path $userDir 'Config\Hotkeys.ini'
+	if (-not (Test-Path $path)) {
+		$lines = New-Object System.Collections.Generic.List[string]
+		$lines.Add('[Hotkeys]')
+		$lines.Add('Device = DInput/0/Keyboard Mouse')
+		foreach ($k in $DolphinHotkeyDefaults.Keys) { $lines.Add("$k = $($DolphinHotkeyDefaults[$k])") }
+		New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+		[IO.File]::WriteAllLines($path, $lines)
+	}
+	$keys = Read-IniSection $path 'Hotkeys'
+	$set = [ordered]@{}
+	if ($keys['General/Stop'] -eq $DolphinStop) { $set['General/Stop'] = $ModStop }
+	$full = $keys['General/Toggle Fullscreen']
+	$ours = $full -eq $DolphinFullscreen -or $full -like "$DolphinFullscreen | (*Thumb L* & *Thumb R*)"
+	$sticks = $device -match '^(SDL|XInput)/'
+	if ($ours) {
+		$set['General/Toggle Fullscreen'] = if ($sticks) {
+			"$DolphinFullscreen | (``$($device):Thumb L`` & ``$($device):Thumb R``)"
+		} else { $DolphinFullscreen }
+	}
+	if ($set.Count) { Set-IniValues $path 'Hotkeys' $set }
+	$how = if ($ours -and $sticks) { 'click both sticks in, or Alt+Enter' } else { $full }
+	$stop = if ($keys['General/Stop'] -eq $DolphinStop -or $keys['General/Stop'] -eq $ModStop) { ' Stop the game: Shift+Esc.' } else { '' }
+	return "Fullscreen on/off: $how.$stop"
+}
+
 # Turn a patch (parsed JSON) into { disc path -> new bytes }, checking every result hash.
 function Get-PatchChanges($src, $disc, $patch) {
 	$changed = New-Object 'System.Collections.Generic.Dictionary[string,byte[]]'

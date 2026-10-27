@@ -37,6 +37,6 @@ git commit -m "Mod vN"
 git push
 ```
 
-If you change anything in `app\`, bump `app\version.txt` before publishing. `Play.bat` then updates its own scripts on everyone's PC before installing the new mod.
+If you change anything in `app\`, bump `app\version.txt` before publishing (v10 did: `Install-ModHotkeys` sets the fullscreen toggle and Esc). `Play.bat` then updates its own scripts on everyone's PC before installing the new mod.
 
 From v7 the build needs Shy Guy's source model: `Shy Guy.obj` and `heyho_body_alb.png` from the Sketchfab download, in `assets\shy-guy` next to the repo (or pass `-ShyGuy <folder>`). Only the converted model goes into the patch: golfer 16's files are built from Koopa's (named as each file's `base` in the patch), and Koopa's data in them goes in as copy instructions, never as bytes. From v8 it also needs his voice clips (`-ShyGuyVoice`, default `assets\shy-guy\mario-power-tennis-shy-guy-voice.zip`: the Sounds Resource's Mario Power Tennis "Shy Guy's Voice"); `shyguy.VOICE` says which clip plays for each of his lines, and the encoded samples go into the patch as a `replace` op. From v9 his model comes from Mario Power Tennis (`-ShyGuyMpt`, default `gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso` two folders above the repo: the maintainer's own disc); the OBJ is then only a fallback, and the converted model and pictures go into the patch as before.

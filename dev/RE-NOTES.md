@@ -151,6 +151,11 @@ patch), 0x80069F4C (560), 0x8006A834 (464), 0x80084B2C (464), 0x80090438 (404),
   putting (states 4-6, putter, setting on); `color_hook`, `blend_hook`, `zmode_hook` on the GX entries
   scale alpha by `GHOST_ALPHA`, force source-alpha blending and turn depth writes off during that draw, and
   remember the game's last blend and depth modes, which are put back afterwards.
+- v10: the see-through golfer is drawn twice, first for depth only (blend zero x source + one x what's there,
+  the materials' own depth writes), then see-through over that depth without writing it, so only its nearest
+  surfaces show (Shy Guy's legs, belt and the back of his mask showed through his robe). `GXSetColorUpdate`
+  0x8006E1E4 / `GXSetAlphaUpdate` 0x8006E210 can't do the first pass: the scene setup `FUN_8001fc0c` turns colour
+  writes back on mid-draw. The grid, cup and ball still show through him (they're drawn over the golfer).
 
 ## Characters (v7 Shy Guy)
 
@@ -210,7 +215,11 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   Shy Guy moves with Koopa's animations, so v9 gives golfer 16 a method in cave 9 returning Koopa's list with his
   voice IDs in place of Koopa's (`shyguy.ANIM_SOUNDS`).
 - **Select screen call:** `FUN_8040b56c` plays one common-set sound per golfer when picked (0x26F Koopa ... by
-  character code), and on the extra page 0x270 for even link golfers (golfer 16), 0x271 for odd ones.
+  character code), and on the extra page 0x270 for even link golfers (golfer 16), 0x271 for odd ones. Landing the
+  cursor on a golfer plays its idle line ("taiki"), `FUN_80013108(golfer code)`: 0x258-0x269 for the 16, 0x263
+  golfer 16, 0x25E golfer 17, also common-set sounds. v10 gives golfer 16 his lines in both (`shyguy.MENU_VOICE`).
+- **Putter at address:** the ball sits in the middle of the mallet putter's head at address for Koopa too; the
+  golfer's place by the ball isn't per character code, so Shy Guy stands exactly where Koopa does.
 - **Power shot effect:** shot type (setup +0x1CC; B steps through the types the shot allows, e.g. 1 Normal and 0
   Power off the tee, 2 Approach near the green, while power shots last: player +0x5200 byte) 0 is a power shot.
   At impact `FUN_804598c8` sets `_DAT_8050f1ac`: 2 when the launch speed is over `DAT_804def78` and setup +0x22D
@@ -299,12 +308,21 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   skin block's end (root +0x54, blocks of 0x20, +0 = end; bone list at root +0x4C), past the count field. Entries
   2,123-2,206 (his mouth) are zero in the file: the game fills them every frame from the face table at root +0x5C
   (4 bytes, then positions in the same format), checked against a RAM dump.
-- **Meshes:** body 3-16 (mask, eyes, robe, belt, legs, hood, hem, shoes); the rest are his racket, a ball, and a
-  leaf skirt and feathers for his special shots. Mario Power Tennis draws his eye whites black; `mpt.py` sorts mesh
-  4 by position into eyes, blush and the inside of his mouth.
-- **The port** (`mpt.shy_guy`, `shyguy.rig_mpt`): one 256x256 atlas of his textures at their own size; legs and
-  shoes stay where they are on Koopa's leg bones, the arms move onto Koopa's arm line with the hand on Koopa's,
-  and the rest rides the pelvis, 90% size and set back 1.2 units like the OBJ was.
+- **Texture data offsets count from the texture set's start** (0x40 in `B/G/P`), not the module's: v9 read every
+  texture 64 bytes early, so each began with the previous one's two smallest mip levels (a black or brown block in
+  its corner) and was shifted 16 texels; his hood rim, shoe tops and ankles came out black and brown. Each mip
+  chain is largest level first, levels under a CMPR block padded to 32 bytes.
+- **Meshes:** body 3-16 (mask 3, eyes 4/5, robe and sleeves 6, hood strap 7, belt 8 and buckle 12, legs 9, hood
+  10, robe hem 11, shoes 13/14, ankles 16); the rest are his racket, a ball, and a leaf skirt and feathers for his
+  special shots. Mario Power Tennis draws his eye whites black; `mpt.py` sorts mesh 4 by position into eyes, blush
+  and the inside of his mouth.
+- **The port** (`mpt.shy_guy`, `shyguy.rig_mpt`): one 256x256 atlas of his textures at their own size, each
+  padded 8 texels on 4x4 CMPR blocks and the free space filled with the nearest texture's colours (black space
+  darkened the textures' edges at small mip levels); legs stay where they are on Koopa's leg bones and each shoe
+  is whole on the ankle; the sleeves (all on his bones 17/24) move onto Koopa's arm line with the hand on Koopa's,
+  except the flare where they meet the robe (|x| under `MPT_SLEEVE`, 2.5 units tall), which rides the pelvis: on
+  Koopa's upper arm it swung far out through the body in the swing; the rest rides the pelvis, 90% size and set
+  back 1.2 units like the OBJ was.
 
 ## Menus
 

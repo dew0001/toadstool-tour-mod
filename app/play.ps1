@@ -176,7 +176,8 @@ MaxAnisotropy = 4
 # Force 16:9: Dolphin's automatic aspect detection sometimes flips to 4:3 and squeezes the picture.
 Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'AspectRatio' = '1' })
 # Start the mod fullscreen, covering the whole screen and taskbar (borderless, so Alt+Tab and overlays
-# behave); Alt+Enter switches back to a window. Other games keep their own setting.
+# behave); Alt+Enter or both sticks clicked in switch to a window and back (Install-ModHotkeys). Other games
+# keep their own setting.
 Set-IniValues $ini 'Display' ([ordered]@{ 'Fullscreen' = 'True' })
 Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'BorderlessFullscreen' = 'True' })
 # The HD textures are part of the mod, so keep them on even if this file predates them or was edited.
@@ -198,6 +199,13 @@ if (-not $layoutCurrent) {
 	Say (Install-ModControllerProfile $DolphinUserDir $ini)
 	$config['layout_version'] = $ModLayoutVersion
 	$config['layout_device'] = $device
+	Save-Config
+}
+# Fullscreen toggle and Esc (Install-ModHotkeys), set again when they change or you switch controllers.
+if ($config['hotkeys_version'] -ne $ModHotkeysVersion -or $config['hotkeys_device'] -ne $device) {
+	Say (Install-ModHotkeys $DolphinUserDir $device)
+	$config['hotkeys_version'] = $ModHotkeysVersion
+	$config['hotkeys_device'] = $device
 	Save-Config
 }
 
