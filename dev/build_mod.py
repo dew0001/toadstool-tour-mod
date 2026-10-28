@@ -95,6 +95,11 @@ Changes (v14):
   - Tony's impact zone is 5 frames (TONY_ZONE_FRAMES): his impact counter steps 2 through the whole zone, so it is
     two frames early to two late.
 
+Changes (v15):
+  - Tony drives 350 yards and is built bigger (tony.py TORSO_SHAPE, THICKNESS, HAND_SCALE), with an open paw on the
+    select screen instead of a crumpled fist. Golfer 17 can take another base golfer (tony.BASE; TONY_BASE: its
+    methods, and its constructor when its object is bigger, as Donkey Kong's is: GOLFER17_ALLOC). Still Waluigi.
+
 Patch code lives over dead functions (caves 1-14 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -394,16 +399,24 @@ VOICE_METHODS = {42: 0x804C7C00,   # ball near the hole (sfx 0xC3)
 # ---- v13: Tony the Tiger, golfer 17 (cave 14; only with --tony, which needs --shyguy)
 # Shy Guy's link record (slot 0) has a second golfer, golfer 17 (body 1), which v7 hid. Tony is it: cave 14 writes
 # his entry (tony.RECORD) after cave 9 writes Shy Guy's, and the extra page keeps its 2 cells per record. In rounds
-# golfer 17 (FUN_804c2404's default case) gets all of Waluigi's methods (code 1, FUN_804badbc; same object size and
-# base constructor) except the three that name its files, which tony.py builds from Waluigi's. Waluigi's voice
-# methods ask for his voice set, which isn't loaded for golfer 17, so Tony is silent (golfer 17's own set is a
-# girl's voice).
+# golfer 17 (FUN_804c2404's default case) gets all of his base golfer's methods (tony.BASE: Waluigi, code 1,
+# FUN_804badbc, same object size and base constructor; or Donkey Kong, code 9, see GOLFER17_ALLOC) except the three
+# that name its files, which tony.py builds from the base's. The base's voice methods ask for its voice set, which
+# isn't loaded for golfer 17, so Tony is silent (golfer 17's own set is a girl's voice).
 CAVE14 = 0x80053528         # dead FUN_80053528 (find_dead_code.py: DEAD)
 CAVE14_SIZE = 476
 CAVE14_FIRST = 0x9421FFA8
 GOLFER17_VTABLE = 0x804CABC8
-WALUIGI_VTABLE = 0x804C9DA8
 GOLFER17_FILE_METHODS = {22: 0x804CAD3C, 23: 0x804CAD30, 24: 0x804CAD48}   # golfer 17's: C/W/G, C/W/F, C/W/J
+TONY_BASE = None            # tony.BASES[tony.BASE] with --tony: the golfer whose methods (and files) he gets
+# Golfer 17 is made by FUN_804c2404's default case: `bl` the allocator (0x1E4 bytes, set at 0x804C2418), `bl` the
+# base constructor FUN_80407590, then its vtable. A base whose object is bigger (Donkey Kong's 0x1EC, with two
+# fields of his own) has golfer 17 made by that golfer's constructor instead (tony.BASES "ctor"; it allocates and
+# fills the object and sets its own vtable, which golfer 17's then replaces), and the base constructor call goes.
+GOLFER17_ALLOC = 0x804C2438
+GOLFER17_ALLOC_WORD = 0x4BB58239    # bl 0x8001a670
+GOLFER17_BASE_CTOR = 0x804C2440
+GOLFER17_BASE_CTOR_WORD = 0x4BF45151   # bl 0x80407590
 # Tony has no auto swing. On the swing meter (view 0xB in FUN_80412f6c) the power press decides it: A gives the auto
 # swing (setup +0x234 = 1, the game times the impact; sound 0x238), B the manual one (+0x234 = 0, the player presses
 # again at impact; sound 0x23E). `andi. r9,r0,0x300` at POWER_PRESS tests for either (r0 = setup +0x104, the buttons
@@ -1670,15 +1683,18 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
             put(buf, OVERLAY_BASE, CHIRP_HALF, CHIRP_HALF_WORDS[1], CHIRP_HALF_WORDS[0])
             put(buf, OVERLAY_BASE, LINK_EXP_FIRST, LINK_EXP_FIRST_TONY if "tony_record" in v9 else
                 LINK_EXP_FIRST_WORDS[1], LINK_EXP_FIRST_WORDS[0])
-        if v9 and "tony_record" in v9:  # golfer 17 (Tony) behaves like Waluigi, with his own files
+        if v9 and "tony_record" in v9:  # golfer 17 (Tony) behaves like his base golfer, with his own files
             for k in range(VTABLE_METHODS):
-                waluigi = word(buf, OVERLAY_BASE, WALUIGI_VTABLE + 4 * k)
+                theirs = word(buf, OVERLAY_BASE, TONY_BASE["vtable"] + 4 * k)
                 old = word(buf, OVERLAY_BASE, GOLFER17_VTABLE + 4 * k)
                 own = GOLFER17_FILE_METHODS.get(k)
                 if own is not None and old != own:
                     raise SystemExit(f"golfer 17's vtable entry {k} isn't the method this build keeps")
                 if own is None:
-                    put(buf, OVERLAY_BASE, GOLFER17_VTABLE + 4 * k, waluigi, old)
+                    put(buf, OVERLAY_BASE, GOLFER17_VTABLE + 4 * k, theirs, old)
+            if TONY_BASE.get("ctor"):
+                put(buf, OVERLAY_BASE, GOLFER17_ALLOC, ppc.bl(GOLFER17_ALLOC, TONY_BASE["ctor"]), GOLFER17_ALLOC_WORD)
+                put(buf, OVERLAY_BASE, GOLFER17_BASE_CTOR, 0x60000000, GOLFER17_BASE_CTOR_WORD)   # nop
             put(buf, OVERLAY_BASE, POWER_PRESS, ppc.bl(POWER_PRESS, v9["tony_power"]), POWER_PRESS_WORD)
             put(buf, OVERLAY_BASE, IMPACT_ZONE, ppc.b(IMPACT_ZONE, v9["tony_zone"]), IMPACT_ZONE_WORD)
             put(buf, OVERLAY_BASE, POWER_TICK, ppc.bl(POWER_TICK, v9["tony_power_tick"]), POWER_TICK_WORD)
@@ -1761,6 +1777,9 @@ def main():
         golf = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
         if TONY:
             import tony
+            global TONY_BASE
+            TONY_BASE = tony.BASES[tony.BASE]
+            print(f"Tony's base: {tony.BASE} (golfer {TONY_BASE['golfer']})")
             cave14, v14 = cave14_code(tony.RECORD)
             print(f"cave 14: {len(cave14)} of {CAVE14_SIZE} bytes at 0x{CAVE14:08X} (Tony's link record entry)")
         cave9, v9 = cave9_code(shyguy.RECORD, shyguy.anim_sound_table(golf),

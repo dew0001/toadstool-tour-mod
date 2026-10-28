@@ -276,7 +276,7 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   0x804CAD30, 0x804CAD48 name `C/W/G`, `C/W/F`, `C/W/J`; emblem `C/W/H`, face `C/W/I`, select model `B/V/L`) gets
   Waluigi's 47 methods (vtable 0x804C9DA8) except those three, so he moves with Waluigi's animations and is silent
   (Waluigi's voice set isn't loaded for him; golfer 17's own is a girl's). His record's +0x28 is 1: Waluigi's power
-  shot effects. Stats (Andrew's high-risk pick): 300 yards (each club is the drive x a fixed share, main.dol
+  shot effects. Stats (Andrew's high-risk pick): 350 yards (v13 240, then 270, v14 300; each club is the drive x a fixed share, main.dol
   `FUN_80009c58`: 100, 93, 86, 80, 74, 68, 63, 58, 53, 48, 43, 38, 31% for clubs 0-12, x (100 + the club set's
   bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 4 (v13: 2) on every shot but putts whatever
   the modifiers (see Impact window; checked in game on all 13 clubs, and with his stat forced to +10), a meter twice
@@ -286,6 +286,25 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   right): thumb 51-53 / 70-72, index 60-62 / 79-81, middle 57-59 / 76-78, ring 54-56 / 73-75, pinky 63-65 / 82-84
   (hands 50 / 69). The club sits in the curl of the fingers, so a model whose fingers ride only on the hand bone
   holds it outside the paw: `tony.py` maps each of Tony's finger joints onto these.
+  Matching a base's other models to its golf model (`tony.shifted_bone_map`): by the rig's child order first, as
+  the select screen models pose the hands (Waluigi's `B/V/C` holds the right hand half closed, and matching by place
+  swapped ring 73-75 and pinky 82-84). The select pose clenches that hand into a fist, which bunched the skin of
+  Tony's knuckles into a crumpled clump, so v15 gives the select model no finger bones (an open paw).
+  Other bases (`tony.BASES`; v15 tried Donkey Kong, which Andrew turned down): golfer objects are 0x1E4 bytes
+  (Waluigi, Luigi, Bowser, golfer 17) except Donkey Kong's, 0x1EC (`FUN_804bdfa4` stores a float from 0x804E29A8 at
+  +0x1E4 and +0x1E8 for his methods), so golfer 17 on his methods must be made by his constructor (build_mod.py
+  `GOLFER17_ALLOC`: `bl` it in place of the allocator at 0x804C2438, `nop` the base constructor call at
+  0x804C2440; golfer 17's vtable store then follows). Donkey Kong: `C/U/G`, `C/U/F`, `C/U/J`, select `B/U/Z`
+  (character 6), vtable 0x804CA500; pelvis 14, chest 40, neck 41, head 42, arms 66-69 / 85-88, fingers 70-84 /
+  89-103 (index, middle, ring, pinky, thumb), legs 16-18 / 28-30, toes 19-22 / 31-34, tie 62-65, club holder
+  104-110. His `B/U/Z` hangs the whole body one bone lower, 6.88 back, and poses the hands differently
+  (`tony.shifted_bone_map`). Bowser: `C/T/B`, `C/T/A`, `C/T/E`, select `B/V/I` (character 11), vtable 0x804C9C70,
+  root 0 at (-0.75, 0.23, -19.71), body 1, tail 2-6, spine 7, chest 8, head 9, arms 42-45 / 85-88, thumb and three
+  fingers 46-57 / 89-100, legs from the root 103-106 / 113-116. Luigi: select `B/U/V` (character 1), vtable
+  0x804C9A18.
+  Club reach is linear in the drive (`FUN_80009c58`), and the launch-speed search has no cap that bites at 350:
+  measured (`scripts\tony_drive_test.ps1`, Lakitu 1, power 58/60, impact on the mark) 300 yards carried 273.7 and
+  350 carried 315.5 / 324.4, each about 94% of `drive x 58/60` there (downhill, wind, spread).
   Voice slots for him (not built yet): a round loads golfer 17's own set, MusyX group 17 "ella" (`C/Y/U`-`X`, 20
   sounds 0x50-0x63; special shot set "shella" `D/B/S`, 0x15F-0x160). Golfer 17's own voice methods play [43] swing
   0x50, [44] nice impact 0x51, [42] ball near the hole 0x63, [46] chirps 0-7 0x5B-0x62 (jump table 0x804E2EFC);

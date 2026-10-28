@@ -5,6 +5,8 @@
 #
 #   test_dolphin.ps1 start [-Image <main.dol or .iso>] [-Profile <user folder>] [-Dolphin <Dolphin.exe>]
 #   test_dolphin.ps1 shot            take a screenshot, print its path (read it with any image viewer/tool)
+#   -ShotKey Options (start and shot): the pad button for screenshots, for a second test profile run while someone
+#   plays in the first one, whose focused window takes PS screenshots too
 #   test_dolphin.ps1 stop
 #   test_dolphin.ps1 play [-Image ...]   start it on the normal desktop for a person to play (their own controller
 #                                        mapping from their Dolphin, else keyboard controls)
@@ -14,7 +16,8 @@ param(
 	[Parameter(Mandatory, Position = 0)] [ValidateSet('start', 'shot', 'stop', 'play')] [string] $Action,
 	[string] $Image = (Join-Path $PSScriptRoot '..\..\..\build\sys\main.dol'),
 	[string] $Profile = (Join-Path $PSScriptRoot '..\..\..\mod\test-profile'),
-	[string] $Dolphin = (Join-Path $PSScriptRoot '..\..\..\..\dolphin-2606a-x64\Dolphin-x64\Dolphin.exe')
+	[string] $Dolphin = (Join-Path $PSScriptRoot '..\..\..\..\dolphin-2606a-x64\Dolphin-x64\Dolphin.exe'),
+	[ValidateSet('PS', 'Options')] [string] $ShotKey = 'PS'
 )
 $ErrorActionPreference = 'Stop'
 $Profile = (Resolve-Path $Profile).Path
@@ -190,7 +193,7 @@ switch ($Action) {
 			Fullscreen = 'False'; RenderToMain = 'False'; KeepWindowOnTop = 'False'; RenderWindowAutoSize = 'False'
 			RenderWindowXPos = '0'; RenderWindowYPos = '0'; RenderWindowWidth = '960'; RenderWindowHeight = '540'
 		}
-		Set-Ini (Join-Path $config 'Hotkeys.ini') 'Hotkeys' @{ Device = $pad; 'General/Take Screenshot' = '`PS`' }
+		Set-Ini (Join-Path $config 'Hotkeys.ini') 'Hotkeys' @{ Device = $pad; 'General/Take Screenshot' = "``$ShotKey``" }
 		Write-PadProfile $true
 		$listening = Get-NetUDPEndpoint -LocalAddress 127.0.0.1 -LocalPort 26760 -ErrorAction SilentlyContinue
 		if (-not $listening) {
@@ -206,7 +209,7 @@ switch ($Action) {
 	'shot' {
 		$dir = Join-Path $Profile 'ScreenShots'
 		$last = Get-ChildItem $dir -Recurse -Filter *.png -ErrorAction SilentlyContinue | Where-Object Name -NotLike '*.small.png' | Sort-Object LastWriteTime | Select-Object -Last 1
-		python -I (Join-Path $PSScriptRoot 'dsu_pad.py') press PS 120 | Out-Null
+		python -I (Join-Path $PSScriptRoot 'dsu_pad.py') press $ShotKey 120 | Out-Null
 		for ($i = 0; $i -lt 30; $i++) {
 			Start-Sleep -Milliseconds 200
 			$new = Get-ChildItem $dir -Recurse -Filter *.png -ErrorAction SilentlyContinue | Where-Object Name -NotLike '*.small.png' | Sort-Object LastWriteTime | Select-Object -Last 1

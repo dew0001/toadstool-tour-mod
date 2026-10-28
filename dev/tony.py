@@ -59,10 +59,15 @@ BASES = {
     "wario": {"golfer": 5, "model": "C/T/G", "pelvis": 104, "spine": 4, "chest": 5, "neck": 6, "head": 8,
               "clav": (38, 57), "upper": (39, 58), "fore": (40, 59), "hand": (41, 60), "hand_tip": (53, 72),
               "thigh": (107, 115), "shin": (108, 116), "foot": (109, 117), "toe": (110, 118)},
-    "luigi": {"golfer": 3, "model": "C/S/S", "pelvis": 113, "spine": 16, "chest": 17, "neck": 18, "head": 18,
+    "luigi": {"golfer": 3, "model": "C/S/S", "second": "C/S/Z", "bank": "C/S/R", "select": "B/U/V", "vtable": 0x804C9A18,
+              "pelvis": 113, "spine": 16, "chest": 17, "neck": 18, "head": 18,
               "clav": (94, 44), "upper": (95, 45), "fore": (96, 46), "hand": (97, 47), "hand_tip": (103, 53),
               "thigh": (116, 124), "shin": (117, 125), "foot": (118, 126), "toe": (119, 127)},
+    # A base that golfer 17 can become also names its other files (second model, texture bank, select screen model
+    # at 0x804459A0 + 4 x character code), its vtable, and its constructor when its object isn't golfer 17's 0x1E4
+    # bytes (build_mod.py builds golfer 17 with that one).
     "waluigi": {"golfer": 1, "model": "C/S/C", "hide_parts": (7,),     # part 7: the buttons on his overalls
+                "second": "C/S/J", "bank": "C/S/B", "select": "B/V/C", "vtable": 0x804C9DA8,
                 "pelvis": 3, "spine": 22, "chest": 22, "neck": 23, "head": 24,
                 "clav": (47, 66), "upper": (48, 67), "fore": (49, 68), "hand": (50, 69), "hand_tip": (59, 78),
                 "thigh": (5, 13), "shin": (6, 14), "foot": (7, 15), "toe": (8, 16),
@@ -70,14 +75,38 @@ BASES = {
                 "fingers": {"thumb": ((51, 52, 53), (70, 71, 72)), "index": ((60, 61, 62), (79, 80, 81)),
                             "middle": ((57, 58, 59), (76, 77, 78)), "ring": ((54, 55, 56), (73, 74, 75)),
                             "pinky": ((63, 64, 65), (82, 83, 84))}},
+    # Bowser (golfer 4, character code 11): heavy, a tail (bones 2-6), a thumb and three fingers (Tony's ring and
+    # pinky share his third), legs hung from the root bone 0, everything at x -0.75, z -19.7.
+    "bowser": {"golfer": 4, "model": "C/T/B", "second": "C/T/E", "bank": "C/T/A", "select": "B/V/I", "vtable": 0x804C9C70,
+               "pelvis": 1, "spine": 7, "chest": 8, "neck": 8, "head": 9,
+               "clav": (42, 85), "upper": (43, 86), "fore": (44, 87), "hand": (45, 88), "hand_tip": (54, 97),
+               "thigh": (103, 113), "shin": (104, 114), "foot": (105, 115), "toe": (106, 116),
+               "fingers": {"thumb": ((46, 47, 48), (89, 90, 91)), "index": ((49, 50, 51), (92, 93, 94)),
+                           "middle": ((52, 53, 54), (95, 96, 97)), "ring": ((55, 56, 57), (98, 99, 100)),
+                           "pinky": ((55, 56, 57), (98, 99, 100))}},
+    # Donkey Kong (golfer 9, character code 6): long arms, short legs, hunched. His object is 0x1EC bytes
+    # (FUN_804bdfa4 sets two floats at +0x1E4 / +0x1E8 that his methods use). Bones 62-65 are his tie, 104-110 the
+    # club holder, 111-118 the select screen's barrel; his body meshes (part 1) all go, the tie with them.
+    "dk": {"golfer": 9, "model": "C/U/G", "second": "C/U/J", "bank": "C/U/F", "select": "B/U/Z", "vtable": 0x804CA500,
+           "ctor": 0x804BDFA4, "pelvis": 14, "spine": 40, "chest": 40, "neck": 41, "head": 42,
+           "clav": (66, 85), "upper": (67, 86), "fore": (68, 87), "hand": (69, 88), "hand_tip": (75, 94),
+           "thigh": (16, 28), "shin": (17, 29), "foot": (18, 30), "toe": (21, 33),
+           "fingers": {"thumb": ((82, 83, 84), (101, 102, 103)), "index": ((70, 71, 72), (89, 90, 91)),
+                       "middle": ((73, 74, 75), (92, 93, 94)), "ring": ((76, 77, 78), (95, 96, 97)),
+                       "pinky": ((79, 80, 81), (98, 99, 100))}},
 }
 HEAD_SCALE = 1.4      # Tony's head bigger than his body's scale (the cast all have big heads)
-HAND_SCALE = 1.4      # and his paws (thickness; with finger bones the palm and fingers take the base's lengths, so
+HAND_SCALE = 1.75     # and his paws (thickness; with finger bones the palm and fingers take the base's lengths, so
                       # they close round the grip where the base's do)
-THICKNESS = {"clav": 1.2, "upper": 1.5, "fore": 1.5, "thigh": 1.7, "shin": 1.7, "foot": 1.3}
+FINGER_SCALE = 1.4    # his fingers a little thinner than the palm (as thick as v13-v14's whole paw): stretched to the
+                      # base's long fingers, fingers as thick as this palm crowd each other round the grip
+THICKNESS = {"clav": 1.9, "upper": 2.1, "fore": 1.9, "thigh": 2.1, "shin": 1.9, "foot": 1.45}
                       # arms and legs thicker than the torso's scale: stretched to the base's long limbs they
                       # would otherwise look thin
-TORSO_WIDTH = 1.2     # and his chest and hips broader (across and front to back)
+TORSO_SHAPE = {"pelvis": (1.3, 1.2), "spine": (1.48, 1.27), "chest": (1.7, 1.35)}
+                      # and his torso broader, (across, front to back) per segment, the chest most: a power hitter's
+                      # V (v15, Andrew: "bulk him up"; v13-v14 were 1.2 for all three, with paws 1.4 and limbs
+                      # clav 1.2, upper/fore 1.5, thigh/shin 1.7, foot 1.3)
 
 
 def bone_name(n):
@@ -182,11 +211,12 @@ def fit_transforms(tony, base, joints, bone_of=lambda b: b):
     sh_t = (t["c_arm_twist_offset.l"] + t["c_arm_twist_offset.r"]) / 2
     sh_w = (J(base["upper"][0]) + J(base["upper"][1])) / 2
     scale = (sh_w[1] - hip_w[1]) / (sh_t[1] - hip_t[1])        # the torso: hips to shoulders
-    S = scale * np.diag([TORSO_WIDTH, 1, TORSO_WIDTH])
-    torso = (S, hip_w - S @ hip_t)
-    out = {s: torso for s in ("pelvis", "spine", "chest")}
+    out = {}
+    for s, (across, depth) in TORSO_SHAPE.items():
+        S = scale * np.diag([across, 1, depth])
+        out[s] = (S, hip_w - S @ hip_t)
     neck_t = t["neck.x"]
-    neck_w = torso[0] @ neck_t + torso[1]
+    neck_w = out["chest"][0] @ neck_t + out["chest"][1]
     hs = scale * HEAD_SCALE
     out["neck"] = out["head"] = (hs * np.eye(3), neck_w - hs * neck_t)
     for side, k in (("l", 0), ("r", 1)):
@@ -219,7 +249,7 @@ def fit_transforms(tony, base, joints, bone_of=lambda b: b):
             jw.append(jw[2] + (jw[2] - jw[1]))
             for k3 in range(3):
                 out[f"{f}{k3 + 1}.{side}"] = limb_transform(jt[k3], jt[k3 + 1], jw[k3], jw[k3 + 1],
-                                                            scale * HAND_SCALE)
+                                                            scale * FINGER_SCALE)
     return out, scale
 
 
@@ -495,10 +525,11 @@ def as_obj(pos, mesh):
 
 # ---------------------------------------------------------------- golfer 17's files
 
-BASE = "waluigi"
-# golfer 17's files <- the base's: in-round models, texture bank, select screen model (Waluigi: golfer 1, whose
-# methods [22] [23] [24] name C/S/C, C/S/B, C/S/J, and character code 9, whose select screen model is B/V/C)
-SOURCES = {"C/W/G": "C/S/C", "C/W/J": "C/S/J", "B/V/L": "B/V/C", "C/W/F": "C/S/B"}
+BASE = "waluigi"     # v15 tried "dk" (Andrew: "he looks crazy on dk"); see BASES for what a base needs
+# golfer 17's files <- the base's: in-round models, texture bank, select screen model (e.g. Waluigi: golfer 1,
+# whose methods [22] [23] [24] name C/S/C, C/S/B, C/S/J, and character code 9, whose select screen model is B/V/C)
+SOURCES = {"C/W/G": BASES[BASE]["model"], "C/W/J": BASES[BASE]["second"], "B/V/L": BASES[BASE]["select"],
+           "C/W/F": BASES[BASE]["bank"]}
 GOLFER_MODEL, BANK = "C/W/G", "C/W/F"
 FACE = "C/W/I"            # in-round face beside the score (64x64 RGB5A3)
 PLATES = "C/W/H"          # emblem (texture 0) and name plate
@@ -508,14 +539,14 @@ PORTRAIT = (20, -8, (0, 2.45, 0.1), 0.42)      # face pictures: turn, tilt, cent
 EMBLEM_VIEW = (0, -5, (0, 2.47, 0.08), 0.44)
 NAME = b"Tony\x00\x00\x00\x00"
 # His golfer in the link record's slot 0 (record offsets: the second golfer's entry is at +0x2C, see
-# shyguy.RECORD): name twice, body 1 (golfer 17), right-handed, Waluigi's power shot effects (golfer code 1).
-# Andrew's trade-off pick, high risk and high reward: 300 yards (the longest regular golfer hits 220, the Star
-# versions 230 to 300; the game sizes every other club from the driver), high (3), curve to the default side (0)
-# slightly (1), the best control (4) and strong spin (5), but the lowest impact there is (-10, the game's floor; the
-# Star versions' lowest is -6), a 5-frame impact zone on his twice-as-fast meter, putts aside (build_mod.py
-# TONY_ZONE, POWER_TICK) and no auto swing (build_mod.py POWER_PRESS: only B sets his power).
-RECORD = {0x2C: NAME[:4], 0x3C: NAME[:4], 0x44: (300).to_bytes(4, "big"), 0x48: bytes([1, 0, 0, 3]),
-          0x4C: bytes([0, 1, 0xF6, 4]), 0x50: bytes([5, 0, 0, 0]), 0x54: bytes([1, 0, 0, 0])}
+# shyguy.RECORD): name twice, body 1 (golfer 17), right-handed, his base golfer's power shot effects (its code).
+# Andrew's trade-off pick, high risk and high reward: 350 yards, past every Star version (the longest regular
+# golfer hits 220, the Star versions 230 to 300; the game sizes every other club from the driver), high (3), curve
+# to the default side (0) slightly (1), the best control (4) and strong spin (5), but the lowest impact there is
+# (-10, the game's floor; the Star versions' lowest is -6), a 5-frame impact zone on his twice-as-fast meter, putts
+# aside (build_mod.py TONY_ZONE, POWER_TICK) and no auto swing (build_mod.py POWER_PRESS: only B sets his power).
+RECORD = {0x2C: NAME[:4], 0x3C: NAME[:4], 0x44: (350).to_bytes(4, "big"), 0x48: bytes([1, 0, 0, 3]),
+          0x4C: bytes([0, 1, 0xF6, 4]), 0x50: bytes([5, 0, 0, 0]), 0x54: bytes([BASES[BASE]["golfer"], 0, 0, 0])}
 # The select screen's lines for golfer 17 are the Game Boy Advance girl's (common set: 0x25E the cursor on him,
 # 0x271 the pick call of odd link golfers): silent, until he has a voice of his own.
 MENU_SILENT = (0x25E, 0x271)
@@ -713,6 +744,46 @@ def skinned_swap(raw, pos, nrm, uv, tris, weights, tex, place, tex_size, levels,
     return mod.pack(), len(slots), len(runs), len(extra_runs)
 
 
+def shifted_bone_map(src, dst, pelvis, tol=2.0):
+    """The base's golf model bone -> the same bone in its other models (second model, select screen), also when the
+    skeleton sits elsewhere and hangs under an extra root bone (Donkey Kong's select screen B/U/Z: everything one
+    bone lower and 6.88 back), unlike shyguy.bone_map: the shift is the pelvis's, found as the bone at
+    its height straight below or behind it, and a root bone of src may match any bone of dst. Under parents that
+    match, children match in order: all of them when both have as many, else as long as each pair heads as many
+    bones (his select screen hands are posed differently, so the nearest finger can be the wrong one; the golf
+    model's right hand has the club holder after the five fingers); the rest by place."""
+    ws, wd = mdl.world_bind(src), mdl.world_bind(dst)
+    at = lambda w, b: np.array([w[b][3], w[b][7], w[b][11]])
+    p = at(ws, pelvis)
+    j = min(range(len(wd)), key=lambda j: abs(at(wd, j)[0] - p[0]) + abs(at(wd, j)[1] - p[1]))
+    shift = at(wd, j) - p
+    ps, pd = [q for q, _ in mdl.bones(src)], [q for q, _ in mdl.bones(dst)]
+
+    def size(parents, b):
+        return 1 + sum(size(parents, k) for k in range(len(parents)) if parents[k] == b)
+    out, used = {}, set()
+    for i in range(len(ws)):
+        best = None
+        if ps[i] in out:
+            kids_s = [k for k in range(len(ps)) if ps[k] == ps[i]]
+            kids_d = [k for k in range(len(pd)) if pd[k] == out[ps[i]]]
+            n = len(kids_s) if len(kids_s) == len(kids_d) else 0
+            while n < min(len(kids_s), len(kids_d)) and size(ps, kids_s[n]) == size(pd, kids_d[n]):
+                n += 1
+            if kids_s.index(i) < n and kids_d[kids_s.index(i)] not in used:
+                best = (None, kids_d[kids_s.index(i)])
+        for j in range(len(wd)) if not best else ():
+            if j in used or (ps[i] in out and pd[j] != out[ps[i]]) or (ps[i] not in out and ps[i] >= 0):
+                continue
+            d = float(np.linalg.norm(at(ws, i) + shift - at(wd, j)))
+            if d < tol and (best is None or d < best[0]):
+                best = (d, j)
+        if best:
+            out[i] = best[1]
+            used.add(best[1])
+    return out
+
+
 def build(clean_files, folder, current=None, verbose=True):
     """{disc path: new file} for golfer 17: models, texture bank, pictures. current: files already changed by the
     build (Shy Guy's extra page pictures), which his are added to."""
@@ -737,16 +808,22 @@ def build(clean_files, folder, current=None, verbose=True):
     for rel in (GOLFER_MODEL, "C/W/J", "B/V/L"):
         mraw = read(SOURCES[rel])
         m = mdl.Model(mraw)
-        # 2.0: the select screen's Waluigi holds his right pinky tip 1.56 from the golf model's
-        bmap = {b: b for b in range(len(mdl.bones(m)))} if rel == GOLFER_MODEL else shyguy.bone_map(ref, m, 2.0)
-        joints = base_joints(base, m)
-        missing = sorted({b for s in tony.segments for b in [segment_bone(base, s)] if b not in bmap})
+        # the other models' bones by the rig's order first (shifted_bone_map): matched by place alone, the select
+        # screen's Waluigi, whose right hand is posed half closed, swapped Tony's ring and pinky
+        bmap = ({b: b for b in range(len(mdl.bones(m)))} if rel == GOLFER_MODEL
+                else shifted_bone_map(ref, m, base["pelvis"]))
+        # The select screen holds no club, and its pose clenches Waluigi's right hand into a fist that bunched the skin
+        # of Tony's knuckles into a crumpled clump (v13-v14): there his fingers ride the paw, an open paw.
+        fit = {k: v for k, v in base.items() if k != "fingers"} if rel == "B/V/L" else base
+        need = {segment_bone(fit, s) for s in tony.segments}
+        joints = base_joints(fit, m)
+        missing = sorted(b for b in need if b not in bmap)
         if missing:
             raise SystemExit(f"Tony: {SOURCES[rel]} has no bones matching {base['model']} {missing}")
-        transforms, scale = fit_transforms(tony, base, joints, lambda b: bmap[b])
+        transforms, scale = fit_transforms(tony, fit, joints, lambda b: bmap[b])
         pos = fit_points(mesh["pos"], mesh["weights"], tony.segments, transforms)
         weights = bone_weights(mesh["weights"], tony.segments,
-                               {s: bmap[segment_bone(base, s)] for s in tony.segments})
+                               {s: bmap[segment_bone(fit, s)] for s in tony.segments})
         meshes, count = m.p(m.root + 0x40), m.u32(m.root + 0x3C)
         body = [i for i in range(count) if m.u32(meshes + 0x3C * i + 0x38) == shyguy.BODY_PART]
         texset = m.p(m.root + 0x8C)

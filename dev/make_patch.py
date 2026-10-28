@@ -58,11 +58,11 @@ FILES = [  # (disc path, compressed?) - every file build_mod.py touches
 MIN_COPY = 64   # shorter matches with the original stay as edits
 # Files the build makes from another file of the game: the patch starts from that one ("base"), so what they share
 # goes in as copies. Shy Guy's golfer 16 files are built from Koopa Troopa's (dev/shyguy.py SOURCES), Tony's
-# golfer 17 files from Waluigi's (dev/tony.py SOURCES).
+# golfer 17 files from his base golfer's (dev/tony.py BASE and SOURCES: Waluigi's or Donkey Kong's).
 BASE = {"files/C/W/B": "files/C/V/S", "files/C/W/E": "files/C/V/Z", "files/B/V/K": "files/B/V/D",
-        "files/C/W/A": "files/C/V/R",
-        "files/C/W/G": "files/C/S/C", "files/C/W/J": "files/C/S/J", "files/B/V/L": "files/B/V/C",
-        "files/C/W/F": "files/C/S/B"}
+        "files/C/W/A": "files/C/V/R"}
+import tony  # noqa: E402
+BASE.update({f"files/{ours}": f"files/{theirs}" for ours, theirs in tony.SOURCES.items()})
 
 
 def runs(old, new):
