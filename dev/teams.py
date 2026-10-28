@@ -19,7 +19,8 @@ count and scorecard per team), so the game's own Doubles scoring, score panel, s
     (tee shots first, then off the green, farthest from the pin first) gets loaded into the team record; after
     the shot it goes back to the slot, and the team record shows the team's best: the best holed score once no
     teammate can still beat it (the hole is then over for the team), else the fewest strokes still playing.
-  - Scramble / Team Scramble (one side, d15 = 1): members take turns from the team's lie; each one's result goes
+  - Scramble / Team Scramble (one side, d15 = 1): members take turns from the team's lie, starting with the member
+    whose ball the team plays (v17), each one's result going
     to a slot instead of the team's lie. After a hole-out that ball is taken at once; after the last member the
     captain picks from a menu (the game's post-shot menu: a header row and one row per ball, with its distance
     and lie; the best shot is highlighted first: holed, then no penalty, then the distance to the pin weighted
@@ -209,6 +210,8 @@ def data_block():
         a.word(name, 0)
     a.label("members")
     a(0)
+    a.label("starts")                         # v17: each team's first shooter, the member whose ball it plays
+    a(0)
     a.label("slots")
     a(*([0] * (4 * SLOT_SIZE // 4)))
     for k, text in enumerate(HELP_TEXTS):
@@ -233,6 +236,25 @@ def data_block():
     t(*([0] * (4 * OPTION_TEXT // 4)))
     t.label("labels")
     t(*([0] * (4 * 8 // 4)))
+    # strokes and putts (bl, replaces addi r9,r9,1) and a mulligan (bl, replaces addi r9,r9,-1): in a scramble
+    # only each round's first shot counts. Keeps r3, r4, r11; r0, r10, r12 scratch.
+    d = a.labels
+
+    def first_test():                         # returns (cr0 eq) when this shot counts
+        _la(t, 12, d["team_mode"])
+        t(ppc.lwz(12, 0, 12), ppc.cmpwi(12, SCRAMBLE), ppc.BLTLR)
+        t(ppc.lis(12, 0x804E), ppc.lbz(10, D17 & 0xFFFF, 12), ppc.lbz(12, D15 & 0xFFFF, 12),
+          ppc.divw(0, 10, 12), ppc.mullw(0, 0, 12), ppc.subf(10, 0, 10))   # the shooter's team
+        _la(t, 12, d["members"])
+        t(ppc.lbzx(10, 12, 10), ppc.cmpwi(10, 0), ppc.BEQLR)
+    t.label("stroke")
+    t(ppc.addi(9, 9, 1))
+    first_test()
+    t(ppc.addi(9, 9, -1), ppc.BLR)
+    t.label("mulligan")
+    t(ppc.addi(9, 9, -1))
+    first_test()
+    t(ppc.addi(9, 9, 1), ppc.BLR)
     return (code, a.labels), (t.assemble(), t.labels)
 
 
@@ -300,7 +322,8 @@ def pick_code(d):
     # take(r3 = team, r4 = member): that member's shot becomes the team's lie; a penalty only now.
     a.label("take")
     _enter(a, 0x20, 29)
-    a(ppc.mr(31, 3))
+    _la(a, 12, d["starts"])
+    a(ppc.stbx(4, 12, 3), ppc.mr(31, 3))
     _lbz_abs(a, 12, D15)
     a(ppc.mullw(12, 12, 4), ppc.add(12, 12, 31))
     _slot(a, 30, 12, d)
@@ -764,6 +787,8 @@ def hooks_code(d, x, b, at, e):
     _la(a, 10, d["choose_menu"])
     a(ppc.stw(9, 0, 10))
     _la(a, 10, d["menu_open"])
+    a(ppc.stw(9, 0, 10))
+    _la(a, 10, d["starts"])
     a(ppc.stw(9, 0, 10), ppc.cmpwi(11, TEAM_SCRAMBLE))
     a.br("beq", "setup_team")
     a(ppc.mtcrf(0xFF, 12), ppc.BLR)
@@ -801,7 +826,10 @@ def hooks_code(d, x, b, at, e):
     a(ppc.lbzx(11, 10, 3), ppc.lbz(12, REC_STROKES, 9), ppc.cmpwi(12, 0))
     a.br("bne", "pick_rotate")
     a(ppc.li(11, 0), ppc.stbx(11, 10, 3))
-    a.label("pick_rotate")
+    a.label("pick_rotate")                    # from the member whose ball the team plays, round in order
+    _la(a, 10, d["starts"])
+    a(ppc.lbzx(12, 10, 3), ppc.add(11, 11, 12), ppc.lbz(12, STATE_D16, 31), ppc.lbz(10, STATE_D15, 31),
+      ppc.divw(12, 12, 10), ppc.divw(10, 11, 12), ppc.mullw(10, 10, 12), ppc.subf(11, 10, 11))
     a(ppc.lbz(12, STATE_D15, 31), ppc.mullw(12, 12, 11), ppc.add(12, 12, 3), ppc.stb(12, STATE_D17, 31))
     a(ppc.li(12, 0), ppc.cmpwi(11, 0))
     a.br("beq", "pick_face")
@@ -809,22 +837,6 @@ def hooks_code(d, x, b, at, e):
     a.label("pick_face")                      # the HUD's big face: the lead, or a partner
     a(ppc.stb(12, REC_TOGGLE, 9))
     a.b(PICK_DONE)
-
-    # -- strokes and putts (bl, replaces addi r9,r9,1) and a mulligan (bl, replaces addi r9,r9,-1): in a
-    # scramble only the team's first member of each round counts. Keeps r3, r4, r11; r10, r12 scratch.
-    def member_test():
-        _la(a, 12, d["team_mode"])
-        a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, SCRAMBLE), blt_lr)
-        a(ppc.lis(12, 0x804E), ppc.lbz(10, D17 & 0xFFFF, 12), ppc.lbz(12, D15 & 0xFFFF, 12),
-          ppc.divw(10, 10, 12), ppc.cmpwi(10, 0), beq_lr)
-    a.label("stroke")
-    a(ppc.addi(9, 9, 1))
-    member_test()
-    a(ppc.addi(9, 9, -1), ppc.BLR)
-    a.label("mulligan")
-    a(ppc.addi(9, 9, -1))
-    member_test()
-    a(ppc.addi(9, 9, 1), ppc.BLR)
 
     # -- after a shot (b from SHOT_HOOK): r30 = player. Not a scramble: the game's own penalty and lie code.
     a.label("shot")
@@ -878,9 +890,7 @@ def hooks_code(d, x, b, at, e):
     a(ppc.lbzx(11, 26, 31), ppc.addi(11, 11, 1), ppc.stbx(11, 26, 31))
     a(ppc.lbz(0, 0x28, 27), ppc.cmpwi(0, 0))
     a.br("beq", "shot_more")
-    a(ppc.mr(3, 31), ppc.mr(4, 11))                         # in the hole: take it now
-    a.bl(x["best_of"])
-    a(ppc.mr(4, 3), ppc.mr(3, 31))
+    a(ppc.divw(4, 25, 24), ppc.mr(3, 31))                   # in the hole: the holer's ball, now
     a.bl(x["take"])
     a.br("b", "shot_out")
     a.label("shot_more")
@@ -1056,7 +1066,7 @@ def caves():
         if len(code) > size:
             raise SystemExit(f"team games, cave {name}: {len(code)} bytes; only {size} fit")
         out.append((at, first, code))
-    labels = {**h.labels, "cam_update": c.labels["cam_update"], **{f"best_{k}": v for k, v in b_labels.items()}, **{f"pick_{k}": v for k, v in x.labels.items()},
+    labels = {**h.labels, "stroke": t["stroke"], "mulligan": t["mulligan"], "cam_update": c.labels["cam_update"], **{f"best_{k}": v for k, v in b_labels.items()}, **{f"pick_{k}": v for k, v in x.labels.items()},
               **{f"data_{k}": v for k, v in d.items()}}
     labels["_texts"] = [(HELP_IDS[k], d[f"help_{k}"]) for k in range(len(NAMES))] + \
         [(MSG_TEAM_HELP, d["team_help"])] + [(ALT_IDS[k], e.labels[f"alt_{k}"]) for k in range(len(ALT_IDS))]

@@ -24,7 +24,7 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | Cave | Size | Was | Holds |
 | --- | --- | --- | --- |
 | 0x8006EAB4 | 736 | SDK torus helper | v1 widescreen stubs (ortho, matrix, aspect) |
-| 0x8003E86C | 1104 | `C_MTX44Concat` | v2 camera data block, fast-forward, follow camera |
+| 0x8003E86C | 1104 | `C_MTX44Concat` | v2 camera data block, fast-forward (v17: held C-stick up, the mod's RT, or R; was A), follow camera |
 | 0x8003AE84 | 1872 | `OSCheckActiveThreads` | v2/v3/v4 putt aim view, replay prompt, message hook, HUD anchors, see-through draw |
 | 0x80021C60 | 2200 | printf-style formatter | v3 HUD anchor table (data only) |
 | 0x800411B8 | 1076 | FUN_800411b8 | v4 quarter-step power |
@@ -111,7 +111,8 @@ wiped before the first frame.
   further presses add spin (setup +0x24C), and the phase ends when CA4 passes CA8 + 15. Replays press when CB8 /
   CA4 equal the recorded setup +0x190 / +0x1AC. v13 cave 14 (`tony_power_tick`, `tony_impact_tick`) runs golfer
   17's meter twice as fast off the putter: CB8 steps 2, stopping on the top and on 2 x max - 1; CA4 steps 2 on even
-  numbers through his zone (`TONY_ZONE`), so it lands on 0 and the zone is as wide early as late, then 1 (the spin
+  numbers through his zone (v13-v16 `TONY_ZONE`, v17 the zone in use, 0x80523CB0), so it lands on 0 and the zone
+  is as wide early as late, then 1 (the spin
   presses keep most of their time: 14 frames after the mark instead of 16). Checked in game: 120 counts a second
   (60 normally), top and lapse met, v14 CA4 ... -4 -2 0 2 4 5 6 ..., putts 60.
 - **Range adjust** in `FUN_80412f6c` (aim update): analog L/R (+0x130/+0x134) tick a step when
@@ -251,7 +252,11 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   method +0x24 (`FUN_80416ad4`): a per-club base plus a share that grows in thirds of `impact + 10`.
   v13: cave 14's `tony_zone` (on `FUN_804169d0`'s first instruction) returns `TONY_ZONE` for golfer 17 unless it's
   a putt. With his meter's impact counter stepping 2, a zone of Z takes Z + 1 frames: v13 2 (3 frames), v14 4 (5
-  frames, -4 -2 0 2 4: Andrew's "5 frames").
+  frames, -4 -2 0 2 4: Andrew's "5 frames"). v17 drops that stub (Andrew: "isnt affected by the club selection and
+  lie like everyone else"): the stat getter call in this function (`bl FUN_8044c5bc` at 0x80416A80, r3 = player,
+  r29 = setup) adds 9 for golfer 17, so his -10 card reads about 0 to the table (the getter's own +1 included; 10
+  gave every club but the driver 9). Checked in game off the tee: driver 5, clubs 1-5 7, clubs 6-12 9; a wedge from
+  about 50 yards 7; with an odd zone the even steps take Z frames (5: -4..4).
 - **Golfer objects in a round:** `FUN_804074a8(code)` makes each golfer: Koopa (15) in `FUN_804bd45c`, vtable
   0x804CA3C8; golfer 16 in `FUN_804c7220`'s default case, vtable 0x804CC948. Both are 0x1E4 bytes on the same
   base constructor `FUN_80407590`. The vtables have 47 methods; [22], [23] and [24] return the file IDs of the
@@ -291,8 +296,8 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   (Waluigi's voice set isn't loaded for him; golfer 17's own is a girl's). His record's +0x28 is 1: Waluigi's power
   shot effects. Stats (Andrew's high-risk pick): 350 yards (v13 240, then 270, v14 300; each club is the drive x a fixed share, main.dol
   `FUN_80009c58`: 100, 93, 86, 80, 74, 68, 63, 58, 53, 48, 43, 38, 31% for clubs 0-12, x (100 + the club set's
-  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 4 (v13: 2) on every shot but putts whatever
-  the modifiers (see Impact window; checked in game on all 13 clubs, and with his stat forced to +10), a meter twice
+  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone set by club and lie as everyone's but
+  read about 10 points up (v17; v13-v16 pinned it: 2, then 4, see Impact window), a meter twice
   as fast off the putter (see Meter ticks; with the zone, 5 frames on time; v13 had 3), and no auto swing (see Power). The select screen's lines for him, common-set 0x25E (cursor) and 0x271 (odd link golfers' pick
   call), are the girl's: v13 makes them silent. Waluigi's in-round model draws his overalls' buttons as mesh part
   7 (not part 1, the body): `tony.py` hides that part too. Waluigi's `C/S/C` has three bones per finger (left /
@@ -506,6 +511,10 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
   of the hole intro is not the emblem: it is the mode's icon, file IDs at 0x804D5FF8[mode slot 4-15].
 - **Music:** main.dol `FUN_80011a94(situation, course)`, a 16 x 7 song table; v11 plays Blooper Bay's for 8.
 - **Saves:** the hole-in-one mask store (golf 0x804682F4) would wrap course 8 onto Lakitu Valley's; v11 skips it.
+- **Reach** (v17): a club's reach is `FUN_8044c344(player, club)` = `FUN_80009c58(drive, club, set)` (one call, at
+  0x8044C434, for the 16 golfers' drives from 0x804D2980 + id x 0x1C and link golfers' from their record +0x1A).
+  On course 8 a stub adds 35 to the drive first (course8.py `REACH_HOOK`): checked, Mario's driver reads 247 yards
+  on Pebble Beach's 1st tee (212 elsewhere).
 - **Auto-aim** (v12): every new shot starts from `FUN_804abd70(setup, player)`: yaw (setup +0x1D8) at the pin, then
   by case: pin in reach (2) the power is fitted; out of reach (3, 4) it searches the hole's collision for a landing
   spot. `FUN_804a7874` classes every collision triangle by its surface's score (method [11], called at
@@ -591,10 +600,13 @@ Doubles (alternate shot) is the game's only team mode; v16 bends it into Best Ba
     score and a lie in the hole, so the game ends the team's hole (and match play compares teams as usual); else
     the fewest strokes still playing and the lie's in-hole flag cleared. Gotcha hit: comparing a slot address
     with `cmpwi 0` (our addresses are negative as signed words).
-  - Scramble: `pick` makes the shooter side + sides x member (member reset when +0x1BC is 0); `stroke` /
-    `mulligan` count only member 0; `shot` replaces the penalty/lie block: each member's result goes to a slot
-    (OB: the lie again, flagged; drop: `FUN_80426f38` into the slot); a hole-out is taken at once; after the last
-    member the team's captain (its lowest controller port, player +0x5164; no human: the best shot) picks.
+  - Scramble: `pick` makes the shooter side + sides x member, member = (start + shots this round) mod members
+    (round count reset when +0x1BC is 0; v17 start = the member whose ball the team plays, so they hit first: Andrew
+    "if we all hit and pick player 4's ball then player 4 gets to hit first"; a holer leads off the next hole);
+    `stroke` / `mulligan` (cave "text") count only each round's first shot; `shot` replaces the penalty/lie block:
+    each member's result goes to a slot (OB: the lie again, flagged; drop: `FUN_80426f38` into the slot); a
+    hole-out takes the holer's ball at once; after the last member the team's captain (its lowest controller port,
+    player +0x5164; no human: the best shot) picks.
   - The captain's menu is a post-shot menu (`FUN_80483564`, type 2 with its codes replaced: a header row, code 10,
     which can't be chosen, then codes 0..n-1, texts 0x129 + code from our buffers through the message hook,
     cursor +0x40 starting on the best shot). As CUR_MENU (0x804ECE30) the scene would stop for it (0x80404134) and

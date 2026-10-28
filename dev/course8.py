@@ -24,6 +24,8 @@ loaded at 0x80400000; see dev/RE-NOTES.md "Courses"):
   - Sky: the hole loader's sky choice sends course 8 to Blooper Bay's sea sky instead of Lakitu Valley's.
   - Icon: the course select shows texture 7 of B/W/R (the star medallion) for index 7; icons_file() redraws it.
   - Auto-aim (v12): another hole's fairway, fringe and green are no target (AIM_SCORE, a stub in cave 13).
+  - Distance (v17): every golfer's drive is DRIVE_BONUS yards longer on this course (the clubs scale with it), as
+    the real holes are long for the game's golfers (REACH_HOOK, a stub in cave 13).
 The holes themselves (models, collision, flyover cameras) come from dev/course (holegen.py, coursejson.py).
 """
 import struct
@@ -60,6 +62,9 @@ COURSE_NOW = 0x804E68F4     # golf: course code byte of the round
 # too, so it aimed at other holes; those triangles carry collision.ATTR_OTHER_HOLE, and the stub scores them 79.
 AIM_SCORE = 0x804A7A20      # golf: cmpwi r3,0x4f after the score call (r27 = triangle record + 0xC)
 AIM_SCORE_WORD = 0x2C03004F
+REACH_HOOK = 0x8044C434     # golf FUN_8044c344 (a club's reach): bl FUN_80009c58(f1 = drive, r3 = club, r4 = set)
+REACH = 0x80009C58
+DRIVE_BONUS = 35.0          # yards added to every golfer's drive on this course
 AIM_SCORE_MIN = 0x50
 OTHER_HOLE_ATTR = 0x0100      # course/collision.py ATTR_OTHER_HOLE
 MUSIC = 0x80011A94          # main.dol: addi r0,r4,-1 (r4 = course code)
@@ -277,6 +282,16 @@ def cave13_code(list_addr):
     a.label("aim_score_cmp")
     a(AIM_SCORE_WORD, ppc.BLR)
 
+    a.label("reach")           # every golfer drives DRIVE_BONUS yards farther here (f1 = drive)
+    hi, lo = ppc.hi_lo(COURSE_NOW)
+    a(ppc.lis(12, hi), ppc.lbz(12, lo, 12), ppc.cmpwi(12, CODE))
+    a.br("bne", "reach_game")
+    a.la(12, "drive_bonus")
+    a(ppc.lfs(0, 0, 12), ppc.fadds(1, 1, 0))
+    a.label("reach_game")
+    a.b(REACH)
+    a.float("drive_bonus", DRIVE_BONUS)
+
     a.label("ace_guard")       # the hole-in-one mask store, skipped on course 8
     hi, lo = ppc.hi_lo(COURSE_NOW)
     a(ppc.lis(12, hi), ppc.lbz(12, lo, 12), ppc.cmpwi(12, CODE))
@@ -318,6 +333,7 @@ def overlay_patches(rel, labels, word):
         out.append((RESOLVE_HOOK, ppc.b(RESOLVE_HOOK, labels["resolve"]), LI_R8_0))
         out.append((ACE_HOOK, ppc.b(ACE_HOOK, labels["ace_guard"]), ACE_WORDS[0]))
         out.append((AIM_SCORE, ppc.bl(AIM_SCORE, labels["aim_score"]), AIM_SCORE_WORD))
+        out.append((REACH_HOOK, ppc.bl(REACH_HOOK, labels["reach"]), ppc.bl(REACH_HOOK, REACH)))
         out.append((SKY_TEST, ppc.b(SKY_TEST, labels["sky"]), SKY_TEST_WORD))
         out.append((NAME_SITES["golf"], ppc.bl(NAME_SITES["golf"], labels["name"]), NAME_ADD))
         entry = CARD_TABLE + 4 * CODE

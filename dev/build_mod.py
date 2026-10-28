@@ -105,6 +105,11 @@ Changes (v16):
     with the captain's pick menu and its camera (teams.py: stubs and data in nine more dead functions, menu icons
     and labels appended to B/V/V and B/V/W); the carousel's Doubles is "Team Play" (B/V/T texture 9).
 
+Changes (v17):
+  - Tony's impact zone follows club and lie like everyone's (IMPACT_STAT_CALL, TONY_IMPACT_SHIFT); fast-forward
+    is Right Trigger (C-stick up) or R, not A; Pebble Beach adds 35 yards to every drive (course8.py REACH_HOOK);
+    in a scramble the picked ball's player hits first (teams.py).
+
 Patch code lives over dead functions (caves 1-14 below, and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -175,6 +180,9 @@ AIM_BALL = 0x80502734       # golf overlay: ball position the aim camera works f
 STATE_SWING, STATE_LAUNCHED = 5, 6  # player +0x24 during the swing / stroke animation
 STATE_BALL_MOVING = 7       # player +0x24 while the ball flies/rolls
 PAD_A = 0x100
+PAD_R = 0x20
+PAD_CSTICK_Y = 0x1A         # pad state (player +0x4F14): C-stick Y, s8; the mod's controls put RT on its up
+FF_STICK = 40               # how far up counts as held
 FF_EXTRA_UPDATES = 2        # holding A runs this many extra updates per frame (3x speed)
 
 # No opening movie: FUN_8000de5c plays the logos, then the opening movie (A/T/L) in a loop that runs until a
@@ -431,24 +439,25 @@ GOLFER17_BASE_CTOR_WORD = 0x4BF45151   # bl 0x80407590
 POWER_PRESS = 0x80413240
 POWER_PRESS_WORD = 0x70090300
 TONY_GOLFER = 17
-# Tony's impact zone is 5 frames on every shot but putts. FUN_804169d0(lie object, setup) gives the zone, the most
-# impact error that still counts (`2 x entry - 1` from the table at 0x804DAFD4, by club, lie and impact stat;
-# RE-NOTES "Impact window"); his impact stat alone can't pin it, since club sets add up to +4 and the getter another
-# +1. Its first instruction (`stwu r1,-0x88(r1)`) becomes a branch to cave 14, which returns TONY_ZONE for golfer 17
-# when the club isn't the putter (putts return 0 there anyway). His meter's impact counter steps 2 on even numbers
-# through the zone (IMPACT_TICK below), so a zone of 4 takes -4, -2, 0, 2 and 4: two frames early to two late
-# (Andrew asked for 3 frames, then 5).
-TONY_ZONE_FRAMES = 5
-TONY_ZONE = TONY_ZONE_FRAMES - 1
-IMPACT_ZONE = 0x804169D0
-IMPACT_ZONE_WORD = 0x9421FF78
+# Tony's impact zone. FUN_804169d0(lie object, setup) gives the zone, the most impact error that still counts
+# (`2 x entry - 1` from the table at 0x804DAFD4, by club, lie and impact stat; RE-NOTES "Impact window"). v13-v16
+# pinned his at 4 on every club and lie; v17 lets club and lie set it as for everyone (Andrew: "isnt affected by the
+# club selection and lie like everyone else"): the stat getter's answer (`bl FUN_8044c5bc` at IMPACT_STAT_CALL)
+# gets TONY_IMPACT_SHIFT added for golfer 17, so his card still shows -10 while the table reads him at about 0 (with
+# the getter's own +1: driver off the tee 5, long irons 7, wedges 9, less from the rough and sand; a shift of 10
+# gave every club but the driver 9). His meter's impact counter steps 2 on even numbers
+# through the zone (IMPACT_TICK below), so a zone of 5 takes -4, -2, 0, 2 and 4: 5 frames, a zone of 9 nine.
+TONY_IMPACT_SHIFT = 9
+IMPACT_STAT_CALL = 0x80416A80
+IMPACT_STAT = 0x8044C5BC
+IMPACT_ZONE_NOW = 0x80523CB0  # the zone in use (the meter block's +0xC)
 # His swing meter runs twice as fast (not on putts). FUN_8046e440 ticks it once a frame through the meter block
 # 0x80523CA4 (r31): on the power bar (view 0xB) the counter +0x14 (0x80523CB8; power = it, mirrored past the top)
 # goes up 1, and the meter lapses when it equals 2 x max - 1 exactly; after the power press (view 0xC) the impact
 # counter +0 (0x80523CA4) goes up 1 from power - 2 x max, and the impact error is it (0 = on the mark). Replays
 # press when the counters equal the recorded ones. For golfer 17: the power bar steps 2, stopping on the top (setup
 # +0x250) and on 2 x max - 1 so full power and the lapse are still met exactly (POWER_TICK, `addi r9,r9,1`; r9 the
-# counter, r11 the setup); the impact counter steps 2 on even numbers to the end of his zone (TONY_ZONE), so it lands
+# counter, r11 the setup); the impact counter steps 2 on even numbers to the end of his zone (IMPACT_ZONE_NOW), so it lands
 # on 0 exactly and the zone is the same width early and late, then 1 again, so the time left for spin presses is
 # about the game's (IMPACT_TICK, the `lwz r9,0(r31)` before the game's +1; cr0 and r10 are live past it, so the stub
 # leaves them alone).
@@ -479,15 +488,16 @@ def cave14_code(record):
     a(ppc.andi_(9, 0, 0x200), 0x4E800020)     # B only; blr
     a.label("power_any")
     a(ppc.andi_(9, 0, 0x300), 0x4E800020)
-    a.label("tony_zone")                      # replaces FUN_804169d0's stwu: r4 = setup, r12 and cr0 free
-    a(ppc.lwz(12, 0x1D4, 4), ppc.cmpwi(12, 13))
-    a.br("beq", "zone_game")                  # a putt
-    a(ppc.lwz(12, 0x25C, 4), ppc.lbz(12, 0x51EF, 12), ppc.cmpwi(12, TONY_GOLFER))
-    a.br("bne", "zone_game")
-    a(ppc.li(3, TONY_ZONE), 0x4E800020)       # blr
-    a.label("zone_game")
-    a(IMPACT_ZONE_WORD)
-    a.b(IMPACT_ZONE + 4)
+    a.label("tony_impact")                    # replaces bl FUN_8044c5bc (r3 = player) in the zone's lookup
+    a(ppc.stwu(1, -16, 1), ppc.mflr(0), ppc.stw(0, 20, 1), ppc.stw(31, 12, 1), ppc.mr(31, 3))
+    a.bl(IMPACT_STAT)
+    a(ppc.lbz(12, 0x51EF, 31), ppc.cmpwi(12, TONY_GOLFER))
+    a.br("bne", "tony_impact_done")
+    a(ppc.addi(3, 3, TONY_IMPACT_SHIFT), ppc.cmpwi(3, 10))
+    a.br("ble", "tony_impact_done")
+    a(ppc.li(3, 10))
+    a.label("tony_impact_done")
+    a(ppc.lwz(31, 12, 1), ppc.lwz(0, 20, 1), ppc.mtlr(0), ppc.addi(1, 1, 16), 0x4E800020)
 
     def tony_check(other):                    # golfer 17 off the putter, else to `other`; r11 = setup, r12 scratch
         a(ppc.lwz(12, 0x1D4, 11), ppc.cmpwi(12, 13))
@@ -512,7 +522,8 @@ def cave14_code(record):
     a.label("tony_impact_tick")               # replaces lwz r9,0(r31): the game adds 1 to what this leaves in r9
     a(ppc.lwz(9, 0, 31))
     tony_check("impact_tick_done")
-    a(ppc.cmpwi(9, TONY_ZONE))
+    hi, lo = ppc.hi_lo(IMPACT_ZONE_NOW)
+    a(ppc.lis(12, hi), ppc.lwz(12, lo, 12), ppc.cmpw(9, 12))
     a.br("bge", "impact_tick_done")           # past his zone: the game's pace
     a(ppc.addi(9, 9, 2), ppc.rlwinm(9, 9, 0, 0, 30), ppc.addi(9, 9, -1))   # next even number, less the game's 1
     a.label("impact_tick_done")
@@ -727,8 +738,12 @@ def cave2_code(aim_place):
     a.label("ff_loop")
     a(ppc.lwz(4, 0x24, 31), ppc.cmpwi(4, STATE_BALL_MOVING))
     a.br("bne", "ff_done")
-    a(ppc.lwz(4, 0x4F14, 31), ppc.lhz(4, 0, 4), ppc.andi_(4, 4, PAD_A))  # shooter's pad: held buttons
+    # v17: Right Trigger (C-stick up) or R held, not A (Andrew: "switch fast forward off of A to Right Trigger")
+    a(ppc.lwz(4, 0x4F14, 31), ppc.lbz(0, PAD_CSTICK_Y, 4), ppc.extsb(0, 0), ppc.cmpwi(0, FF_STICK))
+    a.br("bgt", "ff_go")
+    a(ppc.lhz(4, 0, 4), ppc.andi_(4, 4, PAD_R))  # shooter's pad: held buttons
     a.br("beq", "ff_done")
+    a.label("ff_go")
     a(ppc.mr(3, 31))
     a.bl(PLAYER_UPDATE)
     a(ppc.addi(30, 30, -1), ppc.cmpwi(30, 0))
@@ -1706,7 +1721,8 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
                 put(buf, OVERLAY_BASE, GOLFER17_ALLOC, ppc.bl(GOLFER17_ALLOC, TONY_BASE["ctor"]), GOLFER17_ALLOC_WORD)
                 put(buf, OVERLAY_BASE, GOLFER17_BASE_CTOR, 0x60000000, GOLFER17_BASE_CTOR_WORD)   # nop
             put(buf, OVERLAY_BASE, POWER_PRESS, ppc.bl(POWER_PRESS, v9["tony_power"]), POWER_PRESS_WORD)
-            put(buf, OVERLAY_BASE, IMPACT_ZONE, ppc.b(IMPACT_ZONE, v9["tony_zone"]), IMPACT_ZONE_WORD)
+            put(buf, OVERLAY_BASE, IMPACT_STAT_CALL, ppc.bl(IMPACT_STAT_CALL, v9["tony_impact"]),
+                ppc.bl(IMPACT_STAT_CALL, IMPACT_STAT))
             put(buf, OVERLAY_BASE, POWER_TICK, ppc.bl(POWER_TICK, v9["tony_power_tick"]), POWER_TICK_WORD)
             put(buf, OVERLAY_BASE, IMPACT_TICK, ppc.bl(IMPACT_TICK, v9["tony_impact_tick"]), IMPACT_TICK_WORD)
     if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record (and Tony's beside it)
