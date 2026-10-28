@@ -85,7 +85,8 @@ class Course:
                           if f["tags"].get("golf") in ("cartpath", "path") and f["kind"] == "way" and len(f["pts"]) > 1]
         self.roads = [(LineString(f["pts"]), f["tags"].get("highway")) for f in self.features
                       if f["tags"].get("highway") and f["kind"] == "way" and len(f["pts"]) > 1
-                      and f["tags"].get("highway") not in ("footway", "path", "steps")]
+                      and f["tags"].get("highway") not in ("footway", "path", "steps")
+                      and f["tags"].get("golf") not in ("cartpath", "path")]   # most cart paths are service roads too
         self.trees = [tuple(p["pt"]) for p in self.points if p["tags"].get("natural") == "tree"]
         self.land = self._land()
         self._mirror()
@@ -191,6 +192,25 @@ class Course:
         start = Point(line.coords[0])
         return sorted([p for p, t in self.kinds.get("tee", []) if p.distance(start) < 60],
                       key=lambda p: p.distance(start))
+
+    def holes_of(self, kind):
+        """[(polygon, set of hole numbers)] for "fairway" or "green": a green belongs to the hole it ends
+        (green_of; a practice green to none), a fairway to every hole whose line passes within 10 m, else the
+        nearest hole within 40 m (the neighbouring courses' fairways belong to none)."""
+        cache = self.__dict__.setdefault("_holes_of", {})
+        if kind not in cache:
+            greens = {n: self.green_of(n) for n in self.holes}
+            out = []
+            for p, t in self.kinds.get(kind, []):
+                if kind == "green":
+                    own = {n for n, g in greens.items() if g is p}
+                else:
+                    own = {n for n, line in self.holes.items() if line.distance(p) < 10}
+                    near = min(self.holes, key=lambda n: self.holes[n].distance(p))
+                    own = own or ({near} if self.holes[near].distance(p) < 40 else set())
+                out.append((p, own))
+            cache[kind] = out
+        return cache[kind]
 
 
 if __name__ == "__main__":

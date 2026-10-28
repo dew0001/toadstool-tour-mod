@@ -76,6 +76,11 @@ Changes (v11):
   - The No Wind item's red X sits on the wind gauge again (PROJ_CALLERS 0x804307D0).
   - With --course8 <folder>: an 8th course, Pebble Beach (course8.py, caves 11-13; its files from dev/course).
 
+Changes (v12):
+  - Shy Guy gets no experience screen after a round (LINK_EXP_FIRST: link golfers start at 17).
+  - Pebble Beach: the auto-aim keeps to the hole being played (course8.AIM_SCORE); roads inside the course and the
+    cart paths play as cart path, not out of bounds (dev/course).
+
 Patch code lives over dead functions (caves 1-10 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -350,6 +355,10 @@ LINK_COMMENTS_WORDS = (0x38000001, 0x38000000)
 # 8-15 ran past its 8 lines into other messages (left-over Japanese text); everyone else's use chirp & 7.
 CHIRP_HALF = 0x8046F3F0          # C/L/V: srawi r0,r29,2 (r29 = chirp) -> srawi r0,r28,2 (r28 = chirp & 7)
 CHIRP_HALF_WORDS = (0x7FA01670, 0x7F801670)
+# v12: at a round's end FUN_80400a64 gives each link golfer (code over 15) whose record names the player the
+# round's experience (record +0x278) and then shows the experience screen. Shy Guy (16) isn't one: start at 17.
+LINK_EXP_FIRST = 0x80400AB8      # C/L/V: cmplwi r11,0xf (r11 = the player's golfer code) -> cmplwi r11,0x10
+LINK_EXP_FIRST_WORDS = (0x280B000F, 0x280B0010)
 # In rounds each golfer is an object made by FUN_804074a8(code) with a vtable of 47 methods in the golf overlay.
 # Golfer 16 (code 0x10, made by FUN_804c7220's default case) gets Koopa Troopa's methods (code 15, FUN_804bd45c;
 # same object size and base constructor) except the three that name its files, which shyguy.py builds from Koopa's,
@@ -1528,6 +1537,7 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
             put(buf, OVERLAY_BASE, STAR_SWAP_HOOK, ppc.bl(STAR_SWAP_HOOK, v9["star_swap"]),
                 ppc.bl(STAR_SWAP_HOOK, GX_SET_SWAP))
             put(buf, OVERLAY_BASE, CHIRP_HALF, CHIRP_HALF_WORDS[1], CHIRP_HALF_WORDS[0])
+            put(buf, OVERLAY_BASE, LINK_EXP_FIRST, LINK_EXP_FIRST_WORDS[1], LINK_EXP_FIRST_WORDS[0])
     if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record
         put(buf, OVERLAY_BASE, GBA_FILL_HOOK, ppc.bl(GBA_FILL_HOOK, v9["link_record"]),
             ppc.bl(GBA_FILL_HOOK, GBA_FILL_TARGET))

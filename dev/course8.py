@@ -23,6 +23,7 @@ loaded at 0x80400000; see dev/RE-NOTES.md "Courses"):
     goes through a stub that swaps 0xAF for NAME_MSG, which build_mod.py's message hook answers with NAME.
   - Sky: the hole loader's sky choice sends course 8 to Blooper Bay's sea sky instead of Lakitu Valley's.
   - Icon: the course select shows texture 7 of B/W/R (the star medallion) for index 7; icons_file() redraws it.
+  - Auto-aim (v12): another hole's fairway, fringe and green are no target (AIM_SCORE, a stub in cave 13).
 The holes themselves (models, collision, flyover cameras) come from dev/course (holegen.py, coursejson.py).
 """
 import struct
@@ -54,6 +55,13 @@ ACE_HOOK = 0x804682F4       # golf: or r0,r0,r10 / stw r0,-0x5978(r11): the hole
 ACE_WORDS = (0x7C005378, 0x900BA688)
 ACE_DONE = 0x804682FC
 COURSE_NOW = 0x804E68F4     # golf: course code byte of the round
+# v12: the auto-aim (FUN_804abd70, every new shot) picks its landing spot from triangles whose surface scores 80+
+# (method [11]: fairway, fringe, green), sorted by FUN_804a7874. Our hole files hold their neighbours' fairways
+# too, so it aimed at other holes; those triangles carry collision.ATTR_OTHER_HOLE, and the stub scores them 79.
+AIM_SCORE = 0x804A7A20      # golf: cmpwi r3,0x4f after the score call (r27 = triangle record + 0xC)
+AIM_SCORE_WORD = 0x2C03004F
+AIM_SCORE_MIN = 0x50
+OTHER_HOLE_ATTR = 0x0100      # course/collision.py ATTR_OTHER_HOLE
 MUSIC = 0x80011A94          # main.dol: addi r0,r4,-1 (r4 = course code)
 MUSIC_FIRST = 0x3804FFFF
 MUSIC_COURSE = 4            # Blooper Bay's column: the seaside course
@@ -262,6 +270,13 @@ def cave13_code(list_addr):
     a(ppc.li(4, file_id(CARD_FILE)))
     a.b(CARD_LOAD)
 
+    a.label("aim_score")       # the auto-aim's landing classes: another hole's ground scores 79, not a target
+    a(ppc.lhz(0, -0xC, 27), ppc.andi_(0, 0, OTHER_HOLE_ATTR))   # r27 = the next triangle's attribute
+    a.br("beq", "aim_score_cmp")
+    a(ppc.li(3, AIM_SCORE_MIN - 1))
+    a.label("aim_score_cmp")
+    a(AIM_SCORE_WORD, ppc.BLR)
+
     a.label("ace_guard")       # the hole-in-one mask store, skipped on course 8
     hi, lo = ppc.hi_lo(COURSE_NOW)
     a(ppc.lis(12, hi), ppc.lbz(12, lo, 12), ppc.cmpwi(12, CODE))
@@ -302,6 +317,7 @@ def overlay_patches(rel, labels, word):
         out.append((ID_BY_HOLE["golf"], ppc.b(ID_BY_HOLE["golf"], labels["id_golf"]), MR_R8_R3))
         out.append((RESOLVE_HOOK, ppc.b(RESOLVE_HOOK, labels["resolve"]), LI_R8_0))
         out.append((ACE_HOOK, ppc.b(ACE_HOOK, labels["ace_guard"]), ACE_WORDS[0]))
+        out.append((AIM_SCORE, ppc.bl(AIM_SCORE, labels["aim_score"]), AIM_SCORE_WORD))
         out.append((SKY_TEST, ppc.b(SKY_TEST, labels["sky"]), SKY_TEST_WORD))
         out.append((NAME_SITES["golf"], ppc.bl(NAME_SITES["golf"], labels["name"]), NAME_ADD))
         entry = CARD_TABLE + 4 * CODE

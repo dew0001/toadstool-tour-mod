@@ -20,8 +20,11 @@ import dem
 import pebble
 
 SEA, BEACH, ROCK, NATURAL, ROUGH, CUT, FAIRWAY, FRINGE, GREEN, BUNKER, TEE, PATH, ROAD, WATER, BUILDING = range(15)
+# v12: another hole's fairway, fringe and green (they play as their own surface, marked so the game's auto-aim
+# leaves them alone), and roads inside the course (in play, as cart path)
+FAIRWAY_X, FRINGE_X, GREEN_X, PAVED = range(15, 19)
 NAMES = ["sea", "beach", "rock", "natural", "rough", "first cut", "fairway", "fringe", "green", "bunker", "tee",
-         "cart path", "road", "water", "building"]
+         "cart path", "road", "water", "building", "other fairway", "other fringe", "other green", "paved path"]
 DETAIL = 110      # metres either side of the hole line: fine grid
 REGION = 520      # metres: how far the hole's model reaches
 FINE, COARSE = 2.5, 9.0
@@ -33,11 +36,19 @@ class HoleTerrain:
     pass
 
 
-def classify(course, xs, ys):
-    """Surface code of world points (arrays), highest priority last."""
+def classify(course, xs, ys, n=None):
+    """Surface code of world points (arrays), highest priority last. With hole n, the other holes' fairways and
+    greens get the _X codes."""
     out = np.full(xs.shape, NATURAL, np.int8)
     inside_course = contains_xy(course.area.buffer(-2), xs, ys)
     out[inside_course] = ROUGH
+
+    def split(kind):
+        mine = [p for p, own in course.holes_of(kind) if n is None or n in own]
+        other = [p for p, own in course.holes_of(kind) if n is not None and n not in own]
+        return mine, other
+    fairways, other_fairways = split("fairway")
+    greens, other_greens = split("green")
 
     def paint(polys, code, grow=0.0):
         if not polys:
@@ -51,15 +62,19 @@ def classify(course, xs, ys):
     paint([p for p, t in k.get("beach", [])], BEACH)
     paint([p for p, t in k.get("rock", [])], ROCK)
     paint([p for p, t in k.get("fairway", [])], CUT, 2.0)
-    paint([p for p, t in k.get("fairway", [])], FAIRWAY)
-    paint([p for p, t in k.get("green", [])], FRINGE, 1.5)
-    paint([p for p, t in k.get("green", [])], GREEN)
+    paint(other_fairways, FAIRWAY_X)
+    paint(fairways, FAIRWAY)
+    paint(other_greens, FRINGE_X, 1.5)
+    paint(greens, FRINGE, 1.5)
+    paint(other_greens, GREEN_X)
+    paint(greens, GREEN)
     paint([p for p, t in k.get("tee", [])], TEE)
     paint([p for p, t in k.get("bunker", [])], BUNKER)
     paint([p for p, t in k.get("water", [])], WATER)
     roads = [ls.buffer(3.0 if kind in ("residential", "unclassified", "tertiary", "secondary", "primary",
                                        "service") else 2.0) for ls, kind in course.roads]
     paint(roads, ROAD)
+    out[(out == ROAD) & inside_course] = PAVED     # out of bounds only outside the course
     paint([ls.buffer(1.2) for ls in course.cartpaths], PATH)
     paint([p for p, t in k.get("building", [])], BUILDING)
     sea = ~contains_xy(course.land, xs, ys)
@@ -91,7 +106,7 @@ def build(n, fine=FINE, coarse=COARSE):
     in_corr = contains_xy(corridor, FX, FY)
     in_reg = contains_xy(region, FX, FY)
     t.FX, t.FY, t.in_corr, t.in_reg = FX, FY, in_corr, in_reg
-    codes = classify(c, FX, FY)
+    codes = classify(c, FX, FY, n)
     t.codes = codes
     t.H = heights(c, FX, FY, codes)
     t.course = c
@@ -102,7 +117,8 @@ def preview(t, path):
     from PIL import Image
     pal = np.array([(30, 70, 150), (225, 210, 165), (110, 100, 90), (70, 105, 45), (75, 140, 50), (90, 160, 60),
                     (110, 190, 70), (120, 200, 90), (140, 220, 110), (240, 230, 190), (100, 180, 80),
-                    (170, 165, 150), (120, 120, 120), (50, 110, 190), (200, 120, 100)], np.float64)
+                    (170, 165, 150), (120, 120, 120), (50, 110, 190), (200, 120, 100), (130, 180, 120),
+                    (130, 190, 130), (150, 200, 140), (150, 150, 140)], np.float64)
     img = pal[t.codes]
     gy, gx = np.gradient(t.H, t.fine[1], t.fine[0])
     shade = np.clip(0.85 - 0.5 * (gx * 0.7 - gy * 0.7) / np.sqrt(1 + gx ** 2 + gy ** 2), 0.35, 1.25)

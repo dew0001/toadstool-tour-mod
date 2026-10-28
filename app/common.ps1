@@ -129,54 +129,111 @@ function Set-IniValues($path, $section, $values) {
 	[IO.File]::WriteAllLines($path, $lines)
 }
 
-# ---- Controller layout for the mod (Xbox-style names; SDL and XInput controllers both use them)
+# ---- Controller layout for the mod, the same on every controller
 # LB/RB pick clubs, LT/RT switch views, left stick left/right aims and up/down sets the power (up moves the
-# landing spot farther: the game's L, down closer: its R), right stick left/right still turns the camera
-# and up/down also sets the power, View/Back gives side views (the game's Z). The sticks drive the game's
-# analog L/R, so the landing spot moves faster the further you tilt; a 25% dead zone keeps aiming from
-# nudging it. Full tilt also clicks L/R for the menus that use them.
-$ModLayoutVersion = 3
+# landing spot farther: the game's analog L, down closer: its analog R), right stick left/right still turns the
+# camera and up/down also sets the power, View/Back gives side views (the game's Z). The sticks drive the game's
+# analog L/R, so the landing spot moves faster the further you tilt; a 25% dead zone keeps aiming from nudging
+# it. Clicking a stick in is the game's L or R button (lefty and Star on the character select screen).
+# v12: the layout no longer depends on the player's Port 1 setup, which could name a controller that isn't plugged
+# in (then nothing worked). Every binding names each controller Dolphin may see: XInput (Xbox controllers, most PC
+# pads, and PlayStation/Switch controllers through Steam or DS4Windows) and SDL (Dolphin's default, any controller
+# SDL knows, buttons by position: Xbox A = PlayStation Cross = Switch B). Whichever is plugged in works.
+$ModLayoutVersion = 4
 $ModProfileName = 'Toadstool Tour Mod'
-$ModLayout = [ordered]@{
-	'Main Stick/Up'     = '`Shoulder R`'
-	'Main Stick/Down'   = '`Shoulder L`'
-	'C-Stick/Up'        = '`Trigger R`'
-	'C-Stick/Down'      = '`Trigger L`'
-	'Triggers/L'        = ''  # analog only (filled below): a digital L would force full speed
-	'Triggers/R'        = ''
-	'Triggers/L-Analog' = ''  # stick up: landing spot farther (filled from the player's own stick setup)
-	'Triggers/R-Analog' = ''  # stick down: landing spot closer
-	'Triggers/Dead Zone' = '25.000000000000000'
-	'Buttons/Z'         = '`Back`'
+$ModLayout = [ordered]@{   # face buttons by position (A south, B east, X west, Y north); both stick dialects use the rest
+	'Buttons/A'         = 'A'
+	'Buttons/B'         = 'B'
+	'Buttons/X'         = 'X'
+	'Buttons/Y'         = 'Y'
+	'Buttons/Z'         = 'Back'
+	'Buttons/Start'     = 'Start'
+	'Main Stick/Up'     = 'Shoulder R'
+	'Main Stick/Down'   = 'Shoulder L'
+	'Main Stick/Left'   = 'Left X-'
+	'Main Stick/Right'  = 'Left X+'
+	'C-Stick/Up'        = 'Trigger R'
+	'C-Stick/Down'      = 'Trigger L'
+	'C-Stick/Left'      = 'Right X-'
+	'C-Stick/Right'     = 'Right X+'
+	'Triggers/L'        = 'Thumb L'   # pressed L/R also push the analog all the way (Dolphin), as a GameCube's do
+	'Triggers/R'        = 'Thumb R'
+	'Triggers/L-Analog' = 'Left Y+', 'Right Y+'   # stick up (Y+ is up in both dialects): landing spot farther
+	'Triggers/R-Analog' = 'Left Y-', 'Right Y-'   # stick down: closer
+	'D-Pad/Up'          = 'Pad N'
+	'D-Pad/Down'        = 'Pad S'
+	'D-Pad/Left'        = 'Pad W'
+	'D-Pad/Right'       = 'Pad E'
+}
+$ModFaceNames = @{
+	'XInput' = @{ 'A' = 'Button A'; 'B' = 'Button B'; 'X' = 'Button X'; 'Y' = 'Button Y' }
+	'SDL'    = @{ 'A' = 'Button S'; 'B' = 'Button E'; 'X' = 'Button W'; 'Y' = 'Button N' }
+}
+# SDL names controllers by model (SDL/0/<name> is the first of that model); these are the ones SDL itself names.
+$ModSdlNames = 'Xbox 360 Controller', 'Xbox 360 Wireless Controller', 'Xbox One Controller', 'Xbox One S Controller',
+	'Xbox One Elite Controller', 'Xbox One Elite 2 Controller', 'Xbox Series X Controller', 'Xbox Adaptive Controller',
+	'PS3 Controller', 'PS4 Controller', 'PS5 Controller', 'DualSense Wireless Controller',
+	'DualSense Edge Wireless Controller', 'Nintendo Switch Pro Controller', 'Steam Controller'
+# Dolphin's own keyboard layout for Port 1, for players without a GCPadNew.ini (Dolphin then uses these).
+$DolphinKeyboardDefaults = [ordered]@{
+	'Buttons/A' = '`X`'; 'Buttons/B' = '`Z`'; 'Buttons/X' = '`C`'; 'Buttons/Y' = '`S`'; 'Buttons/Z' = '`D`'
+	'Buttons/Start' = '`RETURN`'; 'Main Stick/Up' = '`UP`'; 'Main Stick/Down' = '`DOWN`'; 'Main Stick/Left' = '`LEFT`'
+	'Main Stick/Right' = '`RIGHT`'; 'Main Stick/Modifier' = '`LSHIFT`'; 'C-Stick/Up' = '`I`'; 'C-Stick/Down' = '`K`'
+	'C-Stick/Left' = '`J`'; 'C-Stick/Right' = '`L`'; 'C-Stick/Modifier' = '`LCONTROL`'; 'Triggers/L' = '`Q`'
+	'Triggers/R' = '`W`'; 'D-Pad/Up' = '`T`'; 'D-Pad/Down' = '`G`'; 'D-Pad/Left' = '`F`'; 'D-Pad/Right' = '`H`'
 }
 
-# Writes a Dolphin controller profile from the player's own Port 1 setup with the mod layout on top,
-# and tells Dolphin to use it for the modded game only. Returns a short status for the player.
+# The controllers the mod's bindings name: XInput's first, every SDL model above, and the player's own Port 1
+# controller when it's another XInput/SDL one.
+function Get-ModPads($device) {
+	$pads = @('XInput/0/Gamepad') + @($ModSdlNames | ForEach-Object { "SDL/0/$_" })
+	if ($device -match '^(SDL|XInput)/\d+/[^:]+$' -and $pads -notcontains $device) { $pads += $device }
+	return $pads
+}
+
+# One control on every mod controller: `XInput/0/Gamepad:Button A` | `SDL/0/PS4 Controller:Button S` | ...
+function Get-ModBinding($names, $pads) {
+	$parts = foreach ($d in $pads) {
+		$dialect = $d -replace '/.*$', ''
+		foreach ($n in @($names)) {
+			$name = if ($ModFaceNames[$dialect].ContainsKey($n)) { $ModFaceNames[$dialect][$n] } else { $n }
+			"``$($d):$name``"
+		}
+	}
+	return $parts -join ' | '
+}
+
+# Writes the mod's Dolphin controller profile and tells Dolphin to use it on Port 1 for the modded game only.
+# A keyboard on Port 1 keeps its own keys alongside (or Dolphin's, without a GCPadNew.ini); a controller's own
+# Port 1 bindings are left out, so they can't fight the layout. Returns a short status for the player.
 function Install-ModControllerProfile($userDir, $gameIni) {
 	$pad = Read-IniSection (Join-Path $userDir 'Config\GCPadNew.ini') 'GCPad1'
-	if (-not $pad['Device'] -or $pad['Device'] -notmatch '^(SDL|XInput)/') {
-		return "Kept your own controls (mod layout needs an Xbox/PlayStation-style controller on Port 1; yours is '$($pad['Device'])')."
+	if (-not $pad['Device']) {
+		$pad = [ordered]@{ 'Device' = 'DInput/0/Keyboard Mouse' }
+		foreach ($k in $DolphinKeyboardDefaults.Keys) { $pad[$k] = $DolphinKeyboardDefaults[$k] }
 	}
-	# Up/down come from the player's own stick bindings, since SDL and XInput name "up" differently.
-	$stick = @{}
-	foreach ($k in 'Main Stick/Up', 'Main Stick/Down', 'C-Stick/Up', 'C-Stick/Down') { $stick[$k] = $pad[$k] }
-	if (-not $stick['Main Stick/Up']) { $stick['Main Stick/Up'] = '`Left Y+`' }
-	if (-not $stick['Main Stick/Down']) { $stick['Main Stick/Down'] = '`Left Y-`' }
-	if (-not $stick['C-Stick/Up']) { $stick['C-Stick/Up'] = '`Right Y+`' }
-	if (-not $stick['C-Stick/Down']) { $stick['C-Stick/Down'] = '`Right Y-`' }
-	$layout = [ordered]@{}
-	foreach ($k in $ModLayout.Keys) { $layout[$k] = $ModLayout[$k] }
-	$layout['Triggers/L-Analog'] = "($($stick['Main Stick/Up'])) | ($($stick['C-Stick/Up']))"
-	$layout['Triggers/R-Analog'] = "($($stick['Main Stick/Down'])) | ($($stick['C-Stick/Down']))"
-	$profile = Join-Path $userDir "Config\Profiles\GCPad\$ModProfileName.ini"
+	$keyboard = $pad['Device'] -like '*/Keyboard Mouse'
+	$pads = Get-ModPads $pad['Device']
 	$lines = New-Object System.Collections.Generic.List[string]
 	$lines.Add('[Profile]')
-	foreach ($k in $pad.Keys) { if (-not $layout.Contains($k)) { $lines.Add("$k = $($pad[$k])") } }
-	foreach ($k in $layout.Keys) { $lines.Add("$k = $($layout[$k])") }
+	$lines.Add("Device = $(if ($keyboard) { $pad['Device'] } else { $pads[0] })")
+	if ($keyboard) {
+		foreach ($k in $pad.Keys) {
+			if ($k -notin 'Device', 'Triggers/Dead Zone' -and -not $ModLayout.Contains($k)) { $lines.Add("$k = $($pad[$k])") }
+		}
+	}
+	foreach ($k in $ModLayout.Keys) {
+		$expr = Get-ModBinding $ModLayout[$k] $pads
+		if ($keyboard -and $pad[$k]) { $expr = "($($pad[$k])) | $expr" }
+		$lines.Add("$k = $expr")
+	}
+	$lines.Add('Triggers/Dead Zone = 25.000000000000000')
+	$profile = Join-Path $userDir "Config\Profiles\GCPad\$ModProfileName.ini"
 	New-Item -ItemType Directory -Force (Split-Path $profile) | Out-Null
 	[IO.File]::WriteAllLines($profile, $lines)
 	Set-IniValues $gameIni 'Controls' ([ordered]@{ 'PadProfile1' = $ModProfileName })
-	return "Mod controls set for $($pad['Device'] -replace '^\w+/\d+/', ''): LB/RB clubs, LT/RT views, left stick aims and sets power."
+	$also = if ($keyboard) { ' Your keyboard keys work too.' } else { '' }
+	return "Mod controls set for any Xbox, PlayStation or Switch controller: LB/RB clubs, LT/RT views, left stick aims and sets power, click a stick for lefty (left) or Star (right) on the character screen.$also"
 }
 
 # ---- Hotkeys for the mod. Fullscreen is Dolphin's, not the game's, so it's switched by a Dolphin hotkey: Alt+Enter
@@ -185,7 +242,7 @@ function Install-ModControllerProfile($userDir, $gameIni) {
 # Shift+Esc. Dolphin's Hotkeys.ini is shared by every game, so only those two change, and only while they're still
 # Dolphin's own (or ours); a missing file is first written with Dolphin's built-in set (HotkeyManager::LoadDefaults,
 # Windows), since Dolphin leaves any hotkey the file doesn't list unbound.
-$ModHotkeysVersion = 1
+$ModHotkeysVersion = 2
 $DolphinStop = 'ESCAPE'
 $ModStop = '@(Shift+ESCAPE)'
 $DolphinFullscreen = '@(Alt+RETURN)'
@@ -226,7 +283,7 @@ foreach ($i in 1..8) {
 	$DolphinHotkeyDefaults["Save State/Save State Slot $i"] = "@(Shift+F$i)"
 }
 
-# Sets the mod's two hotkeys (see above) for the controller on Port 1. Returns a short status for the player.
+# Sets the mod's two hotkeys (see above). Returns a short status for the player.
 function Install-ModHotkeys($userDir, $device) {
 	$path = Join-Path $userDir 'Config\Hotkeys.ini'
 	if (-not (Test-Path $path)) {
@@ -241,15 +298,13 @@ function Install-ModHotkeys($userDir, $device) {
 	$set = [ordered]@{}
 	if ($keys['General/Stop'] -eq $DolphinStop) { $set['General/Stop'] = $ModStop }
 	$full = $keys['General/Toggle Fullscreen']
-	$ours = $full -eq $DolphinFullscreen -or $full -like "$DolphinFullscreen | (*Thumb L* & *Thumb R*)"
-	$sticks = $device -match '^(SDL|XInput)/'
-	if ($ours) {
-		$set['General/Toggle Fullscreen'] = if ($sticks) {
-			"$DolphinFullscreen | (``$($device):Thumb L`` & ``$($device):Thumb R``)"
-		} else { $DolphinFullscreen }
+	$ours = $full -eq $DolphinFullscreen -or $full -like "$DolphinFullscreen | (*Thumb L* & *Thumb R*)*"
+	if ($ours) {   # v2: on every mod controller (Get-ModPads), not just the one Port 1 names
+		$both = foreach ($d in (Get-ModPads $device)) { "(``$($d):Thumb L`` & ``$($d):Thumb R``)" }
+		$set['General/Toggle Fullscreen'] = "$DolphinFullscreen | $($both -join ' | ')"
 	}
 	if ($set.Count) { Set-IniValues $path 'Hotkeys' $set }
-	$how = if ($ours -and $sticks) { 'click both sticks in, or Alt+Enter' } else { $full }
+	$how = if ($ours) { 'click both sticks in, or Alt+Enter' } else { $full }
 	$stop = if ($keys['General/Stop'] -eq $DolphinStop -or $keys['General/Stop'] -eq $ModStop) { ' Stop the game: Shift+Esc.' } else { '' }
 	return "Fullscreen on/off: $how.$stop"
 }

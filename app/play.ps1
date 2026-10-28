@@ -197,11 +197,12 @@ if (-not (Read-IniSection $ini 'Video_Settings').Contains('InternalResolution') 
 	Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'InternalResolution' = '0' })
 }
 
-# Mod controller layout, rebuilt when the layout changes or you switch controllers.
+# Mod controller layout (every controller, see Install-ModControllerProfile), rebuilt when the layout changes or
+# Port 1 changes (a keyboard there keeps its keys).
 $device = (Read-IniSection (Join-Path $DolphinUserDir 'Config\GCPadNew.ini') 'GCPad1')['Device']
 $profilePath = Join-Path $DolphinUserDir "Config\Profiles\GCPad\$ModProfileName.ini"
 $layoutCurrent = $config['layout_version'] -eq $ModLayoutVersion -and $config['layout_device'] -eq $device -and
-	(($device -notmatch '^(SDL|XInput)/') -or (Test-Path $profilePath))
+	(Test-Path $profilePath) -and (Read-IniSection $ini 'Controls')['PadProfile1'] -eq $ModProfileName
 if (-not $layoutCurrent) {
 	Say (Install-ModControllerProfile $DolphinUserDir $ini)
 	$config['layout_version'] = $ModLayoutVersion

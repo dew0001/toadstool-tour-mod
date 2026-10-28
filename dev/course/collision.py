@@ -119,6 +119,8 @@ for _c in range(0x36, 0x41):
 
 # Triangle attribute word (+0xA): bits 0-7 surface code, bits 13-14 zone, bit 15 two-sided.
 ATTR_TWO_SIDED = 0x8000    # set: both faces collide (except in query mode 1); clear: only rays from the front side
+ATTR_OTHER_HOLE = 0x0100   # bits 8-12 go unread by the game (it takes the low byte); v12 marks another hole's fairway,
+                           # fringe and green with this one, and course 8's auto-aim stub (course8.py) skips them
 ZONE_SHIFT = 13            # ball +0xC8 = (attr >> 13) & 3: 0 in play, 2 out of bounds, 3 hazard (penalty drop)
 ZONE_IN_PLAY, ZONE_OB, ZONE_HAZARD = 0, 2, 3
 

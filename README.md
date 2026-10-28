@@ -19,7 +19,7 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 - **Fullscreen and sharp:** starts fullscreen over the whole screen at a resolution that fits your screen, with HD UI textures by NickPancakes installed automatically. Click both sticks in (or Alt+Enter) to switch between fullscreen and a window; Esc no longer stops the game and drops you out of fullscreen (Shift+Esc stops it). These are Dolphin's hotkeys, so they apply in other games too; `Play.bat` only changes them if you haven't set your own.
 - **Automatic updates:** `Play.bat` checks for a new version every time you start the game.
 
-## Controls (Xbox or PlayStation-style controller on Port 1)
+## Controls (any Xbox, PlayStation or Switch-style controller)
 
 | Control | Does |
 | --- | --- |
@@ -31,10 +31,12 @@ A mod for **Mario Golf: Toadstool Tour** (GameCube, USA) that you play in [Dolph
 | View / Back | Side view while held |
 | A | Swing; hold after the hit to fast-forward |
 | Start | Pause menu (Scorecard, Rules, ..., **See-Through** on/off) |
+| Click the left stick in | The game's L: on the character select screen, left-handed on/off |
+| Click the right stick in | The game's R: on the character select screen, the Star version on/off |
 | Click both sticks in | Fullscreen on/off (Alt+Enter on the keyboard does the same) |
 | Shift+Esc | Stop the game (Esc alone does nothing, so it can't throw you out of fullscreen) |
 
-Every way of looking around still works on putts: the camera goes back down the line when you let go. These controls are set up for the modded game only, from your own Port 1 controller settings; other games keep yours.
+Every way of looking around still works on putts: the camera goes back down the line when you let go. `Play.bat` sets these controls up for the modded game only, the same for whatever controller you plug in (buttons by position: Xbox A = PlayStation Cross = Switch B), whatever Dolphin's Port 1 says; other games keep your own settings. If Port 1 is your keyboard, its keys keep working too.
 
 This repo contains **no game data**. The mod is built on your PC from **your own copy** of the game, and every player ends up with a byte-identical result, so online play stays in sync.
 
@@ -59,7 +61,7 @@ After that, `Play.bat` just starts the game, and rebuilds it first whenever ther
 
 ## Playing online (Dolphin NetPlay)
 
-Up to 4 players. Everyone needs the latest mod version (run `Play.bat` or `Update only.bat` first), the same Dolphin version, and their controller set up under **Controllers → Port 1**.
+Up to 4 players. Everyone needs the latest mod version (run `Play.bat` or `Update only.bat` first), the same Dolphin version, and **Controllers → Port 1** set to *Standard Controller* (Dolphin's default; `Play.bat` sets up the buttons).
 
 **Host:**
 1. **Tools → Start NetPlay... → Host**.

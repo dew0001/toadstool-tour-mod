@@ -216,6 +216,16 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   play it.
   Shy Guy moves with Koopa's animations, so v9 gives golfer 16 a method in cave 9 returning Koopa's list with his
   voice IDs in place of Koopa's (`shyguy.ANIM_SOUNDS`).
+- **Lefty and Star** (select screen `FUN_8040b9ec`, pad words at 0x8026BB5C + 0x38 x port: +6 repeating
+  directions, +0xA new presses): L (0x40) flips the player's lefty word 0x8044BA90 + 4 x pick, R (0x20) the Star
+  word 0x8044BA68 + 4 x pick when the golfer's bit is set in the halfword at `*0x80447F90` = 0x8022A3CC (the
+  players-unlocked flags, all set by the mod); both only on the grid (not the extra page). The pick ends up in
+  0x80176044 + player (bit 0 Star, bit 1 lefty). Dolphin sets L/R only from the mapped buttons, never from the
+  analog travel, so the mod's layout gives them the stick clicks (v12).
+- **End of round experience** (`FUN_80400a64`, golf): for each player whose golfer code is over 15 (player +0x51EF)
+  and who scored points (+0x2C), if the link record's name (+0x268) matches the player's name (0x804E5D74 + 0x2C x
+  player) the points go into record +0x278 and the round ends on the experience screen (`FUN_80485818(.., 6, ..)`).
+  v12 makes the test `cmplwi r11,0x10` (0x80400AB8) so Shy Guy, golfer 16, gets none.
 - **Select screen call:** `FUN_8040b56c` plays one common-set sound per golfer when picked (0x26F Koopa ... by
   character code), and on the extra page 0x270 for even link golfers (golfer 16), 0x271 for odd ones. Landing the
   cursor on a golfer plays its idle line ("taiki"), `FUN_80013108(golfer code)`: 0x258-0x269 for the 16, 0x263
@@ -265,7 +275,9 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
 - Find what plays: `tools/debug_patch.py` `plays` (every ID asked of the three calls and who asked, `sfxlog.ps1
   -Pairs -At 0x80057A14`), `sfx` (every ID MusyX starts), `voices`; Dolphin's `[DSP] DumpAudio = True` records the
   mix to `Dump/Audio/*_dspdump.wav` for checking a sound by correlation. `tools/swing.ps1` swings on the meter's
-  own target (reads counter 0x80523CB8 and target 0x80523CBC), so hands-off tests can putt out;
+  own target (reads counter 0x80523CB8 and target 0x80523CBC), so hands-off tests can putt out (on Pebble
+  tee shots in the v12 tests it read a target of 117 = 2 x max - 1 and timed out with the counter stopped at 58;
+  those tests pressed A on timings instead);
   `tools/power_swing.ps1` swings a power shot and lists the burst's particles as the ball leaves.
 - **Model format** (`model.py`): type-2 module; root (magic 0x0131A313) found through the code stub's HA16/LO16
   relocations at +20/+24. Meshes (0x3C): +6 texcoord sets, +7 textures, +8 texture entries (4 bytes: flag short,
@@ -375,6 +387,15 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
   of the hole intro is not the emblem: it is the mode's icon, file IDs at 0x804D5FF8[mode slot 4-15].
 - **Music:** main.dol `FUN_80011a94(situation, course)`, a 16 x 7 song table; v11 plays Blooper Bay's for 8.
 - **Saves:** the hole-in-one mask store (golf 0x804682F4) would wrap course 8 onto Lakitu Valley's; v11 skips it.
+- **Auto-aim** (v12): every new shot starts from `FUN_804abd70(setup, player)`: yaw (setup +0x1D8) at the pin, then
+  by case: pin in reach (2) the power is fitted; out of reach (3, 4) it searches the hole's collision for a landing
+  spot. `FUN_804a7874` classes every collision triangle by its surface's score (method [11], called at
+  0x804A79EC / 0x804A7A18): codes 0x18 and 0x2E -> 4, score under 0x46 -> 9 (avoid), under 0x50 -> 4, else 0
+  (a target: fairway, fringe, green); `FUN_804a7344` walks them. Nothing marks which hole a triangle belongs to, so
+  on the 8th course, whose hole files hold their neighbours' fairways, it aimed down other holes. v12 marks another
+  hole's fairway, fringe and green with attribute bit 8 (0x100; bits 8-12 go unread, the lie and the rest take the
+  low byte) and a stub on 0x804A7A20 (`cmpwi r3,0x4f`, r27 = the triangle record + 0xC) scores them 79 for the
+  search only: they still play as fairway, fringe and green.
 - **New disc files:** the game builds a file's path from its ID (`FUN_8001bbf0`: ID / 2 in base 26 as "X/Y/Z"),
   so the course's files live under a new top-level folder `E` (IDs from 5408). `TTMod.Build` appends them to the
   file table (0x20440, free space up to 0x28000) and updates boot.bin's FST size.
@@ -437,6 +458,11 @@ with keyboard controls. Set `TTMOD_ROOT`, `TTMOD_DOL` or `TTMOD_PID` to point el
 4. Menus to a round: Start, A, A (1 Player), A (Mario; Pad E five times = Koopa Troopa; Pad S twice = Shy Guy on
    the extra page), Pad E, A (Character Match; Pad E three times = Stroke Play), A, A (Novice), A (course), A
    (Yes), then A. About 3 s between menu steps, 8 s for the course to load.
+   Shortcuts: keep writing the setup block while the round loads (about 6 s from the last A): the hole order
+   (0x80176060, 18 bytes) picks the first hole, 0x8017607C the number of holes (1 = a one-hole round). Writing
+   the ball record's position (+0x9C, feet; collision vertices are x32) and zeroing its velocity (+0x50) every few
+   ms for 1.5-3 s while a shot flies drops the ball on that spot, so a test can land on a given surface or in the
+   cup (the pin the auto-aim uses: 0x804E6864/68/6C). The ball record's +0xB8 is the surface code it rests on.
 5. Tools in `dev\tools` (PowerShell 7 or 5.1):
    - `gcmem.ps1` (dot-source): `[GCMem]::Open(pid, 'GFTEMD')`, `U8/U32/F32/W32(address)`, `ReadGC(address, n)`;
      finds Dolphin's emulated RAM by the game ID and the 0x01800000 size at +0x28.

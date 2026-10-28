@@ -58,7 +58,10 @@ SURF = {
     ht.FRINGE: ("fringe", 0, 0x0B, 0), ht.GREEN: ("green", 0, 0x02, 0), ht.BUNKER: ("sand", 0, 0x03, 0),
     ht.TEE: ("fringe", 0, 0x08, 0), ht.PATH: ("dirt", 0, 0x07, 0), ht.ROAD: ("asphalt", 1, 0x06, col.ZONE_OB),
     ht.WATER: ("sea", 0, 0x05, col.ZONE_HAZARD), ht.BUILDING: ("dirt", 1, 0x06, col.ZONE_OB),
+    ht.FAIRWAY_X: ("fairway", 1, 0x01, 0), ht.FRINGE_X: ("fringe", 0, 0x0B, 0), ht.GREEN_X: ("green", 0, 0x02, 0),
+    ht.PAVED: ("asphalt", 1, 0x07, 0),
 }
+OTHER_HOLE = (ht.FAIRWAY_X, ht.FRINGE_X, ht.GREEN_X)   # collision: col.ATTR_OTHER_HOLE (the auto-aim skips them)
 CLIFF = 99   # pseudo-surface for steep triangles
 
 
@@ -263,8 +266,8 @@ def build(n, out_dir):
     keep = contains_xy(region, cen[:, 0], cen[:, 1])
     T = T[keep]
     cen = cen[keep]
-    codes_t = ht.classify(c, cen[:, 0], cen[:, 1])
-    codes_v = ht.classify(c, pts[:, 0], pts[:, 1])
+    codes_t = ht.classify(c, cen[:, 0], cen[:, 1], n)
+    codes_v = ht.classify(c, pts[:, 0], pts[:, 1], n)
     h = heights(c, pts, codes_v)
     # orientation: (p1 - p0) x (p2 - p0) must point down in the game's axes (x, h, y)
     P3 = np.stack([pts[:, 0], h, pts[:, 1]], 1)
@@ -293,11 +296,11 @@ def build(n, out_dir):
     d_hole = np.array(line.coords[-1]) - np.array(line.coords[0])
     d_hole /= np.linalg.norm(d_hole)
     stripe = np.floor(((pts - np.array([ox, oy])) @ d_hole) / 9.0) % 2
-    mown = np.isin(codes_v, (ht.FAIRWAY, ht.TEE))
+    mown = np.isin(codes_v, (ht.FAIRWAY, ht.FAIRWAY_X, ht.TEE))
     shade *= np.where(mown, np.where(stripe == 0, 1.06, 0.94), 1.0)
     cliff_v = np.unique(T[steep].ravel())    # sea cliffs and banks: dark rock
     shade[cliff_v] *= 0.68
-    tone = {ht.ROUGH: 0.86, ht.CUT: 0.93, ht.NATURAL: 0.74, ht.ROAD: 0.9, ht.BUILDING: 0.8}
+    tone = {ht.ROUGH: 0.86, ht.CUT: 0.93, ht.NATURAL: 0.74, ht.ROAD: 0.9, ht.PAVED: 0.9, ht.BUILDING: 0.8}
     for k_, f_ in tone.items():
         shade[codes_v == k_] *= f_
     cval = np.clip(128 * shade, 40, 220).astype(np.uint8)
@@ -399,7 +402,7 @@ def build(n, out_dir):
                 at = col.attr(0x09, 0 if inc else col.ZONE_HAZARD)
             else:
                 texname, mat, code, zone = SURF[int(s_)]
-                at = col.attr(code, zone)
+                at = col.attr(code, zone) | (col.ATTR_OTHER_HOLE if s_ in OTHER_HOLE else 0)
             faces.append((int(remap[t_[0]]), int(remap[t_[1]]), int(remap[t_[2]]), at))
         cpts = [tuple(p) for p in G[used]]
         for P, tris_, dist_ in houses_coll:

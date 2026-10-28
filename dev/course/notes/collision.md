@@ -127,7 +127,8 @@ use 8-13 fraction bits, mostly 9 (s16 / 512 covers +-64 units = +-2048 ft, in st
   (negative y): clockwise on a map drawn with x to the right and z downwards. Checked: 0 back-face-only hits on
   random vertical rays; `make_mesh` and the OBJ export follow this.
 - Attribute: bits 0-7 surface code (the hit stores the u16; readers take the low byte), bits 13-14 zone, bit 15
-  two-sided. In `FUN_80436cf0`: bit 15 clear -> only rays from the front collide; set -> both faces, except for
+  two-sided. Bits 8-12 are unused by retail; v12's course marks another hole's fairway, fringe and green with bit 8
+  for its auto-aim stub (`collision.ATTR_OTHER_HOLE`, RE-NOTES "Auto-aim"). In `FUN_80436cf0`: bit 15 clear -> only rays from the front collide; set -> both faces, except for
   queries in mode 1 (query +0x1C = 1, the ball step uses it while the ball is sunk). Zone: the ball step stores
   `(attr >> 13) & 3` in ball +0xC8; 2 = out of bounds whatever the surface (`FUN_8041cc34`), 2 or 3 = ball lost,
   penalty drop (`FUN_8041ccbc`). Zone 1 is never used. If a downward probe hits nothing the ball gets code 6, zone 2.
