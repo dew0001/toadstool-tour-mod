@@ -260,7 +260,9 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   adjusted according to worse lies"; 7/9 for longer-zone clubs was wrong): the stub at 0x80416A80 gives golfer 17
   impact 0 (row: 1, 3, 5, 7, 9 by column) and sets the caller's column register r31 to 3 - drop, drop = the club's
   fairway column (lie row 1 of the column table in use) minus this lie's, at least 0, column at least 1: 5 frames
-  from the tee, fairway or better, 3 a column worse, 1 two or more (club-set bonuses don't apply to him).
+  from the tee, fairway or better, 3 a column worse, 1 two or more (club-set bonuses don't apply to him). v19
+  (Andrew: "make tony the tigers impact 3 frames"): 2 - drop, so 3 frames (-2, 0, 2) from good lies and 1 (on the mark
+  only) from any worse lie.
 - **Golfer objects in a round:** `FUN_804074a8(code)` makes each golfer: Koopa (15) in `FUN_804bd45c`, vtable
   0x804CA3C8; golfer 16 in `FUN_804c7220`'s default case, vtable 0x804CC948. Both are 0x1E4 bytes on the same
   base constructor `FUN_80407590`. The vtables have 47 methods; [22], [23] and [24] return the file IDs of the
@@ -300,9 +302,9 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   (Waluigi's voice set isn't loaded for him; golfer 17's own is a girl's). His record's +0x28 is 1: Waluigi's power
   shot effects. Stats (Andrew's high-risk pick): 350 yards (v13 240, then 270, v14 300; each club is the drive x a fixed share, main.dol
   `FUN_80009c58`: 100, 93, 86, 80, 74, 68, 63, 58, 53, 48, 43, 38, 31% for clubs 0-12, x (100 + the club set's
-  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 5 frames on every club, less from
-  worse lies (v18; v13-v16 pinned it: 2, then 4; v17 let clubs widen it; see Impact window), a meter twice
-  as fast off the putter (see Meter ticks; with the zone, 5 frames on time; v13 had 3), and no auto swing (see Power). The select screen's lines for him, common-set 0x25E (cursor) and 0x271 (odd link golfers' pick
+  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 3 frames on every club, 1 from
+  worse lies (v19; v18 5 and 3/1; v13-v16 pinned it: 2, then 4; v17 let clubs widen it; see Impact window), a meter
+  twice as fast off the putter (see Meter ticks), and no auto swing (see Power). The select screen's lines for him, common-set 0x25E (cursor) and 0x271 (odd link golfers' pick
   call), are the girl's: v13 makes them silent. Waluigi's in-round model draws his overalls' buttons as mesh part
   7 (not part 1, the body): `tony.py` hides that part too. Waluigi's `C/S/C` has three bones per finger (left /
   right): thumb 51-53 / 70-72, index 60-62 / 79-81, middle 57-59 / 76-78, ring 54-56 / 73-75, pinky 63-65 / 82-84
@@ -358,6 +360,18 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   character code), and on the extra page 0x270 for even link golfers (golfer 16), 0x271 for odd ones. Landing the
   cursor on a golfer plays its idle line ("taiki"), `FUN_80013108(golfer code)`: 0x258-0x269 for the 16, 0x263
   golfer 16, 0x25E golfer 17, also common-set sounds. v10 gives golfer 16 his lines in both (`shyguy.MENU_VOICE`).
+- **Where a skin choice would hook in** (looked into for Halloween skins, 2026-10-28; nothing built yet):
+  - Round: every read of a golfer's files goes through its vtable +0x58 [22] model, +0x5C [23] bank (-1 = none) and
+    +0x60 [24] second model (-1 = none), always with the player record at hand. `FUN_80426104(player, n)` makes the
+    golfer object and preloads the files (`FUN_8000baac(id, 6)`). The player update `FUN_80423bbc` (state 3) builds
+    the bank (`FUN_8000ecac`) and the model (`FUN_8000f00c`). So a stub after those calls can map (file ID, that
+    player's skin) to another file.
+  - Select screen: `FUN_804031c8` runs one model slot per player (0xA8 apart, state word 0x8044913C). State 0
+    loads `0x804459A0[character code]` through `FUN_8000f044`.
+  - Select-screen buttons (`FUN_8040b9ec`): A, B, X (0x400, opens screen 0x19), R (Star), L (lefty) and the D-pad.
+    Y (0x800) and Z (0x10) are never read there.
+  - The per-player option byte 0x80176044 has 8 values: the round's debug menu prints "opt:%s" from an 8-name list.
+  - The v18 disc has a 182 MB free gap for new files.
 - **Putter at address:** the ball sits in the middle of the mallet putter's head at address for Koopa too; the
   golfer's place by the ball isn't per character code, so Shy Guy stands exactly where Koopa does.
 - **Power shot effect:** shot type (setup +0x1CC; B steps through the types the shot allows, e.g. 1 Normal and 0

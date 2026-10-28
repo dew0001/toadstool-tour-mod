@@ -114,6 +114,9 @@ Changes (v18):
   - Tony's impact zone is 5 frames on every club, less only from worse lies (3 a column worse than the fairway's
     for that club, 1 two or more): IMPACT_STAT_CALL sets his impact and column.
 
+Changes (v19):
+  - Tony's impact zone is 3 frames on every club (TONY_ZONE_COLUMN 2), 1 from a worse lie.
+
 Patch code lives over dead functions (caves 1-14 below, and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -453,11 +456,13 @@ TONY_GOLFER = 17
 # many columns worse this lie is than the fairway's (lie row 1) for the same club, at least 0: 5 frames from the
 # tee, the fairway or better, 3 a column worse, 1 two or more worse. His card still shows -10. His meter's impact
 # counter steps 2 on even numbers through the zone (IMPACT_TICK below): a zone of 5 takes -4, -2, 0, 2 and 4.
+# v19 (Andrew: "make tony the tigers impact 3 frames"): column 2 - drop, so 3 frames (-2, 0, 2) and 1 (0 only) from
+# any worse lie.
 IMPACT_STAT_CALL = 0x80416A80
 IMPACT_STAT = 0x8044C5BC
 ZONE_COLUMNS, ZONE_COLUMNS_APPROACH = 0x804CD5E0, 0x804CD81C
 FAIRWAY_LIE = 1             # the column table's fairway row
-TONY_ZONE_COLUMN = 3        # impact 0 row: column 3 = zone 5
+TONY_ZONE_COLUMN = 2        # impact 0 row: column 2 = zone 3 (v18 3 = zone 5)
 IMPACT_ZONE_NOW = 0x80523CB0  # the zone in use (the meter block's +0xC)
 # His swing meter runs twice as fast (not on putts). FUN_8046e440 ticks it once a frame through the meter block
 # 0x80523CA4 (r31): on the power bar (view 0xB) the counter +0x14 (0x80523CB8; power = it, mirrored past the top)

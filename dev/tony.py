@@ -543,8 +543,8 @@ NAME = b"Tony\x00\x00\x00\x00"
 # Andrew's trade-off pick, high risk and high reward: 350 yards, past every Star version (the longest regular
 # golfer hits 220, the Star versions 230 to 300; the game sizes every other club from the driver), high (3), curve
 # to the default side (0) slightly (1), the best control (4) and strong spin (5), but the lowest impact there is
-# (-10, the game's floor; the Star versions' lowest is -6), a 5-frame impact zone on his twice-as-fast meter, putts
-# aside (build_mod.py TONY_ZONE, POWER_TICK) and no auto swing (build_mod.py POWER_PRESS: only B sets his power).
+# (-10, the game's floor; the Star versions' lowest is -6), a 3-frame impact zone on his twice-as-fast meter (v19;
+# 1 from worse lies), putts aside (build_mod.py TONY_ZONE_COLUMN, POWER_TICK) and no auto swing (build_mod.py POWER_PRESS: only B sets his power).
 RECORD = {0x2C: NAME[:4], 0x3C: NAME[:4], 0x44: (350).to_bytes(4, "big"), 0x48: bytes([1, 0, 0, 3]),
           0x4C: bytes([0, 1, 0xF6, 4]), 0x50: bytes([5, 0, 0, 0]), 0x54: bytes([BASES[BASE]["golfer"], 0, 0, 0])}
 # The select screen's lines for golfer 17 are the Game Boy Advance girl's (common set: 0x25E the cursor on him,
