@@ -19,6 +19,7 @@ def _d(op, rt, d, ra):
 # integer
 def lis(rd, imm): return 0x3C000000 | rd << 21 | _simm(imm)
 def li(rd, imm): return 0x38000000 | rd << 21 | _simm(imm)
+def addis(rd, ra, imm): return 0x3C000000 | rd << 21 | ra << 16 | _simm(imm)
 def addi(rd, ra, imm): return 0x38000000 | rd << 21 | ra << 16 | _simm(imm)
 def ori(ra, rs, imm): return 0x60000000 | rs << 21 | ra << 16 | _simm(imm)
 def mulli(rd, ra, imm): return 0x1C000000 | rd << 21 | ra << 16 | _simm(imm)
@@ -42,6 +43,23 @@ def sth(rs, d, ra): return _d(44, rs, d, ra)
 def stwu(rs, d, ra): return _d(37, rs, d, ra)
 def mflr(rd): return 0x7C0802A6 | rd << 21
 def mtlr(rs): return 0x7C0803A6 | rs << 21
+def mtctr(rs): return 0x7C0903A6 | rs << 21
+def mfcr(rd): return 0x7C000026 | rd << 21
+def mtcrf(mask, rs): return 0x7C000120 | rs << 21 | mask << 12
+def extsb(ra, rs): return 0x7C000774 | rs << 21 | ra << 16
+def divw(rd, ra, rb): return 0x7C0003D6 | rd << 21 | ra << 16 | rb << 11
+def subf(rd, ra, rb): return 0x7C000050 | rd << 21 | ra << 16 | rb << 11  # rd = rb - ra
+def lbzx(rd, ra, rb): return 0x7C0000AE | rd << 21 | ra << 16 | rb << 11
+def stbx(rs, ra, rb): return 0x7C0001AE | rs << 21 | ra << 16 | rb << 11
+def lwzx(rd, ra, rb): return 0x7C00002E | rd << 21 | ra << 16 | rb << 11
+def lwzu(rd, d, ra): return _d(33, rd, d, ra)
+def stmw(rs, d, ra): return _d(47, rs, d, ra)
+def lmw(rd, d, ra): return _d(46, rd, d, ra)
+BEQLR, BLTLR = 0x4D820020, 0x4D800020
+CRCLR6 = 0x4CC63182  # crxor 6,6,6: no float arguments in registers (before a varargs call)
+def cmplwi(ra, imm): return 0x28000000 | ra << 16 | (imm & 0xFFFF)
+def fctiwz(d, b): return 0xFC00001E | d << 21 | b << 11
+def stfd(frs, d, ra): return _d(54, frs, d, ra)
 BLR = 0x4E800020
 
 
@@ -73,7 +91,7 @@ def _rel26(at, target):
 
 
 COND = {"bne": 0x40820000, "beq": 0x41820000, "blt": 0x41800000, "bge": 0x40800000,
-        "bgt": 0x41810000, "ble": 0x40810000}
+        "bgt": 0x41810000, "ble": 0x40810000, "bdnz": 0x42000000}
 
 
 def hi_lo(addr):
@@ -155,6 +173,8 @@ def selftest():
         slwi(9, 9, 3): 0x55291838, frsp(0, 0): 0xFC000018, fmr(1, 28): 0xFC20E090, mullw(9, 9, 0): 0x7D2901D6,
         or_(0, 0, 9): 0x7C004B78, stb(9, 0xD, 27): 0x993B000D,
         fmadds(13, 13, 0, 12): 0xEDAD603A, fmadds(0, 0, 29, 30): 0xEC00F77A,
+        lmw(22, 40, 1): 0xBAC10028, extsb(0, 11): 0x7D600774, divw(9, 9, 0): 0x7D2903D6, mtctr(0): 0x7C0903A6,
+        lwzx(0, 9, 0): 0x7C09002E,
     }
     for got, want in known.items():
         assert got == want, f"{got:08X} != {want:08X}"

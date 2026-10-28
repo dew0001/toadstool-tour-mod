@@ -100,7 +100,12 @@ Changes (v15):
     select screen instead of a crumpled fist. Golfer 17 can take another base golfer (tony.BASE; TONY_BASE: its
     methods, and its constructor when its object is bigger, as Donkey Kong's is: GOLFER17_ALLOC). Still Waluigi.
 
-Patch code lives over dead functions (caves 1-14 below; checked with find_dead_code.py). Low memory at
+Changes (v16):
+  - Best Ball Match / Stroke, Scramble (2v2) and Team Scramble (everyone on one team) beside Doubles' choices,
+    with the captain's pick menu and its camera (teams.py: stubs and data in nine more dead functions, menu icons
+    and labels appended to B/V/V and B/V/W); the carousel's Doubles is "Team Play" (B/V/T texture 9).
+
+Patch code lives over dead functions (caves 1-14 below, and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
@@ -113,6 +118,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import camelot_lz as lz  # noqa: E402
 import ppc  # noqa: E402
+import teams  # noqa: E402
 
 CAVE = 0x8006EAB4          # dead SDK function (GXDrawTorus-style helper)
 CAVE_SIZE = 736
@@ -1207,8 +1213,9 @@ def cave6_code():
     return blob, dict(a.labels)
 
 
-def cave3_code(zoom, v6, texts=()):
-    """Assemble the putt aim view, the replay prompt and the HUD anchors. Returns (bytes, labels)."""
+def cave3_code(zoom, v6, texts=(), more_messages=None):
+    """Assemble the putt aim view, the replay prompt and the HUD anchors. Returns (bytes, labels).
+    more_messages: a stub that answers more messages, then goes on to the game's lookup (teams.py)."""
     a = ppc.Asm(CAVE3)
     a.word("prompt_open")  # 1 while our Continue / Watch Replay menu is up
     a.label("replay_text")
@@ -1299,8 +1306,11 @@ def cave3_code(zoom, v6, texts=()):
         hi, lo = ppc.hi_lo(at)
         a(ppc.lis(3, hi), ppc.addi(3, 3, lo), ppc.BLR)
         a.label(f"text_more_{k}")
-    a(MSG_LOOKUP_FIRST)
-    a.b(MSG_LOOKUP + 4)
+    if more_messages:
+        a.b(more_messages)
+    else:
+        a(MSG_LOOKUP_FIRST)
+        a.b(MSG_LOOKUP + 4)
 
     # Replaces REPLAY_CHECK (the game replays the shot on any B press). Now, on the result screen, the
     # shooter's B opens a Continue / Watch Replay menu, and only Watch Replay sets the replay flag.
@@ -1580,7 +1590,7 @@ def check_matrix_site(buf, base, hook):
 
 
 def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None,
-              cave10=None, course=None, cave14=None):
+              cave10=None, course=None, cave14=None, team=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1590,7 +1600,7 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
                               (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
                               (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9),
                               (CAVE10, CAVE10_FIRST, cave10), (CAVE14, CAVE14_FIRST, cave14)) + \
-            tuple(course[0] if course else ()):
+            tuple(course[0] if course else ()) + tuple(team[0] if team else ()):
         if code is None:
             continue
         if word(data, base, addr) != first:  # still the original (dead) function
@@ -1624,7 +1634,7 @@ def float_word(v):
     return struct.unpack(">I", struct.pack(">f", v))[0]
 
 
-def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None):
+def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None, team=None):
     raw = open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     kind, _ = lz.header(raw)
     blob, _ = lz.decompress(raw)
@@ -1711,6 +1721,9 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
         import course8
         for addr, new, old in course8.overlay_patches(rel, course[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
+    if team:     # v16: Best Ball and Scramble (teams.py)
+        for addr, new, old in teams.overlay_patches(rel, team[1], lambda a: word(buf, OVERLAY_BASE, a)):
+            put(buf, OVERLAY_BASE, addr, new, old)
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -1755,7 +1768,11 @@ def main():
         holes, files, course_files = course8.load(COURSE8, golf)
         course = course8.caves(holes, files)
         print(f"caves 11-13: the 8th course ({COURSE8}), {len(holes)} holes, {len(course_files)} files")
-    cave3, v3 = cave3_code(v7["zoom"], v6, course8.texts(course[1]) if course else ())
+    team = teams.caves()
+    print("team games: " + ", ".join(f"{name} {size} of {teams.CAVES[name][1]} bytes at 0x{teams.CAVES[name][0]:08X}"
+                                     for name, size in team[1]["_sizes"].items()))
+    cave3, v3 = cave3_code(v7["zoom"], v6, (course8.texts(course[1]) if course else []) + teams.texts(team[1]),
+                           teams.message_hook(team[1]))
     cave, stubs = build_cave()
     cave2, v2 = cave2_code(v3["aim_place"])
     print(f"cave 2: {len(cave2)} of {CAVE2_SIZE} bytes at 0x{CAVE2:08X} (fast-forward 0x{v2['ff']:08X},"
@@ -1793,9 +1810,13 @@ def main():
         print(f"cave 10: {len(cave10)} of {CAVE10_SIZE} bytes at 0x{CAVE10:08X} (Shy Guy's power shot"
               f" 0x{v10['power_burst']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14, team)
     for rel in OVERLAY_MATRIX_HOOKS:
-        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course)
+        patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course,
+                      team)
+    for rel, make in ((teams.ICONS, teams.icons_file), (teams.LABELS, teams.labels_file),
+                      (teams.BANNERS, teams.banners_file)):
+        open(os.path.join(build, "files", *rel.split("/")), "wb").write(make(os.path.join(clean, "files")))
     if course:
         open(os.path.join(build, "files", "B", "W", "R"), "wb").write(course8.icons_file(os.path.join(clean, "files")))
         card = os.path.join(build, "files", *course8.CARD_FILE.split("/"))

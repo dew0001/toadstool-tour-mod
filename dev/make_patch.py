@@ -54,6 +54,10 @@ FILES = [  # (disc path, compressed?) - every file build_mod.py touches
     ("files/C/W/I", True),
     ("files/C/W/J", True),
     ("files/B/V/L", True),
+    # Best Ball and Scramble: the Doubles list's icons and labels, its banner (dev/teams.py)
+    ("files/B/V/V", True),
+    ("files/B/V/W", True),
+    ("files/B/V/T", True),    # the carousel's "Doubles" banner says "Team Play"
 ]
 MIN_COPY = 64   # shorter matches with the original stay as edits
 # Files the build makes from another file of the game: the patch starts from that one ("base"), so what they share

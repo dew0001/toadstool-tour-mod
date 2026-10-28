@@ -37,10 +37,23 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8006A834 | 464 | FUN_8006a834 | v11 8th course: the course select list (8 entries) and the menu lookup stubs |
 | 0x80084B2C | 464 | FUN_80084b2c | v11 8th course: list append, music, sky, name, hole-in-one guard; v12 auto-aim score stub (0x80084C20) |
 | 0x80053528 | 476 | FUN_80053528 | v13 Tony's entry in the link record, his B-only power press, impact zone and faster meter (`--tony` only) |
+| 0x80014324 | 1632 | FUN_80014324 | v16 team games: the captain's menu runner, then the hooks (`teams.py` "hooks") |
+| 0x8003BD84 | 736 | FUN_8003bd84 | v16 the captain's menu camera ("cam") |
+| 0x8001B974 | 636 | FUN_8001b974 | v16 the captain's menu and its rows' texts ("menu") |
+| 0x80037BA8 | 556 | FUN_80037ba8 | v16 scramble: best shot, taking a shot ("pick") |
+| 0x80035D64 | 468 | FUN_80035d64 | v16 Best Ball: whose turn ("choose") |
+| 0x800133F0 | 412 | FUN_800133f0 | v16 Best Ball after a shot; the see-through menu box ("after") |
+| 0x8003287C | 864 | FUN_8003287c | v16 team games' data: the mode, members, slots, help texts, menu strings ("data") |
+| 0x80018130 | 456 | FUN_80018130 | v16 the captain's menu rows ("text") |
+| 0x800268D0 | 352 | FUN_800268d0 | v16 Doubles' own choices' help: alternate shot ("extra") |
 
-Still free (DEAD in `find_dead_code.py`):
-0x80054EFC (424), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug
-patch), 0x80090438 (404), 0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
+Still free (DEAD in `find_dead_code.py`, run on `mod\ghidra_out\golf\unreferenced.tsv`; the list above v16 only
+named the 400-byte ones): 0x8003176C (316), 0x8003A480 (320), 0x8003F8C0 (300), 0x80042AE4
+(324), 0x800463C4 (312), 0x8004FBF0 (352), 0x800542C8 (364), 0x80054EFC (424), 0x800550A4 (320), 0x80055248
+(288), 0x80057A14 (712, used by the `draws` debug patch), 0x8005B7E4 (344), 0x8005DAFC (444, `messages` debug
+patch), 0x80067068 (324), 0x8006F468 (344), 0x80073ACC (344), 0x8007C758 (304), 0x8007CCC0 (308), 0x800816FC
+(352), 0x8008C898 (300), 0x80090438 (404), 0x80093460 (392), 0x80096398 (436). Do NOT use 0x80001800: it is
+wiped before the first frame.
 
 ## Gotchas
 
@@ -522,6 +535,87 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
 - v4 adds code 10 as "See-Through: On/Off" when the list has room and doesn't use 10 (`ghost_menu` on both
   `FUN_80473918` calls; `ghost_select` on the `bl FUN_80019bf8` at 0x80476E48 toggles and re-shows the texts,
   then returns to 0x80477894). The message hook supplies its texts while it's listed.
+
+## Team games (v16 Best Ball and Scramble)
+
+Doubles (alternate shot) is the game's only team mode; v16 bends it into Best Ball and Scramble (`teams.py`).
+
+**Menus** (menu overlay):
+- Screens (`FUN_80403e18` switches on the current one; `FUN_80439c1c(id)` pushes, `FUN_80439cd4` pops): 0 top menu
+  (player count: 0x8044B014 humans, 0x80176078 players, 0x8044B018 golfers), 4 character select (humans pick
+  first), 1 the Play Mode carousel `FUN_8041cc9c`, 5 the Doubles team screen `FUN_8041f10c`, 6 CPU picks, 3 the
+  course select (commit `FUN_80415040`), 7 tees and options.
+- Carousel rows: bytes at 0x80445FEC + set x 52 + (humans - 1) x 13 (set = Star Tournament unlocked), counts at
+  0x80446054; entry codes 0 Stroke, 1 Tournament, 2 Character Match, 3 Speed Golf, 4 Coin Attack, 5 Ring Attack,
+  6 Practice, 7 Match Play, 8 Club Slots, 9 Doubles, 10 Side Games, 11 Skins, 12 Star Tournament, 13 Near-Pin.
+  An entry's name is texture [code] of B/V/T, its model record 0x80449CB4 + code x 0xA8, its help message 0x14 +
+  code. Doubles is offered for 1-4 humans; CPUs always fill it to 4 golfers.
+- Sub-lists: count per entry and humans at 0x804460E8 + (code x 4 + humans) x 4 (Doubles: 0x8044617C.., 5 each);
+  `FUN_8041ca00` fills 0x8044C50C[i] (icon B/V/V and label B/V/W texture, 96x96 CMPR / IA4, 25 each) and
+  0x8044C534[i] (help = message 0x22 + value). The row lays out x = 0x164 - 0x24 x count + 0x48 x i; 8 fit.
+- Commit: 0x8041D310-0x8041D32C clears 0x80176090 and the sub-mode, then a switch on code - 4; Doubles (0x8041D41C)
+  writes mode 0/1/8/2 by choice (jump table 0x80447A40, `bgt` at 0x8041D438 for choices past 4 goes to the
+  common tail), then 0x80176090 = 1 and the team screen (or, with 1 human, `FUN_8040b05c` and the CPU screen).
+  Modes without a sub-list clear at 0x8041D738.
+- The team screen's arrangement (0x8044C59C; tables 0x80446228 / 0x804462E8) reorders the setup block at the end
+  of `FUN_80415040`, so team A is slots {0, 2} and team B {1, 3} (4 humans {1,2} v {3,4} -> [H1, H3, H2, H4]).
+- Spare setup bytes (no reads anywhere): 0x8017607D-7F, 0x80176095-97, 0x801760A3. v16 uses 0x8017607D.
+
+**Rounds** (golf overlay; golf state 0x804E5BE4):
+- `FUN_804014c0` copies the setup block (doubles flag -> state +0xAE4 = 0x804E66C8) and sets +0xD15 (0x804E68F9,
+  sides = balls) = +0xD16 (records) = players, halving +0xD15 in Doubles (0x8040158C). +0xD17 = shooter (0xFF none).
+- Team records: `FUN_80400014` allocates 4 of 0x1C8; `FUN_80426104` links player +0x8/+0x10 = the record of side
+  `index mod sides`, +0x14 its scorecard (record +0x8 + hole x 8: +0 hole result, +1 putts, +2 strokes), +0x18
+  its lie (record +0xB4, 0x34 bytes: position, ..., +0x28 in the hole, +0x2C surface code), +0x1C its ball (record
+  +0xE8). So Doubles partners share a ball, lie, strokes and card. Record +0x1BC strokes this hole, +0x1BD putts,
+  +0x1BE 0 playing / 1 holed / 2 out, +0x1C1 honor, +0x1C2 the alternate-shot toggle (and the HUD's big face),
+  +0x1C4 the last penalty (1 drop, 2 out of bounds). `FUN_80414a1c(ball, lie)` saves a lie, `FUN_80414970` puts
+  the ball back on it (every turn start, state 3, 0x80424248).
+- Shooter pick `FUN_80402f1c` (sides only): not started (+0x1BC 0) first, then off the green, then on it; ties
+  by distance to the pin (0x804E6864/686C), then honor. Doubles part 0x80403458-0x804034A8 flips +0x1C2 and adds
+  the side count for the partner. A stroke and a putt count at the power press (0x80413448, 0x80413470);
+  `FUN_8041f3f4` (after the shot, 0x8041F878-0x8041F954) adds penalties (`FUN_8041cc34` out of bounds: replayed
+  from the lie; `FUN_8041ccbc` water and the like: `FUN_80426f38(player, lie)` drops; course 7 `FUN_8041f31c`) or
+  saves the new lie, then marks holed from lie +0x28 and scores (`FUN_8046a0b8`). A mulligan takes the stroke
+  back at 0x8041F5A0. When every side is done, `FUN_80403b0c` calls `FUN_804683c4` at 0x80405A28, then the
+  scoreboard. Score panel `FUN_8042e448` draws faces through `FUN_8042e358(record)`.
+- v16 (`teams.py`, the mode in 0x8017607D: 1 Best Ball, 2 Scramble, 3 Team Scramble; Doubles list choices 5
+  Best Ball Match (Doubles' own Match case at 0x8041D468: mode 1, sub-mode 2), 6 Best Ball Stroke, 7 Scramble,
+  8 Team Scramble). All keep Doubles' team record, so its scoring, panel, scorecard and results do the rest.
+  - `setup` (on the store at 0x80401578; keep r0, the player count halved next): Team Scramble turns the round's
+    doubles flag on with one side.
+  - Best Ball: each member's ball lives in a slot (lie, strokes, done). `bb_choose` (in the picker) picks the
+    member (not started first, then off the green, then the farthest) and loads its lie and strokes into the team
+    record; `bb_after` (at 0x8041F958, after the penalty/lie block) saves them back and leaves the team record as
+    the team: once the best holed score can't be beaten (every teammate still playing has strokes + 1 >= it) that
+    score and a lie in the hole, so the game ends the team's hole (and match play compares teams as usual); else
+    the fewest strokes still playing and the lie's in-hole flag cleared. Gotcha hit: comparing a slot address
+    with `cmpwi 0` (our addresses are negative as signed words).
+  - Scramble: `pick` makes the shooter side + sides x member (member reset when +0x1BC is 0); `stroke` /
+    `mulligan` count only member 0; `shot` replaces the penalty/lie block: each member's result goes to a slot
+    (OB: the lie again, flagged; drop: `FUN_80426f38` into the slot); a hole-out is taken at once; after the last
+    member the team's captain (its lowest controller port, player +0x5164; no human: the best shot) picks.
+  - The captain's menu is a post-shot menu (`FUN_80483564`, type 2 with its codes replaced: a header row, code 10,
+    which can't be chosen, then codes 0..n-1, texts 0x129 + code from our buffers through the message hook,
+    cursor +0x40 starting on the best shot). As CUR_MENU (0x804ECE30) the scene would stop for it (0x80404134) and
+    its draw would skip the course and queue only the menu (0x80406AD8, `FUN_80484a30`), over a frozen picture
+    (screen transition 6); so `menu_scene` answers "not open" for ours, `menu_draw` queues our drawer and lets the
+    course draw, and the picker reads the menu's own value (+0). `glass_draw` wraps the game's drawer
+    (`FUN_8048497c`) with konst alpha 5/8 (`GXSetTevKAlphaSel` 0x8006D9FC, shadow 0x802DFC70) and swaps the box's
+    TEV alpha (raw `FUN_8006dd74(0, 0x8FFC0)` = texture alpha, at 0x80484508/28) for texture x konst (0x8F370):
+    the wooden box (C/O/P texture 0, CMPR) shows the course through it, the rows stay solid.
+  - `cam_update` (each frame the menu is up): the team's ball moves to the highlighted slot and the camera glides
+    to behind it (away from the pin), looking past it toward the pin, then `FUN_800179f0(camera)` rebuilds the
+    view and projection from it (the game's own camera code has already run that frame).
+    Pad state (0x8026BB60 + 0x38 x port; player +0x4F14, menu +0x8C): +0 held, +2 repeating directions, +4
+    pressed, +0x17/+0x18 main stick X/Y, +0x19/+0x1A C-stick X/Y (s8). C-stick X turns 2.5 degrees a frame,
+    Y zooms 12-160 ft.
+  - `face` puts the member who is up in the partner's face slot (teams of 3 or 4).
+  - The carousel's Doubles reads "Team Play": its name banner, B/V/T texture 9 (172x50 IA4), is redrawn in place,
+    its help (message 0x1D) is ours, and the `sublist` stub also gives Doubles' own five choices help ids of ours
+    (alternate shot; cave "extra" at 0x800268D0).
+  Checked in game: Best Ball Match and Stroke, Scramble 2v2 (also with CPUs), Team Scramble of 2, 3 and 4, the
+  captain's menu, camera and see-through box, an out-of-bounds member costing nothing, plain Doubles.
 
 ## HUD (v3)
 
