@@ -73,7 +73,14 @@ if ($latest -and [int]$latest.app_version -gt $appVersion) {
 	exit $LASTEXITCODE
 }
 
-# 3. Find Dolphin and your copy of the game (remembered after the first run).
+# 3. Find Dolphin and your copy of the game (remembered after the first run). Dolphin's settings folder goes by
+# Dolphin.exe (a portable Dolphin keeps its own next to it), so the mod's settings land where your Dolphin reads them.
+$dolphin = $config['dolphin_exe']
+if (-not $dolphin -or -not (Test-Path $dolphin)) { $dolphin = Find-DolphinExe $(if ($latest) { $latest.dolphin }) }
+if (-not $DolphinUserDir -and $dolphin) {
+	$found = Find-DolphinUserDir $dolphin
+	if ($found -and (Test-Path $found)) { $DolphinUserDir = $found }
+}
 if (-not $DolphinUserDir) { $DolphinUserDir = $config['dolphin_user'] }
 if (-not $DolphinUserDir -or -not (Test-Path $DolphinUserDir)) { $DolphinUserDir = Find-DolphinUserDir }
 if (-not $DolphinUserDir) {
@@ -197,18 +204,14 @@ if (-not (Read-IniSection $ini 'Video_Settings').Contains('InternalResolution') 
 	Set-IniValues $ini 'Video_Settings' ([ordered]@{ 'InternalResolution' = '0' })
 }
 
-# Mod controller layout (every controller, see Install-ModControllerProfile), rebuilt when the layout changes or
-# Port 1 changes (a keyboard there keeps its keys).
+# Mod controller layout (every controller, see Install-ModControllerProfile), written again on every run, so
+# nothing in your own Dolphin settings can change it for the modded game; it only says so when something changed.
 $device = (Read-IniSection (Join-Path $DolphinUserDir 'Config\GCPadNew.ini') 'GCPad1')['Device']
-$profilePath = Join-Path $DolphinUserDir "Config\Profiles\GCPad\$ModProfileName.ini"
-$layoutCurrent = $config['layout_version'] -eq $ModLayoutVersion -and $config['layout_device'] -eq $device -and
-	(Test-Path $profilePath) -and (Read-IniSection $ini 'Controls')['PadProfile1'] -eq $ModProfileName
-if (-not $layoutCurrent) {
-	Say (Install-ModControllerProfile $DolphinUserDir $ini)
-	$config['layout_version'] = $ModLayoutVersion
-	$config['layout_device'] = $device
-	Save-Config
-}
+$said = Install-ModControllerProfile $DolphinUserDir $ini
+if ($said) { Say $said }
+$config['layout_version'] = $ModLayoutVersion
+$config['layout_device'] = $device
+Save-Config
 # Fullscreen toggle and Esc (Install-ModHotkeys), set again when they change or you switch controllers.
 if ($config['hotkeys_version'] -ne $ModHotkeysVersion -or $config['hotkeys_device'] -ne $device) {
 	Say (Install-ModHotkeys $DolphinUserDir $device)
@@ -218,8 +221,6 @@ if ($config['hotkeys_version'] -ne $ModHotkeysVersion -or $config['hotkeys_devic
 }
 
 # 6. Start the game.
-$dolphin = $config['dolphin_exe']
-if (-not $dolphin -or -not (Test-Path $dolphin)) { $dolphin = Find-DolphinExe $(if ($latest) { $latest.dolphin }) }
 if (-not $dolphin) {
 	Say 'Where is Dolphin? Pick Dolphin.exe, in the folder you installed or unzipped Dolphin to.'
 	$dolphin = Pick-File 'Find Dolphin.exe' 'Dolphin.exe|Dolphin.exe'

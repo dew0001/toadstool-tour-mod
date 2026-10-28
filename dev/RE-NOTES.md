@@ -98,8 +98,9 @@ patch), 0x80090438 (404), 0x80096398 (436). Do NOT use 0x80001800: it is wiped b
   further presses add spin (setup +0x24C), and the phase ends when CA4 passes CA8 + 15. Replays press when CB8 /
   CA4 equal the recorded setup +0x190 / +0x1AC. v13 cave 14 (`tony_power_tick`, `tony_impact_tick`) runs golfer
   17's meter twice as fast off the putter: CB8 steps 2, stopping on the top and on 2 x max - 1; CA4 steps 2 on even
-  numbers onto 0, then 1 from 2 on (so the spin presses keep their time). Checked in game: 120 counts a second
-  (60 normally), top and lapse met, CA4 ... -2 0 2 3 4 ..., putts 60.
+  numbers through his zone (`TONY_ZONE`), so it lands on 0 and the zone is as wide early as late, then 1 (the spin
+  presses keep most of their time: 14 frames after the mark instead of 16). Checked in game: 120 counts a second
+  (60 normally), top and lapse met, v14 CA4 ... -4 -2 0 2 4 5 6 ..., putts 60.
 - **Range adjust** in `FUN_80412f6c` (aim update): analog L/R (+0x130/+0x134) tick a step when
   `16 - counter < |stick| * rate` (rate float 0x804DAE88 = 16.0: full tilt = a tick a frame). It then adds the
   step (-1/0/+1, in r10) at 0x80414548, clamps to [5, max], clicks (sound 0x1CC) and sets the target.
@@ -235,8 +236,9 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   shot type change, from the aim camera), and the shot builder compares `|impact error|` (0x80523CAC) with it:
   beyond it the shot hooks or slices hard. The meter's length (setup +0x250, steps) comes from the lie object's
   method +0x24 (`FUN_80416ad4`): a per-club base plus a share that grows in thirds of `impact + 10`.
-  v13: cave 14's `tony_zone` (on `FUN_804169d0`'s first instruction) returns 2 for golfer 17 unless it's a putt
-  (`TONY_ZONE`: with his meter's impact counter stepping 2 onto the mark, -2, 0 and 2 count: 3 frames).
+  v13: cave 14's `tony_zone` (on `FUN_804169d0`'s first instruction) returns `TONY_ZONE` for golfer 17 unless it's
+  a putt. With his meter's impact counter stepping 2, a zone of Z takes Z + 1 frames: v13 2 (3 frames), v14 4 (5
+  frames, -4 -2 0 2 4: Andrew's "5 frames").
 - **Golfer objects in a round:** `FUN_804074a8(code)` makes each golfer: Koopa (15) in `FUN_804bd45c`, vtable
   0x804CA3C8; golfer 16 in `FUN_804c7220`'s default case, vtable 0x804CC948. Both are 0x1E4 bytes on the same
   base constructor `FUN_80407590`. The vtables have 47 methods; [22], [23] and [24] return the file IDs of the
@@ -276,9 +278,9 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   (Waluigi's voice set isn't loaded for him; golfer 17's own is a girl's). His record's +0x28 is 1: Waluigi's power
   shot effects. Stats (Andrew's high-risk pick): 300 yards (each club is the drive x a fixed share, main.dol
   `FUN_80009c58`: 100, 93, 86, 80, 74, 68, 63, 58, 53, 48, 43, 38, 31% for clubs 0-12, x (100 + the club set's
-  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 2 on every shot but putts whatever
+  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 4 (v13: 2) on every shot but putts whatever
   the modifiers (see Impact window; checked in game on all 13 clubs, and with his stat forced to +10), a meter twice
-  as fast off the putter (see Meter ticks; with the zone, 3 frames on time: Andrew's "3 wide"), and no auto swing (see Power). The select screen's lines for him, common-set 0x25E (cursor) and 0x271 (odd link golfers' pick
+  as fast off the putter (see Meter ticks; with the zone, 5 frames on time; v13 had 3), and no auto swing (see Power). The select screen's lines for him, common-set 0x25E (cursor) and 0x271 (odd link golfers' pick
   call), are the girl's: v13 makes them silent. Waluigi's in-round model draws his overalls' buttons as mesh part
   7 (not part 1, the body): `tony.py` hides that part too. Waluigi's `C/S/C` has three bones per finger (left /
   right): thumb 51-53 / 70-72, index 60-62 / 79-81, middle 57-59 / 76-78, ring 54-56 / 73-75, pinky 63-65 / 82-84

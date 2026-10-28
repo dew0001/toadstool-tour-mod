@@ -88,8 +88,12 @@ Changes (v13, with --tony):
     from its file names (GOLFER17_VTABLE), and tony.py builds its files from Waluigi's around his model, smoothly
     skinned, so he swings like Waluigi. No experience screen for him either (LINK_EXP_FIRST_TONY). No auto swing
     for him (cave 14, POWER_PRESS: only B sets his power, then he presses at impact himself).
-  - Tony's impact zone is 3 frames (TONY_ZONE) on every shot but putts (cave 14, IMPACT_ZONE), and his
-    swing meter runs twice as fast, putts aside (POWER_TICK, IMPACT_TICK).
+  - Tony's impact zone is 3 frames on every shot but putts (cave 14, IMPACT_ZONE), and his swing meter runs twice
+    as fast, putts aside (POWER_TICK, IMPACT_TICK).
+
+Changes (v14):
+  - Tony's impact zone is 5 frames (TONY_ZONE_FRAMES): his impact counter steps 2 through the whole zone, so it is
+    two frames early to two late.
 
 Patch code lives over dead functions (caves 1-14 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
@@ -408,13 +412,15 @@ GOLFER17_FILE_METHODS = {22: 0x804CAD3C, 23: 0x804CAD30, 24: 0x804CAD48}   # gol
 POWER_PRESS = 0x80413240
 POWER_PRESS_WORD = 0x70090300
 TONY_GOLFER = 17
-# Tony's impact zone is 3 frames on every shot but putts. FUN_804169d0(lie object, setup) gives the zone, the most
+# Tony's impact zone is 5 frames on every shot but putts. FUN_804169d0(lie object, setup) gives the zone, the most
 # impact error that still counts (`2 x entry - 1` from the table at 0x804DAFD4, by club, lie and impact stat;
 # RE-NOTES "Impact window"); his impact stat alone can't pin it, since club sets add up to +4 and the getter another
 # +1. Its first instruction (`stwu r1,-0x88(r1)`) becomes a branch to cave 14, which returns TONY_ZONE for golfer 17
-# when the club isn't the putter (putts return 0 there anyway). His meter's impact counter steps 2 onto the mark
-# (IMPACT_TICK below), so a zone of 2 takes -2, 0 and 2: a frame early, on time, a frame late (Andrew: "3 wide").
-TONY_ZONE = 2
+# when the club isn't the putter (putts return 0 there anyway). His meter's impact counter steps 2 on even numbers
+# through the zone (IMPACT_TICK below), so a zone of 4 takes -4, -2, 0, 2 and 4: two frames early to two late
+# (Andrew asked for 3 frames, then 5).
+TONY_ZONE_FRAMES = 5
+TONY_ZONE = TONY_ZONE_FRAMES - 1
 IMPACT_ZONE = 0x804169D0
 IMPACT_ZONE_WORD = 0x9421FF78
 # His swing meter runs twice as fast (not on putts). FUN_8046e440 ticks it once a frame through the meter block
@@ -423,9 +429,10 @@ IMPACT_ZONE_WORD = 0x9421FF78
 # counter +0 (0x80523CA4) goes up 1 from power - 2 x max, and the impact error is it (0 = on the mark). Replays
 # press when the counters equal the recorded ones. For golfer 17: the power bar steps 2, stopping on the top (setup
 # +0x250) and on 2 x max - 1 so full power and the lapse are still met exactly (POWER_TICK, `addi r9,r9,1`; r9 the
-# counter, r11 the setup); the impact counter steps 2 on even numbers up to the mark, so it lands on 0 exactly, then
-# 1 again from 2 on, so the time after it (spin presses) is unchanged (IMPACT_TICK, the `lwz r9,0(r31)` before the
-# game's +1; cr0 and r10 are live past it, so the stub leaves them alone).
+# counter, r11 the setup); the impact counter steps 2 on even numbers to the end of his zone (TONY_ZONE), so it lands
+# on 0 exactly and the zone is the same width early and late, then 1 again, so the time left for spin presses is
+# about the game's (IMPACT_TICK, the `lwz r9,0(r31)` before the game's +1; cr0 and r10 are live past it, so the stub
+# leaves them alone).
 POWER_TICK = 0x8046E54C
 POWER_TICK_WORD = 0x39290001
 IMPACT_TICK = 0x8046E490
@@ -486,8 +493,8 @@ def cave14_code(record):
     a.label("tony_impact_tick")               # replaces lwz r9,0(r31): the game adds 1 to what this leaves in r9
     a(ppc.lwz(9, 0, 31))
     tony_check("impact_tick_done")
-    a(ppc.cmpwi(9, 2))
-    a.br("bge", "impact_tick_done")           # past the mark: the game's pace
+    a(ppc.cmpwi(9, TONY_ZONE))
+    a.br("bge", "impact_tick_done")           # past his zone: the game's pace
     a(ppc.addi(9, 9, 2), ppc.rlwinm(9, 9, 0, 0, 30), ppc.addi(9, 9, -1))   # next even number, less the game's 1
     a.label("impact_tick_done")
     a(0x4E800020)

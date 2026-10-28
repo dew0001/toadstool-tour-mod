@@ -8,9 +8,15 @@ function Import-TTMod {
 	[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
 }
 
-function Find-DolphinUserDir {
-	# Same order Dolphin uses on Windows: registry override, legacy Documents folder, then AppData.
-	$reg = Get-ItemProperty -Path 'HKCU:\Software\Dolphin Emulator' -Name 'UserConfigPath' -ErrorAction SilentlyContinue
+function Find-DolphinUserDir($exe) {
+	# Same order Dolphin uses on Windows: a portable Dolphin (portable.txt next to Dolphin.exe, or the registry's
+	# LocalUserConfig) keeps its settings in the User folder next to Dolphin.exe; then the registry's UserConfigPath,
+	# the legacy Documents folder, then AppData.
+	$reg = Get-ItemProperty -Path 'HKCU:\Software\Dolphin Emulator' -ErrorAction SilentlyContinue
+	if ($exe -and (Test-Path $exe)) {
+		$exeDir = Split-Path $exe
+		if ((Test-Path (Join-Path $exeDir 'portable.txt')) -or ($reg -and $reg.LocalUserConfig)) { return Join-Path $exeDir 'User' }
+	}
 	if ($reg -and $reg.UserConfigPath -and (Test-Path $reg.UserConfigPath)) { return $reg.UserConfigPath }
 	$docs = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Dolphin Emulator'
 	if (Test-Path $docs) { return $docs }
@@ -139,7 +145,11 @@ function Set-IniValues($path, $section, $values) {
 # in (then nothing worked). Every binding names each controller Dolphin may see: XInput (Xbox controllers, most PC
 # pads, and PlayStation/Switch controllers through Steam or DS4Windows) and SDL (Dolphin's default, any controller
 # SDL knows, buttons by position: Xbox A = PlayStation Cross = Switch B). Whichever is plugged in works.
-$ModLayoutVersion = 4
+# v14 (app 8): friends' controllers still misbehaved, so the layout is forced harder: all four XInput slots and the
+# second of each SDL model too (a virtual pad from Steam or DS4Windows can take the first), every XInput/SDL
+# controller the player's own Dolphin settings name, a non-Xbox-style Port 1 controller keeps its own buttons
+# alongside, Port 1 is a Standard Controller for the modded game, and Play rewrites it all on every run.
+$ModLayoutVersion = 5
 $ModProfileName = 'Toadstool Tour Mod'
 $ModLayout = [ordered]@{   # face buttons by position (A south, B east, X west, Y north); both stick dialects use the rest
 	'Buttons/A'         = 'A'
@@ -183,11 +193,38 @@ $DolphinKeyboardDefaults = [ordered]@{
 	'Triggers/R' = '`W`'; 'D-Pad/Up' = '`T`'; 'D-Pad/Down' = '`G`'; 'D-Pad/Left' = '`F`'; 'D-Pad/Right' = '`H`'
 }
 
-# The controllers the mod's bindings name: XInput's first, every SDL model above, and the player's own Port 1
-# controller when it's another XInput/SDL one.
-function Get-ModPads($device) {
+# Every XInput/SDL controller named anywhere in the player's Dolphin controller settings (any port, any profile but
+# the mod's), e.g. an 8BitDo pad SDL names by its own model.
+function Get-DolphinPads($userDir) {
+	if (-not $userDir) { return @() }
+	$files = @((Join-Path $userDir 'Config\GCPadNew.ini'), (Join-Path $userDir 'Config\WiimoteNew.ini'))
+	$files += @(Get-ChildItem (Join-Path $userDir 'Config\Profiles') -Recurse -Filter '*.ini' -ErrorAction SilentlyContinue |
+		Where-Object { $_.BaseName -ne $ModProfileName } | ForEach-Object { $_.FullName })
+	$found = foreach ($f in $files) {
+		if (Test-Path $f) { [regex]::Matches([IO.File]::ReadAllText($f), '(?:SDL|XInput)/\d+/[^`:\r\n|&()]+') | ForEach-Object { $_.Value.Trim() } }
+	}
+	return @($found | Where-Object { $_ } | Select-Object -Unique)
+}
+
+# The controllers the mod's bindings name: XInput's first and every SDL model above, the player's own Port 1
+# controller when it's another XInput/SDL one, then the other XInput slots, the second of each SDL model and every
+# XInput/SDL controller the player's Dolphin settings name, less any that Ports 2-4 use (two players on one PC).
+function Get-ModPads($device, $userDir) {
 	$pads = @('XInput/0/Gamepad') + @($ModSdlNames | ForEach-Object { "SDL/0/$_" })
 	if ($device -match '^(SDL|XInput)/\d+/[^:]+$' -and $pads -notcontains $device) { $pads += $device }
+	$more = @(1..3 | ForEach-Object { "XInput/$_/Gamepad" }) + @($ModSdlNames | ForEach-Object { "SDL/1/$_" }) + @(Get-DolphinPads $userDir)
+	$taken = @()
+	if ($userDir) {
+		$core = Read-IniSection (Join-Path $userDir 'Config\Dolphin.ini') 'Core'
+		foreach ($n in 2..4) {
+			if ($core["SIDevice$($n - 1)"] -and $core["SIDevice$($n - 1)"] -ne '0') {
+				$port = Read-IniSection (Join-Path $userDir 'Config\GCPadNew.ini') "GCPad$n"
+				$text = ($port.Keys | ForEach-Object { $port[$_] }) -join "`n"
+				$taken += @([regex]::Matches($text, '(?:SDL|XInput)/\d+/[^`:\r\n|&()]+') | ForEach-Object { $_.Value.Trim() })
+			}
+		}
+	}
+	foreach ($d in $more) { if ($pads -notcontains $d -and $taken -notcontains $d) { $pads += $d } }
 	return $pads
 }
 
@@ -203,9 +240,11 @@ function Get-ModBinding($names, $pads) {
 	return $parts -join ' | '
 }
 
-# Writes the mod's Dolphin controller profile and tells Dolphin to use it on Port 1 for the modded game only.
-# A keyboard on Port 1 keeps its own keys alongside (or Dolphin's, without a GCPadNew.ini); a controller's own
-# Port 1 bindings are left out, so they can't fight the layout. Returns a short status for the player.
+# Writes the mod's Dolphin controller profile and tells Dolphin to use it on Port 1, as a Standard Controller, for
+# the modded game only (a GameCube controller adapter on Port 1 stays one). A Port 1 controller that isn't an
+# XInput/SDL one (a keyboard, or a DirectInput pad whose buttons go by number) keeps its own bindings alongside (or
+# Dolphin's keys, without a GCPadNew.ini); an XInput/SDL one's own bindings are left out, so they can't fight the
+# layout. Returns a short status for the player, or nothing when it was all in place already.
 function Install-ModControllerProfile($userDir, $gameIni) {
 	$pad = Read-IniSection (Join-Path $userDir 'Config\GCPadNew.ini') 'GCPad1'
 	if (-not $pad['Device']) {
@@ -213,26 +252,33 @@ function Install-ModControllerProfile($userDir, $gameIni) {
 		foreach ($k in $DolphinKeyboardDefaults.Keys) { $pad[$k] = $DolphinKeyboardDefaults[$k] }
 	}
 	$keyboard = $pad['Device'] -like '*/Keyboard Mouse'
-	$pads = Get-ModPads $pad['Device']
+	$own = $pad['Device'] -notmatch '^(SDL|XInput)/'
+	$pads = Get-ModPads $pad['Device'] $userDir
 	$lines = New-Object System.Collections.Generic.List[string]
 	$lines.Add('[Profile]')
-	$lines.Add("Device = $(if ($keyboard) { $pad['Device'] } else { $pads[0] })")
-	if ($keyboard) {
+	$lines.Add("Device = $(if ($own) { $pad['Device'] } else { $pads[0] })")
+	if ($own) {
 		foreach ($k in $pad.Keys) {
 			if ($k -notin 'Device', 'Triggers/Dead Zone' -and -not $ModLayout.Contains($k)) { $lines.Add("$k = $($pad[$k])") }
 		}
 	}
 	foreach ($k in $ModLayout.Keys) {
 		$expr = Get-ModBinding $ModLayout[$k] $pads
-		if ($keyboard -and $pad[$k]) { $expr = "($($pad[$k])) | $expr" }
+		if ($own -and $pad[$k]) { $expr = "($($pad[$k])) | $expr" }
 		$lines.Add("$k = $expr")
 	}
 	$lines.Add('Triggers/Dead Zone = 25.000000000000000')
 	$profile = Join-Path $userDir "Config\Profiles\GCPad\$ModProfileName.ini"
+	$before = if (Test-Path $profile) { [IO.File]::ReadAllText($profile) } else { '' }
+	$was = (Read-IniSection $gameIni 'Controls')['PadProfile1'], (Read-IniSection $gameIni 'Core')['SIDevice0']
 	New-Item -ItemType Directory -Force (Split-Path $profile) | Out-Null
 	[IO.File]::WriteAllLines($profile, $lines)
 	Set-IniValues $gameIni 'Controls' ([ordered]@{ 'PadProfile1' = $ModProfileName })
-	$also = if ($keyboard) { ' Your keyboard keys work too.' } else { '' }
+	# 6 = Standard Controller, 12 = GameCube controller adapter (real GameCube controllers; no mapping to set)
+	$port = if ((Read-IniSection (Join-Path $userDir 'Config\Dolphin.ini') 'Core')['SIDevice0'] -eq '12') { '12' } else { '6' }
+	Set-IniValues $gameIni 'Core' ([ordered]@{ 'SIDevice0' = $port })
+	if ($before -eq [IO.File]::ReadAllText($profile) -and $was[0] -eq $ModProfileName -and $was[1] -eq $port) { return }
+	$also = if ($keyboard) { ' Your keyboard keys work too.' } elseif ($own) { " Your controller's own buttons work too." } else { '' }
 	return "Mod controls set for any Xbox, PlayStation or Switch controller: LB/RB clubs, LT/RT views, left stick aims and sets power, click a stick for lefty (left) or Star (right) on the character screen.$also"
 }
 
@@ -242,7 +288,7 @@ function Install-ModControllerProfile($userDir, $gameIni) {
 # Shift+Esc. Dolphin's Hotkeys.ini is shared by every game, so only those two change, and only while they're still
 # Dolphin's own (or ours); a missing file is first written with Dolphin's built-in set (HotkeyManager::LoadDefaults,
 # Windows), since Dolphin leaves any hotkey the file doesn't list unbound.
-$ModHotkeysVersion = 2
+$ModHotkeysVersion = 3   # v3: the fullscreen click on every controller Get-ModPads names (app 8)
 $DolphinStop = 'ESCAPE'
 $ModStop = '@(Shift+ESCAPE)'
 $DolphinFullscreen = '@(Alt+RETURN)'
@@ -300,7 +346,7 @@ function Install-ModHotkeys($userDir, $device) {
 	$full = $keys['General/Toggle Fullscreen']
 	$ours = $full -eq $DolphinFullscreen -or $full -like "$DolphinFullscreen | (*Thumb L* & *Thumb R*)*"
 	if ($ours) {   # v2: on every mod controller (Get-ModPads), not just the one Port 1 names
-		$both = foreach ($d in (Get-ModPads $device)) { "(``$($d):Thumb L`` & ``$($d):Thumb R``)" }
+		$both = foreach ($d in (Get-ModPads $device $userDir)) { "(``$($d):Thumb L`` & ``$($d):Thumb R``)" }
 		$set['General/Toggle Fullscreen'] = "$DolphinFullscreen | $($both -join ' | ')"
 	}
 	if ($set.Count) { Set-IniValues $path 'Hotkeys' $set }
