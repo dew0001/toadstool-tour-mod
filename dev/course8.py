@@ -25,7 +25,10 @@ loaded at 0x80400000; see dev/RE-NOTES.md "Courses"):
   - Icon: the course select shows texture 7 of B/W/R (the star medallion) for index 7; icons_file() redraws it.
   - Auto-aim (v12): another hole's fairway, fringe and green are no target (AIM_SCORE, a stub in cave 13).
   - Distance (v17): every golfer's drive is DRIVE_BONUS yards longer on this course (the clubs scale with it), as
-    the real holes are long for the game's golfers (REACH_HOOK, a stub in cave 13).
+    the real holes are long for the game's golfers (REACH_HOOK, a stub in cave 13). v18: 50 yards, none for Tony
+    (golfer 17, 350 already: the longest driver without it), and a Star version drives as its normal self (Andrew:
+    "star should just be ignored on pebble beach and only the +50 buff is used": STAR_ROW_HOOK reads the normal
+    row of the drive table).
 The holes themselves (models, collision, flyover cameras) come from dev/course (holegen.py, coursejson.py).
 """
 import struct
@@ -64,7 +67,11 @@ AIM_SCORE = 0x804A7A20      # golf: cmpwi r3,0x4f after the score call (r27 = tr
 AIM_SCORE_WORD = 0x2C03004F
 REACH_HOOK = 0x8044C434     # golf FUN_8044c344 (a club's reach): bl FUN_80009c58(f1 = drive, r3 = club, r4 = set)
 REACH = 0x80009C58
-DRIVE_BONUS = 35.0          # yards added to every golfer's drive on this course
+DRIVE_BONUS = 50.0          # yards added to every golfer's drive on this course (v17 35)
+NO_BONUS_GOLFER = 17        # but Tony's (v18)
+PLAYER_OPTIONS = 0x804E667C # golf: option bits per player (bit 0 the Star version: FUN_8044c278 picks its drive row)
+STAR_ROW_HOOK = 0x8044C40C  # golf FUN_8044c344: lwzx r9,r29,r9, the drive from 0x804D2980 + row x 28 (odd rows Star)
+STAR_ROW_WORD = 0x7D3D482E  # (r0 is live past it: the stub uses r11 and r12)
 AIM_SCORE_MIN = 0x50
 OTHER_HOLE_ATTR = 0x0100      # course/collision.py ATTR_OTHER_HOLE
 MUSIC = 0x80011A94          # main.dol: addi r0,r4,-1 (r4 = course code)
@@ -282,15 +289,28 @@ def cave13_code(list_addr):
     a.label("aim_score_cmp")
     a(AIM_SCORE_WORD, ppc.BLR)
 
-    a.label("reach")           # every golfer drives DRIVE_BONUS yards farther here (f1 = drive)
+    a.label("reach")           # every golfer drives DRIVE_BONUS yards farther here (f1 = drive, r31 = player)
     hi, lo = ppc.hi_lo(COURSE_NOW)
     a(ppc.lis(12, hi), ppc.lbz(12, lo, 12), ppc.cmpwi(12, CODE))
     a.br("bne", "reach_game")
+    a(ppc.lbz(12, 0x51EF, 31), ppc.cmpwi(12, NO_BONUS_GOLFER))
+    a.br("beq", "reach_game")
     a.la(12, "drive_bonus")
     a(ppc.lfs(0, 0, 12), ppc.fadds(1, 1, 0))
     a.label("reach_game")
     a.b(REACH)
     a.float("drive_bonus", DRIVE_BONUS)
+
+    a.label("star_row")        # a Star version's drive here is its normal one (r29 = row x 28, r9 = table, r31 = player)
+    hi, lo = ppc.hi_lo(COURSE_NOW)
+    a(ppc.lis(12, hi), ppc.lbz(12, lo, 12), ppc.cmpwi(12, CODE))
+    a.br("bne", "star_row_game")
+    hi, lo = ppc.hi_lo(PLAYER_OPTIONS)
+    a(ppc.lwz(12, 0x5160, 31), ppc.lis(11, hi), ppc.addi(11, 11, lo), ppc.lbzx(12, 11, 12), ppc.andi_(12, 12, 1))
+    a.br("beq", "star_row_game")
+    a(ppc.addi(12, 29, -28), ppc.lwzx(9, 12, 9), ppc.BLR)   # the row before: the normal version's
+    a.label("star_row_game")
+    a(STAR_ROW_WORD, ppc.BLR)
 
     a.label("ace_guard")       # the hole-in-one mask store, skipped on course 8
     hi, lo = ppc.hi_lo(COURSE_NOW)
@@ -334,6 +354,7 @@ def overlay_patches(rel, labels, word):
         out.append((ACE_HOOK, ppc.b(ACE_HOOK, labels["ace_guard"]), ACE_WORDS[0]))
         out.append((AIM_SCORE, ppc.bl(AIM_SCORE, labels["aim_score"]), AIM_SCORE_WORD))
         out.append((REACH_HOOK, ppc.bl(REACH_HOOK, labels["reach"]), ppc.bl(REACH_HOOK, REACH)))
+        out.append((STAR_ROW_HOOK, ppc.bl(STAR_ROW_HOOK, labels["star_row"]), STAR_ROW_WORD))
         out.append((SKY_TEST, ppc.b(SKY_TEST, labels["sky"]), SKY_TEST_WORD))
         out.append((NAME_SITES["golf"], ppc.bl(NAME_SITES["golf"], labels["name"]), NAME_ADD))
         entry = CARD_TABLE + 4 * CODE

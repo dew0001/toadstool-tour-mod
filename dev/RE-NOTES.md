@@ -256,7 +256,11 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   lie like everyone else"): the stat getter call in this function (`bl FUN_8044c5bc` at 0x80416A80, r3 = player,
   r29 = setup) adds 9 for golfer 17, so his -10 card reads about 0 to the table (the getter's own +1 included; 10
   gave every club but the driver 9). Checked in game off the tee: driver 5, clubs 1-5 7, clubs 6-12 9; a wedge from
-  about 50 yards 7; with an odd zone the even steps take Z frames (5: -4..4).
+  about 50 yards 7; with an odd zone the even steps take Z frames (5: -4..4). v18 (Andrew: "his impact frames need to be 5 and
+  adjusted according to worse lies"; 7/9 for longer-zone clubs was wrong): the stub at 0x80416A80 gives golfer 17
+  impact 0 (row: 1, 3, 5, 7, 9 by column) and sets the caller's column register r31 to 3 - drop, drop = the club's
+  fairway column (lie row 1 of the column table in use) minus this lie's, at least 0, column at least 1: 5 frames
+  from the tee, fairway or better, 3 a column worse, 1 two or more (club-set bonuses don't apply to him).
 - **Golfer objects in a round:** `FUN_804074a8(code)` makes each golfer: Koopa (15) in `FUN_804bd45c`, vtable
   0x804CA3C8; golfer 16 in `FUN_804c7220`'s default case, vtable 0x804CC948. Both are 0x1E4 bytes on the same
   base constructor `FUN_80407590`. The vtables have 47 methods; [22], [23] and [24] return the file IDs of the
@@ -296,8 +300,8 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   (Waluigi's voice set isn't loaded for him; golfer 17's own is a girl's). His record's +0x28 is 1: Waluigi's power
   shot effects. Stats (Andrew's high-risk pick): 350 yards (v13 240, then 270, v14 300; each club is the drive x a fixed share, main.dol
   `FUN_80009c58`: 100, 93, 86, 80, 74, 68, 63, 58, 53, 48, 43, 38, 31% for clubs 0-12, x (100 + the club set's
-  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone set by club and lie as everyone's but
-  read about 10 points up (v17; v13-v16 pinned it: 2, then 4, see Impact window), a meter twice
+  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 5 frames on every club, less from
+  worse lies (v18; v13-v16 pinned it: 2, then 4; v17 let clubs widen it; see Impact window), a meter twice
   as fast off the putter (see Meter ticks; with the zone, 5 frames on time; v13 had 3), and no auto swing (see Power). The select screen's lines for him, common-set 0x25E (cursor) and 0x271 (odd link golfers' pick
   call), are the girl's: v13 makes them silent. Waluigi's in-round model draws his overalls' buttons as mesh part
   7 (not part 1, the body): `tony.py` hides that part too. Waluigi's `C/S/C` has three bones per finger (left /
@@ -513,8 +517,12 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
 - **Saves:** the hole-in-one mask store (golf 0x804682F4) would wrap course 8 onto Lakitu Valley's; v11 skips it.
 - **Reach** (v17): a club's reach is `FUN_8044c344(player, club)` = `FUN_80009c58(drive, club, set)` (one call, at
   0x8044C434, for the 16 golfers' drives from 0x804D2980 + id x 0x1C and link golfers' from their record +0x1A).
-  On course 8 a stub adds 35 to the drive first (course8.py `REACH_HOOK`): checked, Mario's driver reads 247 yards
-  on Pebble Beach's 1st tee (212 elsewhere).
+  On course 8 a stub adds to the drive first (course8.py `REACH_HOOK`): v17 35 for everyone; v18 50, not for
+  golfer 17 (Tony, r31 = the player there), and a Star version drives as its normal self there: the Star is bit 0 of
+  the player's option bits (golf 0x804E667C + player +0x5160), which `FUN_8044c278` adds to the golfer's drive row
+  (even rows normal, odd Star); `STAR_ROW_HOOK` (the `lwzx r9,r29,r9` at 0x8044C40C, r29 = row x 28; r0 live past
+  it) reads the row before. Checked on Pebble Beach's 1st tee: Mario and Star Mario 262 (212 / 280 elsewhere), Tony
+  350.
 - **Auto-aim** (v12): every new shot starts from `FUN_804abd70(setup, player)`: yaw (setup +0x1D8) at the pin, then
   by case: pin in reach (2) the power is fitted; out of reach (3, 4) it searches the hole's collision for a landing
   spot. `FUN_804a7874` classes every collision triangle by its surface's score (method [11], called at

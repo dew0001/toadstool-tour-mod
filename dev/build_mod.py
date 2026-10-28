@@ -106,9 +106,13 @@ Changes (v16):
     and labels appended to B/V/V and B/V/W); the carousel's Doubles is "Team Play" (B/V/T texture 9).
 
 Changes (v17):
-  - Tony's impact zone follows club and lie like everyone's (IMPACT_STAT_CALL, TONY_IMPACT_SHIFT); fast-forward
+  - Tony's impact zone follows club and lie like everyone's (IMPACT_STAT_CALL); fast-forward
     is Right Trigger (C-stick up) or R, not A; Pebble Beach adds 35 yards to every drive (course8.py REACH_HOOK);
     in a scramble the picked ball's player hits first (teams.py).
+
+Changes (v18):
+  - Tony's impact zone is 5 frames on every club, less only from worse lies (3 a column worse than the fairway's
+    for that club, 1 two or more): IMPACT_STAT_CALL sets his impact and column.
 
 Patch code lives over dead functions (caves 1-14 below, and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
@@ -439,17 +443,21 @@ GOLFER17_BASE_CTOR_WORD = 0x4BF45151   # bl 0x80407590
 POWER_PRESS = 0x80413240
 POWER_PRESS_WORD = 0x70090300
 TONY_GOLFER = 17
-# Tony's impact zone. FUN_804169d0(lie object, setup) gives the zone, the most impact error that still counts
-# (`2 x entry - 1` from the table at 0x804DAFD4, by club, lie and impact stat; RE-NOTES "Impact window"). v13-v16
-# pinned his at 4 on every club and lie; v17 lets club and lie set it as for everyone (Andrew: "isnt affected by the
-# club selection and lie like everyone else"): the stat getter's answer (`bl FUN_8044c5bc` at IMPACT_STAT_CALL)
-# gets TONY_IMPACT_SHIFT added for golfer 17, so his card still shows -10 while the table reads him at about 0 (with
-# the getter's own +1: driver off the tee 5, long irons 7, wedges 9, less from the rough and sand; a shift of 10
-# gave every club but the driver 9). His meter's impact counter steps 2 on even numbers
-# through the zone (IMPACT_TICK below), so a zone of 5 takes -4, -2, 0, 2 and 4: 5 frames, a zone of 9 nine.
-TONY_IMPACT_SHIFT = 9
+# Tony's impact zone. FUN_804169d0(lie object, setup) gives the zone, the most impact error that still counts:
+# `2 x entry - 1`, the entry from the table at 0x804DAFD4 by impact stat (row 10 - impact) and a column 1..5 that
+# the club and the lie pick from 13-byte rows per lie (0x804CD5E0, or 0x804CD81C for approach shots; RE-NOTES
+# "Impact window"). v13-v16 pinned his at 4 on every club and lie (5 frames on his meter), v17 let the club widen it
+# too (7, 9), which Andrew didn't want ("his impact frames need to be 5 and adjusted according to worse lies"). v18:
+# at the stat getter's call (`bl FUN_8044c5bc` at IMPACT_STAT_CALL; r31 = the column for this club and lie, r29 =
+# the setup) golfer 17 gets impact 0, whose row reads 1, 3, 5, 7, 9 by column, and column 3 - drop, drop being how
+# many columns worse this lie is than the fairway's (lie row 1) for the same club, at least 0: 5 frames from the
+# tee, the fairway or better, 3 a column worse, 1 two or more worse. His card still shows -10. His meter's impact
+# counter steps 2 on even numbers through the zone (IMPACT_TICK below): a zone of 5 takes -4, -2, 0, 2 and 4.
 IMPACT_STAT_CALL = 0x80416A80
 IMPACT_STAT = 0x8044C5BC
+ZONE_COLUMNS, ZONE_COLUMNS_APPROACH = 0x804CD5E0, 0x804CD81C
+FAIRWAY_LIE = 1             # the column table's fairway row
+TONY_ZONE_COLUMN = 3        # impact 0 row: column 3 = zone 5
 IMPACT_ZONE_NOW = 0x80523CB0  # the zone in use (the meter block's +0xC)
 # His swing meter runs twice as fast (not on putts). FUN_8046e440 ticks it once a frame through the meter block
 # 0x80523CA4 (r31): on the power bar (view 0xB) the counter +0x14 (0x80523CB8; power = it, mirrored past the top)
@@ -489,15 +497,27 @@ def cave14_code(record):
     a.label("power_any")
     a(ppc.andi_(9, 0, 0x300), 0x4E800020)
     a.label("tony_impact")                    # replaces bl FUN_8044c5bc (r3 = player) in the zone's lookup
-    a(ppc.stwu(1, -16, 1), ppc.mflr(0), ppc.stw(0, 20, 1), ppc.stw(31, 12, 1), ppc.mr(31, 3))
-    a.bl(IMPACT_STAT)
-    a(ppc.lbz(12, 0x51EF, 31), ppc.cmpwi(12, TONY_GOLFER))
-    a.br("bne", "tony_impact_done")
-    a(ppc.addi(3, 3, TONY_IMPACT_SHIFT), ppc.cmpwi(3, 10))
-    a.br("ble", "tony_impact_done")
-    a(ppc.li(3, 10))
-    a.label("tony_impact_done")
-    a(ppc.lwz(31, 12, 1), ppc.lwz(0, 20, 1), ppc.mtlr(0), ppc.addi(1, 1, 16), 0x4E800020)
+    a(ppc.lbz(12, 0x51EF, 3), ppc.cmpwi(12, TONY_GOLFER))
+    a.br("beq", "tony_impact_own")
+    a.b(IMPACT_STAT)                          # anyone else: the game's stat getter
+    a.label("tony_impact_own")                # r29 = setup, r31 = this club and lie's column (the caller's)
+    a(ppc.lwz(12, 0x1CC, 29), ppc.cmpwi(12, 2))
+    hi, lo = ppc.hi_lo(ZONE_COLUMNS)
+    a(ppc.lis(11, hi), ppc.addi(11, 11, lo))
+    a.br("bne", "tony_impact_table")
+    hi, lo = ppc.hi_lo(ZONE_COLUMNS_APPROACH)
+    a(ppc.lis(11, hi), ppc.addi(11, 11, lo))
+    a.label("tony_impact_table")
+    a(ppc.lwz(12, 0x1D4, 29), ppc.add(11, 11, 12), ppc.lbz(11, 13 * FAIRWAY_LIE, 11))  # the fairway's column
+    a(ppc.subf(12, 31, 11), ppc.cmpwi(12, 0))  # drop = fairway's - this lie's
+    a.br("bge", "tony_impact_drop")
+    a(ppc.li(12, 0))
+    a.label("tony_impact_drop")
+    a(ppc.li(11, TONY_ZONE_COLUMN), ppc.subf(31, 12, 11), ppc.cmpwi(31, 1))
+    a.br("bge", "tony_impact_column")
+    a(ppc.li(31, 1))
+    a.label("tony_impact_column")
+    a(ppc.li(3, 0), 0x4E800020)               # impact 0
 
     def tony_check(other):                    # golfer 17 off the putter, else to `other`; r11 = setup, r12 scratch
         a(ppc.lwz(12, 0x1D4, 11), ppc.cmpwi(12, 13))
