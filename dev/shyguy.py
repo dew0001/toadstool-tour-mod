@@ -371,12 +371,15 @@ def display_list(tris, vertex):
     return bytes(dl)
 
 
-FORMAT = {1: ("b", -128, 127), 2: ("H", 0, 0xFFFF), 3: ("h", -0x8000, 0x7FFF)}   # GX S8, U16, S16
+FORMAT = {1: ("b", -128, 127), 2: ("H", 0, 0xFFFF), 3: ("h", -0x8000, 0x7FFF), 4: ("f", None, None)}  # S8 U16 S16 F32
 
 
 def pack_array(values, comp_frac, what):
     """Quantize and pack an array in the model's own vertex format."""
     comp, frac = comp_frac
+    if comp == 4:   # GX F32
+        v = np.asarray(values, np.float64)
+        return b"".join(struct.pack(f">{v.shape[1]}f", *row) for row in v)
     if comp not in FORMAT:
         raise SystemExit(f"Shy Guy: {what} in a format this doesn't write ({comp})")
     code, lo, hi = FORMAT[comp]
@@ -394,9 +397,9 @@ def bind_positions(m):
     return {i: (w[3], w[7], w[11]) for i, w in enumerate(mdl.world_bind(m))}
 
 
-def bone_map(src, dst):
+def bone_map(src, dst, tol=1.5):
     """C/V/S bone -> the same bone in another of Koopa's models: among the unused bones whose parent is the match
-    of its parent, the one nearest its bind-pose position (within 1.5; the select screen's Koopa holds his arms a
+    of its parent, the one nearest its bind-pose position (within tol; the select screen's Koopa holds his arms a
     little lower)."""
     ws, wd = mdl.world_bind(src), mdl.world_bind(dst)
     ps, pd = [p for p, _ in mdl.bones(src)], [p for p, _ in mdl.bones(dst)]
@@ -407,7 +410,7 @@ def bone_map(src, dst):
             if j in used or pd[j] != out.get(ps[i], -1):
                 continue
             d = sum((ws[i][k] - wd[j][k]) ** 2 for k in (3, 7, 11)) ** 0.5
-            if d < 1.5 and (best is None or d < best[0]):
+            if d < tol and (best is None or d < best[0]):
                 best = (d, j)
         if best:
             out[i] = best[1]
@@ -445,10 +448,12 @@ def free_texture_space(m, lo, hi, banked, body_meshes):
     return True
 
 
-def swap(raw, obj, tex, place):
+def swap(raw, obj, tex, place, tex_size=(256, 256), levels=9):
     """Rebuild one of Koopa's models around Shy Guy. obj: (pos, uv, nrm, tris, this model's bone of each position).
     place: ("bank", offset) puts the texture's header on the bank (the data goes there separately); ("inline", None)
-    writes `tex` over the chosen mesh's own texture inside the module. Returns (packed file, bone palettes)."""
+    writes `tex` over the chosen mesh's own texture inside the module; ("append", None) adds it at the module's end.
+    tex_size, levels: the texture's (width, height) and mip levels (CMPR). Returns (packed file, bone palettes).
+    (tony.py rebuilds Waluigi's models around Tony with it too.)"""
     pos, uv, nrm, tris, bone = obj
     mod = Module(raw)
     root = mod.root
@@ -484,10 +489,10 @@ def swap(raw, obj, tex, place):
     nf = mdl.fmt(mod.u32(root + 0x18), mod.blob[root + 0x1B])
     tf = mdl.fmt(mod.u32(root + 0x2C), mod.blob[root + 0x2F])
     unit = nrm / np.linalg.norm(nrm, axis=1, keepdims=True)
-    p0 = grow_array(0x08, 6, pack_array(pos, pf, "positions"))
-    n0 = grow_array(0x1C, 3, pack_array(unit, nf, "normals"))
-    t0 = grow_array(0x30, 2 * struct.calcsize(FORMAT[tf[0]][0]),
-                    pack_array(np.stack([uv[:, 0], -uv[:, 1]], 1), tf, "texcoords"))
+    width = lambda f: struct.calcsize(FORMAT[f[0]][0])    # bytes per component (the select screen's are floats)
+    p0 = grow_array(0x08, 3 * width(pf), pack_array(pos, pf, "positions"))
+    n0 = grow_array(0x1C, 3 * width(nf), pack_array(unit, nf, "normals"))
+    t0 = grow_array(0x30, 2 * width(tf), pack_array(np.stack([uv[:, 0], -uv[:, 1]], 1), tf, "texcoords"))
     if max(p0 + len(pos), n0 + len(nrm), t0 + len(uv)) > 0x10000:
         raise SystemExit("Shy Guy: too many vertices for 16-bit indices")
 
@@ -542,12 +547,14 @@ def swap(raw, obj, tex, place):
     head = texture_header(m, texset, mod.blob[mo + 10])
     if place[0] == "bank":
         at, data = place[1] | 0x80000000, None
+    elif place[0] == "append":
+        at = mod.alloc(tex, 32) - texset
     else:
         at = m.u32(head + 8)
         if at & 0x80000000 or not free_texture_space(m, at, at + len(tex), False, body):
             raise SystemExit("Shy Guy: no room for the texture inside the model")
         mod.blob[texset + at:texset + at + len(tex)] = tex
-    for k, v in enumerate((256 << 16 | 256, 14, at, 1, 1, 5, 1, 0, 8 << 8)):
+    for k, v in enumerate((tex_size[1] << 16 | tex_size[0], 14, at, 1, 1, 5, 1, 0, (levels - 1) << 8)):
         mod.put32(head + 4 * k, v)
     mod.blob += bytes((-len(mod.blob)) % 32)
     return mod.pack(), [sorted(p) for p in palettes]

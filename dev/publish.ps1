@@ -10,6 +10,7 @@
 #     [-ShyGuyMpt <Mario Power Tennis disc for his model; default: gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso
 #      two folders above the repo; '' builds him from the OBJ in -ShyGuy instead>]
 #     [-Course8 <the 8th course's folder from dev\course\holegen.py; default: mod\course8 next to the repo; '' for none>]
+#     [-Tony <folder with Tony the Tiger's source\untitled.glb; default: assets\tony-the-tiger next to the repo; '' for none>]
 param(
 	[Parameter(Mandatory)] [int] $Version,
 	[Parameter(Mandatory)] [string] $CleanGame,
@@ -21,7 +22,8 @@ param(
 	[string] $ShyGuy = (Join-Path $PSScriptRoot '..\..\assets\shy-guy'),
 	[string] $ShyGuyVoice = (Join-Path $PSScriptRoot '..\..\assets\shy-guy\mario-power-tennis-shy-guy-voice.zip'),
 	[string] $ShyGuyMpt = (Join-Path $PSScriptRoot '..\..\..\gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso'),
-	[string] $Course8 = (Join-Path $PSScriptRoot '..\..\mod\course8')
+	[string] $Course8 = (Join-Path $PSScriptRoot '..\..\mod\course8'),
+	[string] $Tony = (Join-Path $PSScriptRoot '..\..\assets\tony-the-tiger')
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -45,8 +47,13 @@ if (-not $SkipBuild) {
 		if (-not (Test-Path (Join-Path $Course8 'course.json'))) { throw "No 8th course at $Course8 (run dev\course\holegen.py, or pass -Course8 '')" }
 		$course = @('--course8', (Resolve-Path $Course8).Path)
 	}
+	$tonyArgs = @()
+	if ($Tony) {
+		if (-not (Test-Path (Join-Path $Tony 'source\untitled.glb'))) { throw "Tony's model isn't in $Tony (pass -Tony '' for none)" }
+		$tonyArgs = @('--tony', (Resolve-Path $Tony).Path)
+	}
 	python -I (Join-Path $PSScriptRoot 'build_mod.py') $CleanDisc $BuildDir --version $Version --shyguy (Resolve-Path $ShyGuy).Path `
-		--shyguy-voice (Resolve-Path $ShyGuyVoice).Path @mpt @course
+		--shyguy-voice (Resolve-Path $ShyGuyVoice).Path @mpt @course @tonyArgs
 	if ($LASTEXITCODE) { throw 'build_mod.py failed' }
 	python -I (Join-Path $PSScriptRoot 'make_patch.py') $CleanDisc $BuildDir $patchPath $Version @course
 	if ($LASTEXITCODE) { throw 'make_patch.py failed' }

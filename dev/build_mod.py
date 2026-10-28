@@ -3,6 +3,7 @@
 Usage: python -I build_mod.py <clean disc dir> <build dir> [--version N] [--no-unlock] [--no-aspect-write] [--keep-id]
                               [--shyguy <folder with Shy Guy.obj and its texture>] [--shyguy-voice <zip of WAV clips>]
                               [--shyguy-mpt <Mario Power Tennis disc: his model from there instead of the OBJ>]
+                              [--course8 <course folder>] [--tony <folder with Tony the Tiger's .glb>]
 The build dir must already hold a copy of the clean tree (robocopy); this script only rewrites
 the files it changes, reading every original from <clean disc dir>.
 
@@ -81,7 +82,16 @@ Changes (v12):
   - Pebble Beach: the auto-aim keeps to the hole being played (course8.AIM_SCORE); roads inside the course and the
     cart paths play as cart path, not out of bounds (dev/course).
 
-Patch code lives over dead functions (caves 1-10 below; checked with find_dead_code.py). Low memory at
+Changes (v13, with --tony):
+  - Tony the Tiger as an 18th golfer, golfer 17, beside Shy Guy on the extra page: cave 14 writes him into the link
+    record's second entry, which stays listed (2 cards per record again). Golfer 17 gets Waluigi's methods apart
+    from its file names (GOLFER17_VTABLE), and tony.py builds its files from Waluigi's around his model, smoothly
+    skinned, so he swings like Waluigi. No experience screen for him either (LINK_EXP_FIRST_TONY). No auto swing
+    for him (cave 14, POWER_PRESS: only B sets his power, then he presses at impact himself).
+  - Tony's impact zone is 3 frames (TONY_ZONE) on every shot but putts (cave 14, IMPACT_ZONE), and his
+    swing meter runs twice as fast, putts aside (POWER_TICK, IMPACT_TICK).
+
+Patch code lives over dead functions (caves 1-14 below; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
@@ -119,7 +129,8 @@ BANNER_TITLE = f"Mario Golf: Toadstool Tour (Mod v{VERSION})".encode("ascii")
 SHYGUY = sys.argv[sys.argv.index("--shyguy") + 1] if "--shyguy" in sys.argv else None
 SHYGUY_VOICE = sys.argv[sys.argv.index("--shyguy-voice") + 1] if "--shyguy-voice" in sys.argv else None
 SHYGUY_MPT = sys.argv[sys.argv.index("--shyguy-mpt") + 1] if "--shyguy-mpt" in sys.argv else None
-COURSE8 = sys.argv[sys.argv.index("--course8") + 1] if "--course8" in sys.argv else None   # folder or "placeholder"
+TONY = sys.argv[sys.argv.index("--tony") + 1] if "--tony" in sys.argv else None   # folder with his .glb (with --shyguy)
+COURSE8 =sys.argv[sys.argv.index("--course8") + 1] if "--course8" in sys.argv else None   # folder or "placeholder"
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
 
@@ -359,6 +370,7 @@ CHIRP_HALF_WORDS = (0x7FA01670, 0x7F801670)
 # round's experience (record +0x278) and then shows the experience screen. Shy Guy (16) isn't one: start at 17.
 LINK_EXP_FIRST = 0x80400AB8      # C/L/V: cmplwi r11,0xf (r11 = the player's golfer code) -> cmplwi r11,0x10
 LINK_EXP_FIRST_WORDS = (0x280B000F, 0x280B0010)
+LINK_EXP_FIRST_TONY = 0x280B0011  # v13 with --tony: Tony (17) isn't one either: start at 18
 # In rounds each golfer is an object made by FUN_804074a8(code) with a vtable of 47 methods in the golf overlay.
 # Golfer 16 (code 0x10, made by FUN_804c7220's default case) gets Koopa Troopa's methods (code 15, FUN_804bd45c;
 # same object size and base constructor) except the three that name its files, which shyguy.py builds from Koopa's,
@@ -373,6 +385,116 @@ VOICE_METHODS = {42: 0x804C7C00,   # ball near the hole (sfx 0xC3)
                  43: 0x804C7AE4,   # swing (0xAF)
                  44: 0x804C7AA8,   # nice impact (0xB1)
                  46: 0x804C7B34}   # chirp 0-7 while someone else lines up (0xBB-0xC2)
+
+
+# ---- v13: Tony the Tiger, golfer 17 (cave 14; only with --tony, which needs --shyguy)
+# Shy Guy's link record (slot 0) has a second golfer, golfer 17 (body 1), which v7 hid. Tony is it: cave 14 writes
+# his entry (tony.RECORD) after cave 9 writes Shy Guy's, and the extra page keeps its 2 cells per record. In rounds
+# golfer 17 (FUN_804c2404's default case) gets all of Waluigi's methods (code 1, FUN_804badbc; same object size and
+# base constructor) except the three that name its files, which tony.py builds from Waluigi's. Waluigi's voice
+# methods ask for his voice set, which isn't loaded for golfer 17, so Tony is silent (golfer 17's own set is a
+# girl's voice).
+CAVE14 = 0x80053528         # dead FUN_80053528 (find_dead_code.py: DEAD)
+CAVE14_SIZE = 476
+CAVE14_FIRST = 0x9421FFA8
+GOLFER17_VTABLE = 0x804CABC8
+WALUIGI_VTABLE = 0x804C9DA8
+GOLFER17_FILE_METHODS = {22: 0x804CAD3C, 23: 0x804CAD30, 24: 0x804CAD48}   # golfer 17's: C/W/G, C/W/F, C/W/J
+# Tony has no auto swing. On the swing meter (view 0xB in FUN_80412f6c) the power press decides it: A gives the auto
+# swing (setup +0x234 = 1, the game times the impact; sound 0x238), B the manual one (+0x234 = 0, the player presses
+# again at impact; sound 0x23E). `andi. r9,r0,0x300` at POWER_PRESS tests for either (r0 = setup +0x104, the buttons
+# pressed this frame; r31 = setup); cave 14's stub tests golfer 17's real shots for B alone, so his A does nothing
+# there (putts have no auto swing and keep A; replays press what the shot used).
+POWER_PRESS = 0x80413240
+POWER_PRESS_WORD = 0x70090300
+TONY_GOLFER = 17
+# Tony's impact zone is 3 frames on every shot but putts. FUN_804169d0(lie object, setup) gives the zone, the most
+# impact error that still counts (`2 x entry - 1` from the table at 0x804DAFD4, by club, lie and impact stat;
+# RE-NOTES "Impact window"); his impact stat alone can't pin it, since club sets add up to +4 and the getter another
+# +1. Its first instruction (`stwu r1,-0x88(r1)`) becomes a branch to cave 14, which returns TONY_ZONE for golfer 17
+# when the club isn't the putter (putts return 0 there anyway). His meter's impact counter steps 2 onto the mark
+# (IMPACT_TICK below), so a zone of 2 takes -2, 0 and 2: a frame early, on time, a frame late (Andrew: "3 wide").
+TONY_ZONE = 2
+IMPACT_ZONE = 0x804169D0
+IMPACT_ZONE_WORD = 0x9421FF78
+# His swing meter runs twice as fast (not on putts). FUN_8046e440 ticks it once a frame through the meter block
+# 0x80523CA4 (r31): on the power bar (view 0xB) the counter +0x14 (0x80523CB8; power = it, mirrored past the top)
+# goes up 1, and the meter lapses when it equals 2 x max - 1 exactly; after the power press (view 0xC) the impact
+# counter +0 (0x80523CA4) goes up 1 from power - 2 x max, and the impact error is it (0 = on the mark). Replays
+# press when the counters equal the recorded ones. For golfer 17: the power bar steps 2, stopping on the top (setup
+# +0x250) and on 2 x max - 1 so full power and the lapse are still met exactly (POWER_TICK, `addi r9,r9,1`; r9 the
+# counter, r11 the setup); the impact counter steps 2 on even numbers up to the mark, so it lands on 0 exactly, then
+# 1 again from 2 on, so the time after it (spin presses) is unchanged (IMPACT_TICK, the `lwz r9,0(r31)` before the
+# game's +1; cr0 and r10 are live past it, so the stub leaves them alone).
+POWER_TICK = 0x8046E54C
+POWER_TICK_WORD = 0x39290001
+IMPACT_TICK = 0x8046E490
+IMPACT_TICK_WORD = 0x813F0000
+
+
+def cave14_code(record):
+    """Tony's entry in link record 0 (record: offset -> 4 bytes), then on to FUN_80410000 like cave 9; and the power
+    press test (POWER_PRESS)."""
+    a = ppc.Asm(CAVE14)
+    a.label("tony_record")
+    hi, lo = ppc.hi_lo(LINK_RECORDS)
+    a(ppc.lis(12, hi), ppc.addi(12, 12, lo))
+    for off, data in sorted(record.items()):
+        w = struct.unpack(">I", data)[0]
+        a(ppc.lis(11, w >> 16), ppc.ori(11, 11, w & 0xFFFF), ppc.stw(11, off, 12))
+    a.b(GBA_FILL_TARGET)
+    a.label("tony_power")                     # replaces andi. r9,r0,0x300: same cr0, r9 scratch, r0 kept
+    a(ppc.lbz(9, 0x184, 31), ppc.cmpwi(9, 0))
+    a.br("bne", "power_any")                  # a replay
+    a(ppc.lwz(9, 0x1D4, 31), ppc.cmpwi(9, 13))
+    a.br("beq", "power_any")                  # a putt
+    a(ppc.lwz(9, 0x25C, 31), ppc.lbz(9, 0x51EF, 9), ppc.cmpwi(9, TONY_GOLFER))
+    a.br("bne", "power_any")
+    a(ppc.andi_(9, 0, 0x200), 0x4E800020)     # B only; blr
+    a.label("power_any")
+    a(ppc.andi_(9, 0, 0x300), 0x4E800020)
+    a.label("tony_zone")                      # replaces FUN_804169d0's stwu: r4 = setup, r12 and cr0 free
+    a(ppc.lwz(12, 0x1D4, 4), ppc.cmpwi(12, 13))
+    a.br("beq", "zone_game")                  # a putt
+    a(ppc.lwz(12, 0x25C, 4), ppc.lbz(12, 0x51EF, 12), ppc.cmpwi(12, TONY_GOLFER))
+    a.br("bne", "zone_game")
+    a(ppc.li(3, TONY_ZONE), 0x4E800020)       # blr
+    a.label("zone_game")
+    a(IMPACT_ZONE_WORD)
+    a.b(IMPACT_ZONE + 4)
+
+    def tony_check(other):                    # golfer 17 off the putter, else to `other`; r11 = setup, r12 scratch
+        a(ppc.lwz(12, 0x1D4, 11), ppc.cmpwi(12, 13))
+        a.br("beq", other)
+        a(ppc.lwz(12, 0x25C, 11), ppc.lbz(12, 0x51EF, 12), ppc.cmpwi(12, TONY_GOLFER))
+        a.br("bne", other)
+    a.label("tony_power_tick")                # replaces addi r9,r9,1: r9 = power bar counter; r12 scratch
+    tony_check("power_tick_game")
+    a(ppc.lwz(12, 0x250, 11), ppc.cmpw(9, 12), ppc.addi(9, 9, 2))
+    a.br("bge", "power_tick_end")             # already past the top
+    a(ppc.cmpw(9, 12))
+    a.br("ble", "power_tick_end")
+    a(ppc.mr(9, 12))                          # stop on the top
+    a.label("power_tick_end")
+    a(ppc.add(12, 12, 12), ppc.addi(12, 12, -1), ppc.cmpw(9, 12))   # (not r0: addi reads it as 0)
+    a.br("ble", "power_tick_done")
+    a(ppc.mr(9, 12))                          # stop on 2 x max - 1 (the lapse)
+    a.label("power_tick_done")
+    a(0x4E800020)
+    a.label("power_tick_game")
+    a(ppc.addi(9, 9, 1), 0x4E800020)
+    a.label("tony_impact_tick")               # replaces lwz r9,0(r31): the game adds 1 to what this leaves in r9
+    a(ppc.lwz(9, 0, 31))
+    tony_check("impact_tick_done")
+    a(ppc.cmpwi(9, 2))
+    a.br("bge", "impact_tick_done")           # past the mark: the game's pace
+    a(ppc.addi(9, 9, 2), ppc.rlwinm(9, 9, 0, 0, 30), ppc.addi(9, 9, -1))   # next even number, less the game's 1
+    a.label("impact_tick_done")
+    a(0x4E800020)
+    code = a.assemble()
+    if len(code) > CAVE14_SIZE:
+        raise SystemExit(f"cave 14 code is {len(code)} bytes; only {CAVE14_SIZE} fit")
+    return code, a.labels
 
 
 # ---- v9: Shy Guy's own power shot (cave 10; only with --shyguy)
@@ -476,9 +598,10 @@ def cave10_code():
     return code, a.labels
 
 
-def cave9_code(record, anim_sounds):
+def cave9_code(record, anim_sounds, fill_next=GBA_FILL_TARGET):
     """Assemble the select screen's link record for Shy Guy (record: offset -> 4 bytes) and golfer 16's animation
-    sound list method. Returns (bytes, labels)."""
+    sound list method. fill_next: where the record writer goes on to (cave 14 adds Tony's entry). Returns (bytes,
+    labels)."""
     a = ppc.Asm(CAVE9)
     # Replaces the `bl FUN_80410000` before the fill loop: record 0 is cleared and becomes golfer 16's, then on to
     # FUN_80410000 (r3-r10 untouched, so its arguments pass through).
@@ -492,7 +615,7 @@ def cave9_code(record, anim_sounds):
     for off, data in sorted(record.items()):
         w = struct.unpack(">I", data)[0]
         a(ppc.lis(11, w >> 16), ppc.ori(11, 11, w & 0xFFFF), ppc.stw(11, off, 12))
-    a.b(GBA_FILL_TARGET)
+    a.b(fill_next)
     # Replaces the `bl FUN_80410140` after the fill loop: record 0's second golfer isn't listed.
     a.label("link_hide")
     hi, lo = ppc.hi_lo(LINK_GOLFERS + 4)
@@ -1437,7 +1560,7 @@ def check_matrix_site(buf, base, hook):
 
 
 def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None,
-              cave10=None, course=None):
+              cave10=None, course=None, cave14=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1446,7 +1569,8 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
                               (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
                               (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9),
-                              (CAVE10, CAVE10_FIRST, cave10)) + tuple(course[0] if course else ()):
+                              (CAVE10, CAVE10_FIRST, cave10), (CAVE14, CAVE14_FIRST, cave14)) + \
+            tuple(course[0] if course else ()):
         if code is None:
             continue
         if word(data, base, addr) != first:  # still the original (dead) function
@@ -1537,13 +1661,28 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
             put(buf, OVERLAY_BASE, STAR_SWAP_HOOK, ppc.bl(STAR_SWAP_HOOK, v9["star_swap"]),
                 ppc.bl(STAR_SWAP_HOOK, GX_SET_SWAP))
             put(buf, OVERLAY_BASE, CHIRP_HALF, CHIRP_HALF_WORDS[1], CHIRP_HALF_WORDS[0])
-            put(buf, OVERLAY_BASE, LINK_EXP_FIRST, LINK_EXP_FIRST_WORDS[1], LINK_EXP_FIRST_WORDS[0])
-    if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record
+            put(buf, OVERLAY_BASE, LINK_EXP_FIRST, LINK_EXP_FIRST_TONY if "tony_record" in v9 else
+                LINK_EXP_FIRST_WORDS[1], LINK_EXP_FIRST_WORDS[0])
+        if v9 and "tony_record" in v9:  # golfer 17 (Tony) behaves like Waluigi, with his own files
+            for k in range(VTABLE_METHODS):
+                waluigi = word(buf, OVERLAY_BASE, WALUIGI_VTABLE + 4 * k)
+                old = word(buf, OVERLAY_BASE, GOLFER17_VTABLE + 4 * k)
+                own = GOLFER17_FILE_METHODS.get(k)
+                if own is not None and old != own:
+                    raise SystemExit(f"golfer 17's vtable entry {k} isn't the method this build keeps")
+                if own is None:
+                    put(buf, OVERLAY_BASE, GOLFER17_VTABLE + 4 * k, waluigi, old)
+            put(buf, OVERLAY_BASE, POWER_PRESS, ppc.bl(POWER_PRESS, v9["tony_power"]), POWER_PRESS_WORD)
+            put(buf, OVERLAY_BASE, IMPACT_ZONE, ppc.b(IMPACT_ZONE, v9["tony_zone"]), IMPACT_ZONE_WORD)
+            put(buf, OVERLAY_BASE, POWER_TICK, ppc.bl(POWER_TICK, v9["tony_power_tick"]), POWER_TICK_WORD)
+            put(buf, OVERLAY_BASE, IMPACT_TICK, ppc.bl(IMPACT_TICK, v9["tony_impact_tick"]), IMPACT_TICK_WORD)
+    if rel == "B/U/C" and v9:  # the select screen's extra page: Shy Guy's link record (and Tony's beside it)
         put(buf, OVERLAY_BASE, GBA_FILL_HOOK, ppc.bl(GBA_FILL_HOOK, v9["link_record"]),
             ppc.bl(GBA_FILL_HOOK, GBA_FILL_TARGET))
-        put(buf, OVERLAY_BASE, GBA_DONE_HOOK, ppc.bl(GBA_DONE_HOOK, v9["link_hide"]),
-            ppc.bl(GBA_DONE_HOOK, GBA_DONE_TARGET))
-        put(buf, OVERLAY_BASE, GBA_ROW_CELLS, GBA_ROW_CELLS_WORD & ~0xFFFF, GBA_ROW_CELLS_WORD)   # cmpwi r31,0
+        if "tony_record" not in v9:   # without Tony the record's second golfer is hidden, one cell per record
+            put(buf, OVERLAY_BASE, GBA_DONE_HOOK, ppc.bl(GBA_DONE_HOOK, v9["link_hide"]),
+                ppc.bl(GBA_DONE_HOOK, GBA_DONE_TARGET))
+            put(buf, OVERLAY_BASE, GBA_ROW_CELLS, GBA_ROW_CELLS_WORD & ~0xFFFF, GBA_ROW_CELLS_WORD)   # cmpwi r31,0
         put(buf, OVERLAY_BASE, LINK_COMMENTS_ON, LINK_COMMENTS_WORDS[1], LINK_COMMENTS_WORDS[0])
     if course:   # v11: the 8th course's hooks (course8.py)
         import course8
@@ -1575,7 +1714,7 @@ def patch_ids(clean_sys, build_sys, clean_files, build_files):
 def main():
     args = [a for i, a in enumerate(sys.argv[1:], 1)
             if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy", "--shyguy-voice",
-                                                                    "--shyguy-mpt", "--course8")]
+                                                                    "--shyguy-mpt", "--course8", "--tony")]
     clean, build = args[:2]
     ppc.selftest()
     proj_sites = projection_call_sites(clean)
@@ -1607,19 +1746,28 @@ def main():
           f" pause menu row 0x{v6['ghost_menu']:08X})")
     print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
     print(f"cave 8: {len(cave8)} of {CAVE8_SIZE} bytes at 0x{CAVE8:08X} (yardage box 0x{v8['box_text']:08X})")
-    cave9 = v9 = cave10 = None
+    cave9 = v9 = cave10 = cave14 = None
+    if TONY and not SHYGUY:
+        raise SystemExit("--tony needs --shyguy (Tony is the second golfer of Shy Guy's link record)")
     if SHYGUY:
         import shyguy
         golf = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
-        cave9, v9 = cave9_code(shyguy.RECORD, shyguy.anim_sound_table(golf))
+        if TONY:
+            import tony
+            cave14, v14 = cave14_code(tony.RECORD)
+            print(f"cave 14: {len(cave14)} of {CAVE14_SIZE} bytes at 0x{CAVE14:08X} (Tony's link record entry)")
+        cave9, v9 = cave9_code(shyguy.RECORD, shyguy.anim_sound_table(golf),
+                               v14["tony_record"] if TONY else GBA_FILL_TARGET)
         print(f"cave 9: {len(cave9)} of {CAVE9_SIZE} bytes at 0x{CAVE9:08X} (Shy Guy's link record"
               f" 0x{v9['link_record']:08X})")
         cave10, v10 = cave10_code()
         v9.update(v10)
+        if TONY:
+            v9.update(v14)
         print(f"cave 10: {len(cave10)} of {CAVE10_SIZE} bytes at 0x{CAVE10:08X} (Shy Guy's power shot"
               f" 0x{v10['power_burst']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14)
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course)
     if course:
@@ -1636,7 +1784,10 @@ def main():
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
               os.path.join(clean, "files"), os.path.join(build, "files"))
     if SHYGUY:
-        for rel, data in shyguy.build(os.path.join(clean, "files"), SHYGUY, SHYGUY_VOICE, SHYGUY_MPT).items():
+        made = shyguy.build(os.path.join(clean, "files"), SHYGUY, SHYGUY_VOICE, SHYGUY_MPT)
+        if TONY:
+            made.update(tony.build(os.path.join(clean, "files"), TONY, made))
+        for rel, data in made.items():
             open(os.path.join(build, "files", *rel.split("/")), "wb").write(data)
 
 

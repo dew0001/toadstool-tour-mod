@@ -47,12 +47,22 @@ FILES = [  # (disc path, compressed?) - every file build_mod.py touches
     ("files/B/T/O", False),   # the common sound set: his call on the select screen, one sample in place
     ("files/B/T/P", False),
     ("files/B/W/R", True),    # course select icons: the 8th course's (build_mod.py --course8)
+    # Tony the Tiger, golfer 17 (build_mod.py --tony)
+    ("files/C/W/F", True),
+    ("files/C/W/G", True),
+    ("files/C/W/H", True),
+    ("files/C/W/I", True),
+    ("files/C/W/J", True),
+    ("files/B/V/L", True),
 ]
 MIN_COPY = 64   # shorter matches with the original stay as edits
 # Files the build makes from another file of the game: the patch starts from that one ("base"), so what they share
-# goes in as copies. Shy Guy's golfer 16 files are built from Koopa Troopa's (dev/shyguy.py SOURCES).
+# goes in as copies. Shy Guy's golfer 16 files are built from Koopa Troopa's (dev/shyguy.py SOURCES), Tony's
+# golfer 17 files from Waluigi's (dev/tony.py SOURCES).
 BASE = {"files/C/W/B": "files/C/V/S", "files/C/W/E": "files/C/V/Z", "files/B/V/K": "files/B/V/D",
-        "files/C/W/A": "files/C/V/R"}
+        "files/C/W/A": "files/C/V/R",
+        "files/C/W/G": "files/C/S/C", "files/C/W/J": "files/C/S/J", "files/B/V/L": "files/B/V/C",
+        "files/C/W/F": "files/C/S/B"}
 
 
 def runs(old, new):

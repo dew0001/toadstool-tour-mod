@@ -54,6 +54,24 @@ function Clear-SavedWindow {
 	Set-Content -Path $qt -Value $out -Encoding ascii
 }
 
+# For a person playing: their own Dolphin's game window position (its Qt.ini [renderwidget]), so the test game
+# opens on the screen they play on. Without a saved one, Dolphin opens it on the screen the mouse is on.
+function Use-PlayerWindow {
+	$own = @((Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Dolphin Emulator\Config\Qt.ini'),
+		(Join-Path $env:APPDATA 'Dolphin Emulator\Config\Qt.ini')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+	if (-not $own) { return }
+	$section = [System.Collections.Generic.List[string]]::new()
+	$in = $false
+	foreach ($l in @(Get-Content $own)) {
+		if ($l -match '^\[') { $in = $l -eq '[renderwidget]' }
+		if ($in) { $section.Add($l) }
+	}
+	if ($section.Count -lt 2) { return }
+	$qt = Join-Path $config 'Qt.ini'
+	$lines = if (Test-Path $qt) { @(Get-Content $qt) } else { @() }
+	Set-Content -Path $qt -Value ($lines + '' + $section) -Encoding ascii
+}
+
 function Write-PadProfile([bool] $Virtual) {
 	if ($Virtual) {
 		$map = [ordered]@{
@@ -148,6 +166,7 @@ switch ($Action) {
 	'play' {
 		Stop-Test
 		Clear-SavedWindow
+		Use-PlayerWindow
 		Write-PadProfile $false
 		$device = Use-PlayerPad
 		Set-Ini (Join-Path $config 'Dolphin.ini') 'Input' @{ BackgroundInput = 'False' }

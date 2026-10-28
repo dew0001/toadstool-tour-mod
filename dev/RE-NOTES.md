@@ -35,9 +35,10 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003CDE4 | 540 | FUN_8003cde4 | v9 Shy Guy's power shot: sound, star burst, star colours (`--shyguy` only) |
 | 0x80069F4C | 560 | FUN_80069f4c | v11 8th course: hole info, file IDs, golf lookup and resolver stubs (`--course8` only) |
 | 0x8006A834 | 464 | FUN_8006a834 | v11 8th course: the course select list (8 entries) and the menu lookup stubs |
-| 0x80084B2C | 464 | FUN_80084b2c | v11 8th course: list append, music, sky, name, hole-in-one guard |
+| 0x80084B2C | 464 | FUN_80084b2c | v11 8th course: list append, music, sky, name, hole-in-one guard; v12 auto-aim score stub (0x80084C20) |
+| 0x80053528 | 476 | FUN_80053528 | v13 Tony's entry in the link record, his B-only power press, impact zone and faster meter (`--tony` only) |
 
-Still free (DEAD in `find_dead_code.py`): 0x80053528 (476),
+Still free (DEAD in `find_dead_code.py`):
 0x80054EFC (424), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug
 patch), 0x80090438 (404), 0x80096398 (436). Do NOT use 0x80001800: it is wiped before the first frame.
 
@@ -79,6 +80,26 @@ patch), 0x80090438 (404), 0x80096398 (436). Do NOT use 0x80001800: it is wiped b
 - Power is a whole number of swing-meter steps: setup +0x1D0, 5..60 while aiming (`RANGE_TARGET`
   0x80523CBC = the meter's target). The meter counter `_DAT_80523cb8` runs 0..2*max-1 one step per frame;
   pressing sets +0x1D0 to its step. One step = 1/60 of the club's reach (4 yd for a 240-yd driver).
+- **Auto and manual swings** (`FUN_80412f6c`, view 0xB = the swing meter): A starts the meter; the power press
+  then decides. `andi. r9,r0,0x300` at 0x80413240 (r0 = setup +0x104 pressed, r31 = setup) takes A or B: A sets
+  setup +0x234 = 1, the auto swing (the game sets the impact, +0x1AC from `_DAT_80523cac`; sound 0x238, meter
+  stage `_DAT_80523cb4` = 3), B sets +0x234 = 0, the manual one (the player presses again at the impact mark, view
+  0xC; sound 0x23E, stage 2). Putts (club 13) branch off after it with no auto swing. If neither is pressed before
+  the counter reaches 2 x max - 1 the meter lapses back to view 5. Replays (+0x184) fake the press from +0x1B5.
+  v13 calls cave 14 there instead: golfer 17's real shots (not putts or replays) take B alone, so Tony has no auto
+  swing (checked in game: A at the power press does nothing and the meter lapses; B then A swings; putts as usual).
+- **Meter ticks** (`FUN_8046e440`, once a frame, r31 = the meter block 0x80523CA4): +0 the impact counter
+  (0x80523CA4), +4 the auto flag (CA8), +8 the impact error (CAC), +0xC the zone (CB0), +0x10 the stage (CB4), +0x14
+  the power counter (CB8), +0x18 the target step (CBC), +0x1C / +0x20 the "nice power" / "nice impact" timers
+  (CC0 / CC4, 90 when exact), +0x34 the current setup (CD8). On the power bar (view 0xB) CB8 goes up 1
+  (`addi r9,r9,1` at 0x8046E54C; power = CB8, or 2 x max - CB8 past the top) and the meter lapses when it equals
+  2 x max - 1 exactly. At the power press `FUN_80412f6c` sets CA4 = CB8 - 2 x max; in view 0xC it goes up 1 (the
+  `lwz r9,0(r31)` at 0x8046E490, then `addi`), the impact error is CA4 (mirrored below -max), 0 = on the mark,
+  further presses add spin (setup +0x24C), and the phase ends when CA4 passes CA8 + 15. Replays press when CB8 /
+  CA4 equal the recorded setup +0x190 / +0x1AC. v13 cave 14 (`tony_power_tick`, `tony_impact_tick`) runs golfer
+  17's meter twice as fast off the putter: CB8 steps 2, stopping on the top and on 2 x max - 1; CA4 steps 2 on even
+  numbers onto 0, then 1 from 2 on (so the spin presses keep their time). Checked in game: 120 counts a second
+  (60 normally), top and lapse met, CA4 ... -2 0 2 3 4 ..., putts 60.
 - **Range adjust** in `FUN_80412f6c` (aim update): analog L/R (+0x130/+0x134) tick a step when
   `16 - counter < |stick| * rate` (rate float 0x804DAE88 = 16.0: full tilt = a tick a frame). It then adds the
   step (-1/0/+1, in r10) at 0x80414548, clamps to [5, max], clicks (sound 0x1CC) and sets the target.
@@ -192,9 +213,30 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
   the card's trajectory picture in 5 bands), curve direction (0/1, mirrored by handedness), curve (0..6: straight,
   slight, big), impact, control, spin. The bars (the card is drawn by `FUN_80406ec8`) show value + 10 of 20 segments;
   the roster runs impact 0..4, control -5..4, spin -6..6, and longer drives come with narrower impact and less
-  control. Character codes: 0 Mario, 1 Peach, 2 DK, 3 Yoshi, 4 Waluigi, 5 Koopa Troopa, 6 Wario, 7 Daisy, 8 Luigi,
-  9 Petey, 10 Boo, 11 Diddy, 12 Birdo, 13 Bowser, 14 Bowser Jr, 15 "nisemario" (the sound group names);
-  0x80445D34 maps them to golfer codes (Koopa 5 -> 15).
+  control. **Character codes** are the select grid's order: 0 Mario, 1 Luigi, 2 Peach, 3 Daisy, 4 Yoshi, 5 Koopa
+  Troopa, 6 DK, 7 Diddy, 8 Wario, 9 Waluigi, 10 Birdo, 11 Bowser, 12 Bowser Jr, 13 Boo, 14 Metal Mario
+  ("nisemario"), 15 Petey (an older list here, from the sound group names, had most of these wrong).
+  0x80445D34 (16 ints) maps them to **golfer codes**: 0 Mario, 1 Waluigi, 2 Peach, 3 Luigi, 4 Bowser, 5 Wario,
+  6 Metal Mario, 7 Birdo, 8 Yoshi, 9 DK, 10 Diddy, 11 Boo, 12 Petey, 13 Daisy, 14 Bowser Jr, 15 Koopa (checked
+  v13 by rendering each golfer's in-round model). Each golfer's vtable methods [22]/[23]/[24] name its in-round
+  model, texture bank and second model (`lis r3,0; addi r3,r3,ID`): e.g. Waluigi `C/S/C`, `C/S/B`, `C/S/J`, Wario
+  `C/T/G`, `C/T/F`, `C/T/N`, Luigi `C/S/S`, `C/S/R`, `C/S/Z`. The select screen's models are u32 file IDs at
+  0x804459A0 + 4 x character code (Waluigi `B/V/C`, Koopa `B/V/D`), then the link golfers' (16 `B/V/K`, 17
+  `B/V/L`).
+- **Impact window** (`FUN_804169d0`, golf, not putts): a column 1..5 from the club and the lie, byte
+  `[club + 13 x lie]` of 0x804CD5E0 (0x804CD81C when setup +0x1CC is 2; the driver off the tee is 3, wedges 5,
+  rough and bunkers lower), then the window is `2 x entry - 1` with the entry from the 21 x 5 byte table at
+  0x804DAFD4, row `10 - impact` (impact from `FUN_8044c5bc`: the golfer's stat plus modifiers, clamped -10..10).
+  Impact 4 (Mario): driver 7, wedge 9. Impact -4: 3 and 7. Impact -8: 1 and 3. Impact -10: 1 everywhere. The
+  roster's lowest is -6 (the longest Star version). The modifiers: the player's club set (byte 0x804E6664 + 4 x
+  player + 0/1/2 for woods/irons/wedges, `FUN_8044c1cc`) indexes 10-byte rows at main.dol 0x8009BD48, whose +4 is
+  an impact bonus (`FUN_80009bd0`; -20 to +4), and +1 when the player's +0x18 object's float +0x20 is over 0.985.
+  The game keeps the result in 0x80523CB0, set when a shot is set up and again by `FUN_8041073c` (each club or
+  shot type change, from the aim camera), and the shot builder compares `|impact error|` (0x80523CAC) with it:
+  beyond it the shot hooks or slices hard. The meter's length (setup +0x250, steps) comes from the lie object's
+  method +0x24 (`FUN_80416ad4`): a per-club base plus a share that grows in thirds of `impact + 10`.
+  v13: cave 14's `tony_zone` (on `FUN_804169d0`'s first instruction) returns 2 for golfer 17 unless it's a putt
+  (`TONY_ZONE`: with his meter's impact counter stepping 2 onto the mark, -2, 0 and 2 count: 3 frames).
 - **Golfer objects in a round:** `FUN_804074a8(code)` makes each golfer: Koopa (15) in `FUN_804bd45c`, vtable
   0x804CA3C8; golfer 16 in `FUN_804c7220`'s default case, vtable 0x804CC948. Both are 0x1E4 bytes on the same
   base constructor `FUN_80407590`. The vtables have 47 methods; [22], [23] and [24] return the file IDs of the
@@ -225,7 +267,50 @@ Shy Guy is a 17th golfer, not a replacement: he is golfer 16, the first of the 8
 - **End of round experience** (`FUN_80400a64`, golf): for each player whose golfer code is over 15 (player +0x51EF)
   and who scored points (+0x2C), if the link record's name (+0x268) matches the player's name (0x804E5D74 + 0x2C x
   player) the points go into record +0x278 and the round ends on the experience screen (`FUN_80485818(.., 6, ..)`).
-  v12 makes the test `cmplwi r11,0x10` (0x80400AB8) so Shy Guy, golfer 16, gets none.
+  v12 makes the test `cmplwi r11,0x10` (0x80400AB8) so Shy Guy, golfer 16, gets none; v13 with Tony `0x11`.
+- **v13 Tony the Tiger, golfer 17** (`tony.py`, `--tony`): the second golfer of Shy Guy's link record (entry at
+  record +0x2C, body 1; cave 14 writes it after cave 9 writes Shy Guy's, and the extra page keeps 2 cells per
+  record). Golfer 17 (`FUN_804c2404`'s default case, vtable 0x804CABC8; its own [22]/[23]/[24] 0x804CAD3C,
+  0x804CAD30, 0x804CAD48 name `C/W/G`, `C/W/F`, `C/W/J`; emblem `C/W/H`, face `C/W/I`, select model `B/V/L`) gets
+  Waluigi's 47 methods (vtable 0x804C9DA8) except those three, so he moves with Waluigi's animations and is silent
+  (Waluigi's voice set isn't loaded for him; golfer 17's own is a girl's). His record's +0x28 is 1: Waluigi's power
+  shot effects. Stats (Andrew's high-risk pick): 300 yards (each club is the drive x a fixed share, main.dol
+  `FUN_80009c58`: 100, 93, 86, 80, 74, 68, 63, 58, 53, 48, 43, 38, 31% for clubs 0-12, x (100 + the club set's
+  bonus)%), height 3, curve 1, impact -10, control 4, spin 5, an impact zone of 2 on every shot but putts whatever
+  the modifiers (see Impact window; checked in game on all 13 clubs, and with his stat forced to +10), a meter twice
+  as fast off the putter (see Meter ticks; with the zone, 3 frames on time: Andrew's "3 wide"), and no auto swing (see Power). The select screen's lines for him, common-set 0x25E (cursor) and 0x271 (odd link golfers' pick
+  call), are the girl's: v13 makes them silent. Waluigi's in-round model draws his overalls' buttons as mesh part
+  7 (not part 1, the body): `tony.py` hides that part too. Waluigi's `C/S/C` has three bones per finger (left /
+  right): thumb 51-53 / 70-72, index 60-62 / 79-81, middle 57-59 / 76-78, ring 54-56 / 73-75, pinky 63-65 / 82-84
+  (hands 50 / 69). The club sits in the curl of the fingers, so a model whose fingers ride only on the hand bone
+  holds it outside the paw: `tony.py` maps each of Tony's finger joints onto these.
+  Voice slots for him (not built yet): a round loads golfer 17's own set, MusyX group 17 "ella" (`C/Y/U`-`X`, 20
+  sounds 0x50-0x63; special shot set "shella" `D/B/S`, 0x15F-0x160). Golfer 17's own voice methods play [43] swing
+  0x50, [44] nice impact 0x51, [42] ball near the hole 0x63, [46] chirps 0-7 0x5B-0x62 (jump table 0x804E2EFC);
+  its own [18] list (0x804D92C8, 31 entries) uses the rest. Waluigi's methods (what golfer 17 has now) ask for his
+  set "waruigi" (0x107-0x119: [43] 0x107, [44] 0x116, [42] 0x119), not loaded for golfer 17. Waluigi's [18] list
+  (0x804D7F08, 25 entries) plays his voice at frame 1 of reactions 0-4 (0x109-0x10D, best to worst), 0x117 / 0x118
+  later in reaction 0, his special set's 0x13C in animation 5, and common sounds (0x19D, 0x1A0, 0x1C9, 0x1F5,
+  0x1F9, 0x209). Power shot hit sounds by effects code (jump table 0x804DF01C): 0 Mario 0x217, 1 Waluigi 0x21E.
+  The plan, as Shy Guy's: keep golfer 17's own [42]/[43]/[44]/[46], point [18] at Waluigi's list with his voice
+  IDs moved to 0x52-0x59, a power shot shout on 0x5A (like cave 10), and his select-screen lines on 0x25E / 0x271.
+- **Model skinning** (main.dol `FUN_80008bfc` each frame; kernels 0x8002E4F8 and 0x8002E5EC, paired singles, so
+  Ghidra shows them as bad data): the model's matrix slots (root +0x48 count, +0x4C a byte list of bones; the
+  instance's slot buffer, +0x30, is allocated as count x 0x30 by `FUN_8000543c`) get their bones' skin matrices;
+  then each skin block (root +0x50 count, +0x54 blocks of 0x20) writes blended vertices into the instance's own
+  position and normal buffers (two each, +4/+8 and +0xC/+0x10 by `lha +0x36`, sized root +0x0C and +0x20 entries,
+  their first root +0x14 / +0x28 entries copied once from the source arrays root +0x10 / +0x24):
+  - block +0x00 / +0x04: first position / normal it writes, in the source arrays and in the buffers
+  - +0x0C runs at +0x10 of (u8 slot a, u8 slot b, u16 count): the next `count` vertices, in order, each
+    `wa * Ma * v + wb * Mb * v`, weights in pairs at +0x08 (s8, 1/128ths; GQR5 = 0x07060706)
+  - +0x18 runs at +0x1C of (u16 slot, u16 count): for `count` vertices numbered (u16, from the block's first) in the
+    list at +0x14, add `w * M * v`, the weights bytes following the pairs. Waluigi's `C/S/C`: 1 block from 1141,
+    96 pair runs (1074 vertices) and 23 extra runs (548); every vertex's weights total exactly 128.
+  A group with flags bit 0 clear draws from those buffers (the draw, `FUN_80006524`, points GX's position and
+  normal arrays at them); its palette entry -1 (0xFFFFFFFF) loads matrix 0, the model's own, since the vertices
+  are already in model space. Face morphs (`FUN_80008858`, root +0x78/+0x7C) also write into the buffers.
+  `tony.skinned_swap` writes Tony this way: one block after everything the base's buffers held, one skinned group.
+  One bone per vertex (rigid groups, as Shy Guy has) tore his chest, shoulders and hips apart at every bend.
 - **Select screen call:** `FUN_8040b56c` plays one common-set sound per golfer when picked (0x26F Koopa ... by
   character code), and on the extra page 0x270 for even link golfers (golfer 16), 0x271 for odd ones. Landing the
   cursor on a golfer plays its idle line ("taiki"), `FUN_80013108(golfer code)`: 0x258-0x269 for the 16, 0x263
@@ -453,7 +538,8 @@ with keyboard controls. Set `TTMOD_ROOT`, `TTMOD_DOL` or `TTMOD_PID` to point el
    Start = Share, L/R = L2/R2, main stick = left stick, C-stick = right stick, D-pad = Pad N/S/E/W.
    Look: `test_dolphin.ps1 shot` prints a screenshot path (a 960-wide `.small.png` copy). `stop` closes it.
    To hand the test game to a person (only when they ask): `test_dolphin.ps1 play` starts it on the normal
-   desktop with keyboard controls (keys: x = A, z = B, c = X, s = Y, d = Z, i/k/j/l = C-stick, q/w = L/R,
+   desktop, on the screen their own Dolphin's game window last used (its Qt.ini [renderwidget]; without that,
+   Dolphin opens it on the screen the mouse is on), with their own controller mapping, else keyboard controls (keys: x = A, z = B, c = X, s = Y, d = Z, i/k/j/l = C-stick, q/w = L/R,
    arrows = main stick, Enter = Start).
 4. Menus to a round: Start, A, A (1 Player), A (Mario; Pad E five times = Koopa Troopa; Pad S twice = Shy Guy on
    the extra page), Pad E, A (Character Match; Pad E three times = Stroke Play), A, A (Novice), A (course), A
