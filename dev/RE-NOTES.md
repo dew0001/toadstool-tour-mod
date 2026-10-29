@@ -60,12 +60,18 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x800542C8 | 364 | FUN_800542c8 | v20 Wolf: points on the panel, scorecard, results ("wshow", full) |
 | 0x800816FC | 352 | FUN_800816fc | v20 Wolf: state, points, names ("wdata") |
 | 0x8005B7E4 | 344 | FUN_8005b7e4 | v20 Worst Ball and Wolf texts ("wtext") |
+| 0x80055248 | 288 | FUN_80055248 | v22 cave 17: the aim arrows (the preview's wind flag, the swing takes the D-pad's spin and curve) |
+| 0x8003F8C0 | 300 | FUN_8003f8c0 | v22 course 2's hole info (Battleground), the golf info lookup (course8.py cave 18) |
+| 0x8008C898 | 300 | FUN_8008c898 | v22 course 3's hole info (Timber Creek), the golf ID lookup (cave 19) |
+| 0x800463C4 | 312 | FUN_800463c4 | v22 courses 2 and 3's hole files, the menu's ID lookup (cave 20) |
+| 0x8006F468 | 344 | FUN_8006f468 | v22 our courses' names, the round's name buffer, the round start stub (cave 21) |
+| 0x8007CCC0 | 308 | FUN_8007ccc0 | v22 the course select's commit, icon row spacing, preview and name stubs (cave 22) |
 
 Still free (DEAD in `find_dead_code.py`, run on `mod\ghidra_out\golf\unreferenced.tsv`; the list above v16 only
-named the 400-byte ones): 0x8003176C (316), 0x8003F8C0 (300), 0x800463C4 (312), 0x80055248 (288), 0x80057A14
-(712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug patch), 0x8006F468 (344), 0x8007CCC0
-(308), 0x8008C898 (300). Do NOT use 0x80001800: it is wiped before the first
-frame.
+named the 400-byte ones): 0x8003176C (316), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444,
+`messages` debug patch). v22 took the rest; v21's caves 11-16 were reshuffled (cave 11 now holds the course list,
+cave 12 the first two courses' hole info). Smaller dead functions (under 288 bytes) were never listed: a new tool
+run without the size filter would find more. Do NOT use 0x80001800: it is wiped before the first frame.
 
 ## Gotchas
 
@@ -137,6 +143,27 @@ frame.
     use by simulating (`FUN_8044ccd8`, secant search) so carry = reach * step / 60.
   - Real shots (mode 3) take the "spread" branch: effective step = step * (1 + random spread), with the table
     interpolated between two steps. Previews (landing marker, mode 5) and putts read the table at the step.
+    The spread is setup +0x23C = (random x 2 - 1) x (+0x238, the lie's "Be Factor" %), drawn at the power press.
+  - Shaping: spin = (+0x21C or +0x224) >> 3, curve = (+0x220 or +0x228) >> 3 (each -0x100..0x100), the second of
+    each pair when the setup's view is 0xE (the shot itself), the first otherwise (previews). The impact error
+    (0x80523CAC) bends and shortens real shots (modes 1, 3; previews only with the shot's +0x55 bit 1): past the zone
+    (0x80523CB0) a fixed hook or slice, inside it in proportion to error / zone.
+- **Aim preview (the arrows)**: while a human aims (views 5-10, `FUN_80410154`), `FUN_80423bbc` builds the shared shot
+  0x805052AC each frame in mode 6/7 and flies it with `FUN_80415790(0x8050272C, lie, shot, mode)`: the arrows, the
+  landing star (setup +0x1EC, also 0x80502768) and its yards. Its shot +0x55 comes from the byte 0x804E5C32 (a debug
+  byte nothing sets; `stb r11,0x55(r29)` at 0x8042493C): bit 0 = fly the preview with the wind (the flight setup
+  `FUN_80414aa4(ball, shot, mode)` always gives modes 1, 3, 5 the wind, 6/7 only with that bit; the No Wind item,
+  player +0x51F2, zeroes it), bit 1 = add the impact error. The wind is 0x804E6854 (speed, the HUD's mph) and
+  0x804E6850 (direction, radians). The D-pad, in `FUN_8041027c` (views 5-9), moves the plan +0x21C (up/down, spin)
+  and +0x220 (left/right, curve) by 0x40: the arrows and the ball picture show it. The swing ignores it: on the
+  meter (views 0xB and 0xC until the impact press) `FUN_80412f6c` sets +0x224 / +0x228 every frame from the main
+  stick (0x804146B8..0x804147BC; under 0.1 of tilt both 0; the stick's direction scaled so its larger axis is tilt x
+  256), and replays from +0x1A4 / +0x1A8. Measured (`scripts\arrow_test.ps1`, Pasadena 12, 4-wood, perfect hits):
+  no wind and no shaping lands within a foot of the star; 5 mph of wind 8 yards off it; D-pad curve with a centred
+  stick 15 yards off (the ball flew straight); the stick held during the swing 18 yards off (the arrows straight).
+  v22 (cave 17): the preview flies with the wind (bit 0 set at 0x8042493C) and a human's swing takes the D-pad plan
+  (`b` at 0x804146B8: +0x224 / +0x228 = +0x21C / +0x220 unless the player's port, record +0x5164, is 4 = CPU).
+  Checked: wind, curve and spin both ways, and a stick held during the swing all land within 1.3 ft of the star.
 - **v4 quarter steps** (cave 5, state block at 0x800411B8: player, club, step, quarter, quarter table):
   - `fine_step` (replaces `lbz r0,0x184(r31)` at 0x80414538): the stick moves quarters; the game's step only
     moves when they roll over. Same player, club and step as last time keeps the quarter. Not for the putter.
@@ -523,6 +550,35 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
     (dev/course/industry.py) make the horizon. The camera's far plane (camera +0x34) is 12800 ft (3.9 km).
   - Its files live under a second new top folder, `F` (holes `F/A`..`F/R`, card `F/S/A`, emblem `F/S/B`);
     `TTMod.Build` appends any number of new folders (each with parent 0).
+- **v22, the 10th and 11th courses (Battleground, Timber Creek): code 9 with a variant.** Code 10 is the practice
+  holes and the per-course tables end there (the CPU table 0x804D7324 has 10 entries, the emblem table 12, the music
+  table 7 columns), so the new courses don't get codes. Menu indexes 9 and 10 make codes 10 and 11 at the course
+  select's commit (`FUN_80415040`: `stb r3,0xA79(r29)` at 0x80415388 stores index + 1 into 0x80176079; r11 and r12
+  are free, CTR is live, nothing reads cr0 before 0x804153A4); a stub there stores code 9 and the variant (1, 2; 0 for
+  any other pick) in the spare setup byte 0x8017607E. The game's other writers of 0x80176079 (main menu resets to 1,
+  the Game Boy Advance link setup `FUN_8043c2ac`) never write 9. Then (course8.py, caves 11-13, 15, 16, 18-22):
+  - Hole IDs 1101 + 18 k + hole for k = 0 Pebble Beach, 1 Pasadena, 2 Battleground, 3 Timber Creek; the ID-by-hole
+    lookups (golf 0x80407048, menu 0x80400A04) add the variant to code 9's k. Info and file lookups by ID divide the
+    ID by 18 and take each course's table from a pointer table (the tables are spread over four caves). An info
+    entry's course byte is the round's code (9 for every Texas course).
+  - The course list (7 + 4 entries of 0x2C, 484 bytes) lives in cave 11; the append stub loops over our courses
+    with its counter in memory (`FUN_8041358c` clobbers the volatile registers; it was unrolled for two).
+  - The icon row (`FUN_80412640`): x = 0x140 + 56 x (i - (n - 1) / 2), the 56 from `lfs f11,0x7504(r9)` at
+    0x80412DB4 (r9 = 0x80440000, free after it; icons 48 wide, the picked one bigger). With more than 9 entries the
+    stub loads 45.0 instead, so 11 fit the board.
+  - Names: on the course select `0xA8 + index` (0xB1, 0xB2 for ours: other texts) is swapped by index for each
+    course's message (0x7FF0, 0x7FDF Pasadena, 0x7FDE, 0x7FDD); in a round `0xA7 + code` sites have no free
+    register to read the variant with (r0 sites), so code 9 always shows message 0x7FEF, a buffer the round start
+    fills with the variant's name.
+  - Round start: golf `FUN_804014c0`'s first instruction (`stwu r1,-24(r1)` at 0x804014C0; it copies the setup
+    block, once per round) goes through a stub that, for code 9, writes the variant's emblem file ID into the
+    emblem table's entry 9 (golf 0x804D5F9C + 36, read by `FUN_8048c354` and the pause menu; the overlay's data
+    loads fresh each round) and copies its name into the 0x7FEF buffer.
+  - The HUD card switch's case for code 9 reads the variant (r11, r12 free in the case), the music stub too (main.dol
+    `FUN_80011a94`: Battleground plays column 6's songs, Timber Creek column 3's). Sky, drive bonus, Star rule and
+    the hole-in-one guard go by code: the Texas courses share code 9's.
+  - Icons: B/W/R textures 9 and 10 appended (68x68 RGB5A3). Files under top folders `G` (Battleground) and `H`
+    (Timber Creek), each with holes A-R and card/emblem S/A, S/B.
 - **Hole info** (par, yards, back-tee yards, course, hole number, Ring Attack group; 141 x 12 bytes): golf
   0x804CCD60, an identical copy in the menu at 0x80444E60. `FUN_80406f90(id)` finds an entry by hole ID,
   `FUN_80407048(course, hole0)` gives the hole ID (the hole order); the menu's copies are `FUN_8040094c` and

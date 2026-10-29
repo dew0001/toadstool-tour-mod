@@ -26,6 +26,7 @@ import dem
 import holedata
 import holeterrain as ht
 import coursesite
+import forest
 import industry
 import modlink
 import scenery
@@ -53,7 +54,16 @@ TEX = {
 if getattr(coursesite.Course, "INDUSTRY", False):   # Pasadena's tanks, sheds and refineries (industry.py)
     TEX.update({name: ("gen", name) for name in industry.GENERATED})
     scenery.GENERATED.update(industry.GENERATED)
+if getattr(coursesite.Course, "CANOPY", False):   # v22: the woods' canopy mesh (forest.py)
+    TEX["canopy"] = ("gen", "canopy")
+    scenery.GENERATED.update(forest.GENERATED)
 TEX_ORDER = list(TEX)
+# v22: the disc's free area (between the file table and the first game file, 272 MB) holds every new file; four
+# courses at 512x512 terrain textures in every hole didn't fit. On the courses with canopy trees (built from v22) these
+# go in at half size (their 512x512 level left out: about 3 cm a texel at the game's 8 m repeat); greens and fringes,
+# seen close while putting, keep theirs. 1.2 MB less a hole.
+HALF_TEXTURES = ({"fairway", "cut", "rough", "natural", "deep", "sand", "rock", "beach", "sea"}
+                 if getattr(coursesite.Course, "CANOPY", False) else set())
 MATS = [(1.0, 1.0), (0.5, 0.5), (0.25, 0.25), (2.0, 2.0)]   # texcoord unit = 4 m: tile 4 m, 8 m, 16 m, 2 m
 # surface -> (texture, material, game surface code, zone)
 SURF = {
@@ -214,11 +224,17 @@ def texture_set(names):
         src = SOURCES.setdefault(rel, modlink.Source(rel))
         ts = src.ptr[src.stub(0x8) + 0x8C]
         ho, w, h, f, d, lod = tx.headers(src.blob, ts)[idx]
+        hdr = bytearray(src.blob[ho:ho + 0x24])
+        if name in HALF_TEXTURES and lod >= 1 and w >= 512:   # leave the top level out
+            d += max(tx.level_size(w, h, f), 32)
+            w, h, lod = w // 2, h // 2, lod - 1
+            struct.pack_into('>I', hdr, 0, h << 16 | w)
+            struct.pack_into('>I', hdr, 0x20, (struct.unpack_from('>I', hdr, 0x20)[0] & ~0xFF00) | lod << 8)
         size, lw, lh = 0, w, h
         for _ in range(lod + 1):
             size += max(tx.level_size(lw, lh, f), 32)
             lw, lh = max(lw // 2, 1), max(lh // 2, 1)
-        entries.append((bytearray(src.blob[ho:ho + 0x24]), bytes(src.blob[ts + d:ts + d + size])))
+        entries.append((hdr, bytes(src.blob[ts + d:ts + d + size])))
         TEX_PROV.append((rel, ts + d, size))
     n = len(entries)
     head = 0xC + 8 * n
@@ -366,6 +382,7 @@ def build(n, out_dir):
     if industrial:   # refineries on the horizon
         sky = industry.Parts(mid)
         sites = industry.skyline(sky, mid, lambda x, y: np.maximum(scenery.elevation(x, y), 0.8), c.area, line)
+        industry.landmarks(sky, mid, lambda x, y: np.maximum(scenery.elevation(x, y), 0.8), getattr(c, "LANDMARKS", ()))
         far_parts += sky.parts() + industry.horizon_ring(mid, scenery.RING_NEAR)
         print("refineries", sites)
     for d0, d1, radius, colour in () if industrial else ((scenery.FAR, 9000, scenery.RING_NEAR, (70, 95, 62)),
@@ -401,7 +418,15 @@ def build(n, out_dir):
     if arr:     # its own model (vertex budget)
         own_models.append(("pb_sea", model_root(L_, texnames, texset, arr[0], arr[1], arr[2], arr[3])))
     props = place_props(c, line, region, pts, h, tri, n, regular, back, gc)
-    print("props", [(nm, len(ii)) for nm, sr, ii in props])
+    print("props", [(nm, len(ii)) for nm, sr, ii in props], "out to", round(place_props.reach), "m")
+    if c.canopy is not None:    # v22: the woods beyond the props (forest.py), in pieces under 16-bit indices
+        fparts = forest.mesh(line, region, place_props.clear, scenery.elevation, place_props.reach, ox, oy)
+        for k, part in enumerate(split_part(p_) for p_ in fparts):
+            for j, piece in enumerate(part):
+                arr = parts_arrays([piece], ox, oy)
+                own_models.append((f"pb_forest{k}{j}", model_root(L_, texnames, texset, arr[0], arr[1], arr[2],
+                                                                  arr[3])))
+                print("forest", len(arr[0]), "vertices", len(piece[4]), "triangles")
     if os.environ.get("ONLY_PROPS"):
         props = [p for p in props if p[0] in os.environ["ONLY_PROPS"].split(",")]
     objects = L_.alloc(bytes(0x10 * (len(props) + len(own_models))), 32)
@@ -474,7 +499,8 @@ def build(n, out_dir):
         cm = collision_prop(name)
         near_insts = [i for i in insts if line.distance(Point(ox + i["pos"][0] * UNIT_M, oy + i["pos"][2] * UNIT_M)) < coll_reach]
         if cm is not None and near_insts and not os.environ.get("NO_COLL_PROPS"):
-            cprops.append((name, cm, near_insts[:256]))
+            for k in range(0, len(near_insts), 256):   # at most 256 instances an object
+                cprops.append((name, cm, near_insts[k:k + 256]))
     coll = col.make_collision(cmesh, cprops, layout)
     blob, relocs = col.build(coll)
 
@@ -543,9 +569,16 @@ def prop_height(name):
     return hi - lo            # collision units (the bbox of a 0x0131A313 mesh is in game units)
 
 
-def inst(pos_units, scale, yaw):
+def prop_half_width(name):
+    m = collision_prop(name)
+    return max(m["bbox"][3] - m["bbox"][0], m["bbox"][5] - m["bbox"][2]) / 2
+
+
+def inst(pos_units, scale, yaw, wide=None):
+    """An instance: uniform scale, or `wide` across and `scale` up."""
     hh = math.radians(yaw) / 2
-    return {"flags": 7, "pos": [float(v) for v in pos_units], "scale": [float(scale)] * 3,
+    sx = float(scale if wide is None else wide)
+    return {"flags": 7, "pos": [float(v) for v in pos_units], "scale": [sx, float(scale), sx],
             "quat": [0.0, math.sin(hh), 0.0, math.cos(hh)]}
 
 
@@ -563,27 +596,31 @@ def place_props(c, line, region, pts, h, tri, n, regular, back, gc):
     playing = unary_union([p for k in ("fairway", "green", "tee", "bunker") for p, t in c.kinds.get(k, [])
                            if p.intersects(region)] or [Polygon()]).buffer(8)
     keep_out = unary_union([buildings.buffer(3), roads, playing])
-    coast_d = lambda x, y: c.land.boundary.distance(Point(x, y))
-    spots = []   # (x, y, kind)
-    for x, y in c.trees:
-        if region.contains(Point(x, y)) and c.land.contains(Point(x, y)) and not playing.contains(Point(x, y)):
-            spots.append((x, y, "osm"))
-    minx, miny, maxx, maxy = region.bounds
-    step = 20.0
-    for gx in np.arange(minx, maxx, step):
-        for gy in np.arange(miny, maxy, step):
-            x, y = gx + rng.uniform(-8, 8), gy + rng.uniform(-8, 8)
-            p = Point(x, y)
-            if not region.contains(p) or not c.land.contains(p) or keep_out.contains(p):
-                continue
-            in_course = c.area.contains(p)
-            chance = 0.12 if in_course else 0.55
-            if rng.uniform() < chance:
-                spots.append((x, y, "course" if in_course else "town"))
     heights = {name: prop_height(name) for name in TREES}
     out = {name: [] for name in TREES}
-    spots.sort(key=lambda s: (s[2] != "osm", line.distance(Point(s[0], s[1]))))
-    for x, y, why in spots:
+    place_props.reach = 0.0
+    if c.canopy is not None:   # v22: the real trees (forest.py), nearest the hole line first
+        clear = unary_union([buildings.buffer(2), roads] +
+                            [p.buffer(0 if k == "fairway" else 1.5) for k in ("fairway", "green", "tee", "bunker")
+                             for p, t in c.kinds.get(k, []) if p.intersects(region)] +
+                            [p for k in c.WATER_KINDS for p, t in c.kinds.get(k, []) if p.intersects(region)]
+                            or [Polygon()])
+        chosen, place_props.reach = forest.pick(c, line, region, clear, lambda xs, ys: contains_xy(c.land, xs, ys))
+        place_props.clear = clear
+        for x, y, tall, crown in chosen:
+            name = forest.species(tall, crown, rng)
+            gy_ = ground(x, y)
+            if not np.isfinite(gy_):
+                continue
+            up = tall / UNIT_M / heights[name]
+            across = min(max(crown / UNIT_M / prop_half_width(name), 0.7 * up), 1.5 * up)
+            out[name].append(inst(((x - ox) / UNIT_M, float(gy_) / UNIT_M - 0.02, (y - oy) / UNIT_M), up,
+                                  rng.uniform(0, 360), across))
+        spots = []
+    else:
+        spots = None
+    coast_d = lambda x, y: c.land.boundary.distance(Point(x, y))
+    for x, y, why in place_old_spots(c, line, region, rng, playing, keep_out) if spots is None else ():
         near_sea = coast_d(x, y) < 160
         r = rng.uniform()
         if r < 0.12:
@@ -615,6 +652,48 @@ def place_props(c, line, region, pts, h, tri, n, regular, back, gc):
             marks.append(inst(((x - ox) / UNIT_M, float(gy_) / UNIT_M, (y - oy) / UNIT_M), 0.2, yaw + 180))
     props.append((TEE_MARKER, PROP_SRC, marks))
     return props
+
+
+def split_part(part, limit=60000):
+    """A part with too many vertices for one model root (16-bit indices) -> parts, cut by x."""
+    texname, mat, code, P, T, uv, rgb = part[:7]
+    P, T = np.asarray(P), np.asarray(T)
+    if len(P) <= limit:
+        return [part]
+    cx = P[T].mean(1)[:, 0]
+    pieces = int(math.ceil(len(P) / limit)) + 1
+    cuts = np.quantile(cx, np.linspace(0, 1, pieces + 1))
+    out = []
+    for a, b in zip(cuts[:-1], cuts[1:]):
+        sel = T[(cx >= a) & ((cx < b) | (b == cuts[-1]))]
+        used = np.unique(sel.ravel())
+        remap = -np.ones(len(P), int)
+        remap[used] = np.arange(len(used))
+        out.append((texname, mat, code, P[used], remap[sel], np.asarray(uv)[used], np.asarray(rgb)[used]) +
+                   tuple(part[7:]))
+    return out
+
+
+def place_old_spots(c, line, region, rng, playing, keep_out):
+    """Pebble Beach's trees (v11): OSM's tree points, then a random scatter, nearest the hole line first."""
+    spots = []   # (x, y, kind)
+    for x, y in c.trees:
+        if region.contains(Point(x, y)) and c.land.contains(Point(x, y)) and not playing.contains(Point(x, y)):
+            spots.append((x, y, "osm"))
+    minx, miny, maxx, maxy = region.bounds
+    step = 20.0
+    for gx in np.arange(minx, maxx, step):
+        for gy in np.arange(miny, maxy, step):
+            x, y = gx + rng.uniform(-8, 8), gy + rng.uniform(-8, 8)
+            p = Point(x, y)
+            if not region.contains(p) or not c.land.contains(p) or keep_out.contains(p):
+                continue
+            in_course = c.area.contains(p)
+            chance = 0.12 if in_course else 0.55
+            if rng.uniform() < chance:
+                spots.append((x, y, "course" if in_course else "town"))
+    spots.sort(key=lambda s: (s[2] != "osm", line.distance(Point(s[0], s[1]))))
+    return spots
 
 
 def model_root(L_, texnames, texset, G_all, uv_all, col_all, groups, pos_frac=POS_FRAC):

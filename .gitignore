@@ -1,5 +1,5 @@
 # Per-PC state written by Play.bat
-data/
+/data/
 
 # Never commit game data: disc images, extracted or decoded game files, analysis output
 *.iso

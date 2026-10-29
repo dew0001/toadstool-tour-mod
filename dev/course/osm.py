@@ -13,6 +13,8 @@ ROOT = os.environ.get("TTMOD_ROOT", os.path.normpath(os.path.join(os.path.dirnam
 COURSES = {                   # course -> the local frame's origin (lat, lon), near the course's middle
     "pebble": (36.566, -121.938),       # Pebble Beach Golf Links (course code 8)
     "pasadena": (29.6165, -95.1768),    # Pasadena Municipal Golf Course, Pasadena, Texas (course code 9)
+    "battleground": (29.698, -95.137),  # Battleground Golf Course, Deer Park, Texas (v22)
+    "timbercreek": (29.558, -95.193),   # Timber Creek Golf Club, Friendswood, Texas (v22)
 }
 COURSE = os.environ.get("TTMOD_COURSE", "pebble")
 DATA = os.path.join(ROOT, "mod", "course-data", COURSE)   # fetch_data.py downloads it

@@ -321,3 +321,42 @@ def horizon_ring(mid, radius, base=-4.0):
 def _pt(x, y):
     from shapely.geometry import Point
     return Point(x, y)
+
+
+# ---------------------------------------------------------------- landmarks far off (v22)
+LANDMARK_SHOWN = 2000.0       # m from the hole's middle: inside the far land (the camera sees 3.9 km)
+
+
+def landmarks(out, mid, ground, places):
+    """Landmarks past the camera's reach (Course.LANDMARKS: [(x, y, kind)] in the course frame) drawn LANDMARK_SHOWN
+    from the hole's middle on their real bearing, scaled to fill the angle the real one does from there."""
+    for x, y, kind in places:
+        dx, dy = x - mid[0], y - mid[1]
+        d = math.hypot(dx, dy)
+        k = min(1.0, LANDMARK_SHOWN / d)
+        sx, sy = mid[0] + dx * k, mid[1] + dy * k
+        base = float(np.asarray(ground(np.array([sx]), np.array([sy])))[0])
+        {"san_jacinto": san_jacinto}[kind](out, sx, sy, base, k)
+
+
+def san_jacinto(out, x, y, base, k):
+    """The San Jacinto Monument (La Porte, 173 m): terraces, a square shaft tapering from 14.6 m to 9 m, the
+    observation floor and the Lone Star on top. k scales it."""
+    stone, light = (214, 204, 178), (232, 224, 204)
+    box(out, "siding", x, y, 40 * k, 40 * k, 0.0, base, 2 * k, stone)
+    box(out, "siding", x, y, 25 * k, 25 * k, 0.0, base + 2 * k, 14 * k, stone)
+    top = base + 158 * k
+    cylinder(out, "siding", x, y, 14.6 / 2 * math.sqrt(2) * k, base + 16 * k, top - base - 16 * k, light, sides=4,
+             top_r=9.0 / 2 * math.sqrt(2) * k, v_scale=12.0)
+    box(out, "siding", x, y, 10.5 * k, 10.5 * k, math.pi / 4, top, 4.5 * k, stone)
+    star_top = top + 4.5 * k
+    r = 5.2 * k
+    for ang in (0.0, math.pi / 2):            # two upright stars, crossed, seen from every side
+        ca, sa = math.cos(ang), math.sin(ang)
+        cx, ch = 0.0, star_top + r
+        ring = [((r if i % 2 == 0 else r * 0.42) * math.sin(i * math.pi / 5),
+                 (r if i % 2 == 0 else r * 0.42) * math.cos(i * math.pi / 5)) for i in range(10)]
+        pts = [(x, ch, y)] + [(x + u * ca, ch + v, y + u * sa) for u, v in ring] +               [(x + ring[0][0] * ca, ch + ring[0][1], y + ring[0][0] * sa)]
+        uv = [(0.0, 0.0)] * len(pts)
+        out.face("metal", pts, uv, (235, 235, 230))
+        out.face("metal", pts[:1] + pts[:0:-1], uv, (235, 235, 230))

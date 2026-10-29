@@ -11,6 +11,8 @@
 #      two folders above the repo; '' builds him from the OBJ in -ShyGuy instead>]
 #     [-Course8 <the 8th course's folder from dev\course\holegen.py; default: mod\course8 next to the repo; '' for none>]
 #     [-Course9 <the 9th course's folder (TTMOD_COURSE=pasadena); default: mod\course9 next to the repo; '' for none>]
+#     [-Course10 / -Course11 <Battleground's / Timber Creek's folders (TTMOD_COURSE=battleground / timbercreek);
+#      defaults: mod\course10, mod\course11 next to the repo; '' for none>]
 #     [-Tony <folder with Tony the Tiger's source\untitled.glb; default: assets\tony-the-tiger next to the repo; '' for none>]
 param(
 	[Parameter(Mandatory)] [int] $Version,
@@ -25,6 +27,8 @@ param(
 	[string] $ShyGuyMpt = (Join-Path $PSScriptRoot '..\..\..\gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso'),
 	[string] $Course8 = (Join-Path $PSScriptRoot '..\..\mod\course8'),
 	[string] $Course9 = (Join-Path $PSScriptRoot '..\..\mod\course9'),
+	[string] $Course10 = (Join-Path $PSScriptRoot '..\..\mod\course10'),
+	[string] $Course11 = (Join-Path $PSScriptRoot '..\..\mod\course11'),
 	[string] $Tony = (Join-Path $PSScriptRoot '..\..\assets\tony-the-tiger')
 )
 $ErrorActionPreference = 'Stop'
@@ -51,6 +55,11 @@ if (-not $SkipBuild) {
 		if ($Course9) {
 			if (-not (Test-Path (Join-Path $Course9 'course.json'))) { throw "No 9th course at $Course9 (run dev\course\holegen.py with TTMOD_COURSE=pasadena, or pass -Course9 '')" }
 			$course += @('--course9', (Resolve-Path $Course9).Path)
+			foreach ($c in @(@('--course10', $Course10), @('--course11', $Course11))) {
+				if (-not $c[1]) { break }
+				if (-not (Test-Path (Join-Path $c[1] 'course.json'))) { throw "No course at $($c[1]) (run dev\course\holegen.py, or pass '')" }
+				$course += @($c[0], (Resolve-Path $c[1]).Path)
+			}
 		}
 	}
 	$tonyArgs = @()
@@ -67,7 +76,7 @@ if (-not $SkipBuild) {
 
 $patch = Get-Content -Raw $patchPath | ConvertFrom-Json
 $data = $null
-if ($patch.data) { $data = Get-PatchData $patch (Join-Path $repo $patch.data.path) }
+if ($patch.data) { $data = Get-PatchData $patch (Get-PatchDataPaths $patch $repo) }
 $src = [TTMod]::Open($CleanGame)
 try {
 	if ([TTMod]::GameId($src) -ne 'GFTE01-rev0') { throw "$CleanGame is not a clean GFTE01 rev 0 disc" }
@@ -88,7 +97,7 @@ $full = [ordered]@{
 	format = 2; name = $patch.name; version = $Version; game_id = $patch.game_id; new_game_id = $patch.new_game_id
 	files = $patch.files; clean_manifest = $manifest; result_sha1 = $resultSha1
 }
-if ($patch.data) { $full['data'] = $patch.data }   # v11: the course's own bytes, mod/patches/vN.data.gz
+if ($patch.data) { $full['data'] = @($patch.data) }   # the courses' own bytes: v22 mod/data/<course>-<hash>.gz
 [IO.File]::WriteAllText($patchPath, ($full | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
 
 $appFiles = [ordered]@{}

@@ -3,7 +3,7 @@
 Usage: python -I build_mod.py <clean disc dir> <build dir> [--version N] [--no-unlock] [--no-aspect-write] [--keep-id]
                               [--shyguy <folder with Shy Guy.obj and its texture>] [--shyguy-voice <zip of WAV clips>]
                               [--shyguy-mpt <Mario Power Tennis disc: his model from there instead of the OBJ>]
-                              [--course8 <course folder>] [--course9 <course folder>]
+                              [--course8 <course folder>] [--course9 <course folder>] [--course10 ..] [--course11 ..]
                               [--tony <folder with Tony the Tiger's .glb>]
 The build dir must already hold a copy of the clean tree (robocopy); this script only rewrites
 the files it changes, reading every original from <clean disc dir>.
@@ -126,7 +126,14 @@ Changes (v21):
   - With --course9 <folder> (and --course8): a 9th course, Pasadena Municipal Golf Course (course code 9; course8.py
     serves both real courses, caves 11-13, 15 and 16; its files from dev/course with TTMOD_COURSE=pasadena).
 
-Patch code lives over dead functions (caves 1-14 below, and teams.py's; checked with find_dead_code.py). Low memory at
+Changes (v22):
+  - The aim arrows show where a clean hit lands: the preview flies with the wind (PREVIEW_FLAGS), and a human
+    player's swing takes the D-pad's spin and curve that the arrows show, not the stick held during the meter
+    (SWING_SHAPE; cave 17).
+  - With --course10 and --course11 <folder> (after --course8, --course9): Battleground (Deer Park) and Timber Creek
+    (Friendswood), menu indexes 9 and 10, played as course code 9 with a variant byte (course8.py, caves 18-22).
+
+Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
@@ -168,6 +175,8 @@ SHYGUY_MPT = sys.argv[sys.argv.index("--shyguy-mpt") + 1] if "--shyguy-mpt" in s
 TONY = sys.argv[sys.argv.index("--tony") + 1] if "--tony" in sys.argv else None   # folder with his .glb (with --shyguy)
 COURSE8 =sys.argv[sys.argv.index("--course8") + 1] if "--course8" in sys.argv else None   # folder or "placeholder"
 COURSE9 = sys.argv[sys.argv.index("--course9") + 1] if "--course9" in sys.argv else None   # folder (v21, with --course8)
+COURSE10 = sys.argv[sys.argv.index("--course10") + 1] if "--course10" in sys.argv else None   # v22: Battleground
+COURSE11 = sys.argv[sys.argv.index("--course11") + 1] if "--course11" in sys.argv else None   # v22: Timber Creek
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
 
@@ -566,6 +575,49 @@ def cave14_code(record):
     code = a.assemble()
     if len(code) > CAVE14_SIZE:
         raise SystemExit(f"cave 14 code is {len(code)} bytes; only {CAVE14_SIZE} fit")
+    return code, a.labels
+
+
+# ---- v22: the aim arrows show where a clean hit lands (cave 17)
+# Andrew: "when shot shaping or just hitting in general the arrows arent accurate". While a human aims (views 5-10),
+# FUN_80423bbc builds a preview shot each frame (mode 6/7, the shared shot 0x805052AC) and flies it (FUN_80415790):
+# that is the arrows, the landing star and its yards. Measured (scripts\arrow_test.ps1, perfect hits): no wind and no
+# shaping lands within a foot of the star; 5 mph of wind 8 yards off; D-pad curve 15 yards off. Two causes:
+#  - Wind: the flight setup FUN_80414aa4 gives previews wind only when the shot's +0x55 bit 0 is set, and that byte
+#    is copied from a debug byte the game never sets (0x804E5C32, `stb r11,0x55(r29)` at PREVIEW_FLAGS; bit 1 would
+#    add the impact error). The stub stores it with bit 0 set (the No Wind item still zeroes the wind there).
+#  - Spin and curve: the D-pad sets the plan the arrows and the ball picture show (setup +0x21C spin, +0x220 curve,
+#    -0x100..0x100, FUN_8041027c), but the real shot (view 0xE in the shot builder) reads +0x224 / +0x228, which
+#    FUN_80412f6c sets every frame of the meter from the control stick (0x804146B8..0x804147BC: a stick under 0.1
+#    gives none). So a D-pad plan alone was never hit, and a stick touched during the swing curved shots the arrows
+#    didn't show. For human players the swing now takes the plan (SWING_SHAPE); CPUs (port 4) and replays as before.
+CAVE17 = 0x80055248         # dead FUN_80055248 (find_dead_code.py: DEAD)
+CAVE17_SIZE = 288
+CAVE17_FIRST = 0x7C0802A6
+PREVIEW_FLAGS = 0x8042493C
+PREVIEW_FLAGS_WORD = 0x997D0055     # stb r11,0x55(r29); cr0 (andi. r9,r11,0x10) is live past it
+SWING_SHAPE = 0x804146B8            # first instruction of the stick read (not a replay); r0 and r9 are free here
+SWING_SHAPE_WORD = 0xC11F0120       # lfs f8,0x120(r31)
+SWING_SHAPE_DONE = 0x804147C0
+PLAYER_PORT = 0x5164                # player record: controller port, 4 = CPU
+CPU_PORT = 4
+
+
+def cave17_code():
+    a = ppc.Asm(CAVE17)
+    a.label("preview_flags")       # bl from PREVIEW_FLAGS: r11 = the flags, r29 = the preview shot
+    a(ppc.ori(12, 11, 1), ppc.stb(12, 0x55, 29), 0x4E800020)
+    a.label("swing_shape")         # b from SWING_SHAPE: r31 = the setup
+    a(ppc.lwz(9, 0x25C, 31), ppc.lwz(0, PLAYER_PORT, 9), ppc.cmpwi(0, CPU_PORT))
+    a.br("beq", "swing_cpu")
+    a(ppc.lwz(0, 0x21C, 31), ppc.lwz(9, 0x220, 31), ppc.stw(0, 0x224, 31), ppc.stw(9, 0x228, 31))
+    a.b(SWING_SHAPE_DONE)
+    a.label("swing_cpu")
+    a(SWING_SHAPE_WORD)
+    a.b(SWING_SHAPE + 4)
+    code = a.assemble()
+    if len(code) > CAVE17_SIZE:
+        raise SystemExit(f"cave 17 code is {len(code)} bytes; only {CAVE17_SIZE} fit")
     return code, a.labels
 
 
@@ -1647,7 +1699,7 @@ def check_matrix_site(buf, base, hook):
 
 
 def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None,
-              cave10=None, course=None, cave14=None, team=None):
+              cave10=None, course=None, cave14=None, team=None, cave17=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1656,7 +1708,8 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
     for addr, first, code in ((CAVE, 0x9421FF70, cave), (CAVE2, 0x7C0802A6, cave2), (CAVE3, 0x7C0802A6, cave3),
                               (CAVE4, CAVE4_FIRST, cave4), (CAVE5, CAVE5_FIRST, cave5), (CAVE6, CAVE6_FIRST, cave6),
                               (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9),
-                              (CAVE10, CAVE10_FIRST, cave10), (CAVE14, CAVE14_FIRST, cave14)) + \
+                              (CAVE10, CAVE10_FIRST, cave10), (CAVE14, CAVE14_FIRST, cave14),
+                              (CAVE17, CAVE17_FIRST, cave17)) + \
             tuple(course[0] if course else ()) + tuple(team[0] if team else ()):
         if code is None:
             continue
@@ -1691,7 +1744,7 @@ def float_word(v):
     return struct.unpack(">I", struct.pack(">f", v))[0]
 
 
-def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None, team=None):
+def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None, team=None, v17=None):
     raw = open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     kind, _ = lz.header(raw)
     blob, _ = lz.decompress(raw)
@@ -1729,6 +1782,8 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
             put(buf, OVERLAY_BASE, site, new, old)
         for site, old, stub in ((BOX_HIDE_HOOK, BOX_HIDE_WORD, "box_hide"), (BOX_TEXT_HOOK, BOX_TEXT_WORD, "box_text")):
             put(buf, OVERLAY_BASE, site, ppc.bl(site, v4[stub]), old)
+        put(buf, OVERLAY_BASE, PREVIEW_FLAGS, ppc.bl(PREVIEW_FLAGS, v17["preview_flags"]), PREVIEW_FLAGS_WORD)
+        put(buf, OVERLAY_BASE, SWING_SHAPE, ppc.b(SWING_SHAPE, v17["swing_shape"]), SWING_SHAPE_WORD)
         if v9:  # golfer 16 (Shy Guy) behaves like Koopa Troopa, with his own files
             for k in range(VTABLE_METHODS):
                 koopa = word(buf, OVERLAY_BASE, KOOPA_VTABLE + 4 * k)
@@ -1809,6 +1864,7 @@ def main():
     args = [a for i, a in enumerate(sys.argv[1:], 1)
             if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy", "--shyguy-voice",
                                                                     "--shyguy-mpt", "--course8", "--course9",
+                                                                    "--course10", "--course11",
                                                                     "--tony")]
     clean, build = args[:2]
     ppc.selftest()
@@ -1824,10 +1880,13 @@ def main():
     if COURSE8:
         import course8
         golf = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
-        loaded = [course8.load(folder, golf) for folder in (COURSE8, COURSE9) if folder]
+        folders = [f for f in (COURSE8, COURSE9, COURSE10, COURSE11) if f]
+        if folders != [COURSE8, COURSE9, COURSE10, COURSE11][:len(folders)]:
+            raise SystemExit("our courses go in order: --course8, --course9, --course10, --course11")
+        loaded = [course8.load(folder, golf) for folder in folders]
         course = course8.caves([(holes, files) for holes, files, _ in loaded])
         course_files = {path: src for _, _, made in loaded for path, src in made.items()}
-        print(f"caves 11-13, 15, 16: {len(loaded)} courses of our own ({COURSE8}, {COURSE9}), {len(course_files)} files: "
+        print(f"caves 11-13, 15, 16, 18-22: {len(loaded)} courses of our own ({', '.join(folders)}), {len(course_files)} files: "
               + ", ".join(f"cave {k} {v}" for k, v in course[1]["_sizes"].items()))
     elif COURSE9:
         raise SystemExit("--course9 needs --course8")
@@ -1849,6 +1908,8 @@ def main():
           f" pause menu row 0x{v6['ghost_menu']:08X})")
     print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
     print(f"cave 8: {len(cave8)} of {CAVE8_SIZE} bytes at 0x{CAVE8:08X} (yardage box 0x{v8['box_text']:08X})")
+    cave17, v17 = cave17_code()
+    print(f"cave 17: {len(cave17)} of {CAVE17_SIZE} bytes at 0x{CAVE17:08X} (aim arrows: wind, D-pad spin and curve)")
     cave9 = v9 = cave10 = cave14 = None
     if TONY and not SHYGUY:
         raise SystemExit("--tony needs --shyguy (Tony is the second golfer of Shy Guy's link record)")
@@ -1873,10 +1934,10 @@ def main():
         print(f"cave 10: {len(cave10)} of {CAVE10_SIZE} bytes at 0x{CAVE10:08X} (Shy Guy's power shot"
               f" 0x{v10['power_burst']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14, team)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14, team, cave17)
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course,
-                      team)
+                      team, v17)
     for rel, make in ((teams.ICONS, teams.icons_file), (teams.LABELS, teams.labels_file),
                       (teams.BANNERS, teams.banners_file)):
         open(os.path.join(build, "files", *rel.split("/")), "wb").write(make(os.path.join(clean, "files")))

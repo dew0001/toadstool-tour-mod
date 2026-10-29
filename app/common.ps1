@@ -357,12 +357,29 @@ function Install-ModHotkeys($userDir, $device) {
 
 # A patch's data file (from v11: the bytes of the files the game doesn't have), checked and unpacked; $null when the
 # patch has none.
-function Get-PatchData($patch, $file) {
+# A patch's course data: one gzip file (v11-v21) or one per course (v22+), the local copies in $files in the
+# patch's order, checked and joined into one array (create ops count their offsets through it).
+function Get-PatchData($patch, $files) {
 	if ($null -eq $patch.data) { return $null }
-	if ([TTMod]::Sha256File($file) -ne $patch.data.sha256) { throw 'The course data download was corrupted; try again.' }
-	$bytes = [TTMod]::Gunzip($file)
-	if ($bytes.Length -ne [long]$patch.data.size) { throw 'The course data download was corrupted; try again.' }
-	return , $bytes
+	$parts = @($patch.data)
+	$files = @($files)
+	[long]$total = 0
+	foreach ($part in $parts) { $total += [long]$part.size }
+	$all = New-Object byte[] $total
+	[long]$at = 0
+	for ($i = 0; $i -lt $parts.Count; $i++) {
+		if ([TTMod]::Sha256File($files[$i]) -ne $parts[$i].sha256) { throw 'The course data download was corrupted; try again.' }
+		$bytes = [TTMod]::Gunzip($files[$i])
+		if ($bytes.Length -ne [long]$parts[$i].size) { throw 'The course data download was corrupted; try again.' }
+		[Array]::Copy($bytes, [long]0, $all, $at, [long]$bytes.Length)
+		$at += $bytes.Length
+	}
+	return , $all
+}
+
+# The patch's course data files in the repo (mod/data/..., or v11-v21's mod/patches/vN.data.gz).
+function Get-PatchDataPaths($patch, $repo) {
+	return @(foreach ($part in @($patch.data)) { Join-Path $repo $part.path })
 }
 
 # Turn a patch (parsed JSON) and its data file's bytes into { disc path -> new bytes }, checking every result hash.

@@ -46,6 +46,7 @@ class Course:
     COURSE_NAME = "Pebble Beach Golf Course"   # the OSM golf course
     LODGE = (-1046, -289)     # The Lodge (x east, y south): holegen.py gives it its own walls
     WATER_KINDS = ("water",)  # kinds drawn and played as water
+    CANOPY = False            # trees from canopy.py's heights instead of OSM's few tree points and random ones
 
     def __init__(self):
         data = json.load(open(os.path.join(osm.DATA, "features.json")))
@@ -54,14 +55,7 @@ class Course:
         course = next(f for f in self.features if f["tags"].get("leisure") == "golf_course"
                       and f["tags"].get("name") == self.COURSE_NAME)
         self.area = _poly(course)
-        self.holes = {}
-        for f in self.features:
-            t = f["tags"]
-            if t.get("golf") == "hole" and f["kind"] == "way" and not t.get("name"):
-                line = LineString(f["pts"])
-                if self.area.buffer(30).contains(Point(f["pts"][0])) and self.area.buffer(30).contains(
-                        Point(f["pts"][-1])):
-                    self.holes[int(t["ref"])] = line
+        self.holes = self._pick_holes()
         assert sorted(self.holes) == list(range(1, 19)), sorted(self.holes)
         self.kinds = {}
         for f in self.features:
@@ -94,8 +88,24 @@ class Course:
                       and f["tags"].get("highway") not in ("footway", "path", "steps")
                       and f["tags"].get("golf") not in ("cartpath", "path")]   # most cart paths are service roads too
         self.trees = [tuple(p["pt"]) for p in self.points if p["tags"].get("natural") == "tree"]
+        # v22: the real trees from the canopy heights (canopy.py), (x, y, height m, crown radius m), where downloaded
+        self.canopy = None
+        if self.CANOPY:
+            import canopy
+            self.canopy = canopy.trees()
         self.land = self._land()
         self._mirror()
+
+    def _pick_holes(self):
+        """{hole number: line} from the OSM golf=hole ways inside the course."""
+        holes = {}
+        for f in self.features:
+            t = f["tags"]
+            if t.get("golf") == "hole" and f["kind"] == "way" and not t.get("name"):
+                if self.area.buffer(30).contains(Point(f["pts"][0])) and self.area.buffer(30).contains(
+                        Point(f["pts"][-1])):
+                    holes[int(t["ref"])] = LineString(f["pts"])
+        return holes
 
     def _mirror(self):
         """x east, y north -> x east, y south (see the top)."""
@@ -107,6 +117,8 @@ class Course:
         self.cartpaths = [m(line) for line in self.cartpaths]
         self.roads = [(m(line), kind) for line, kind in self.roads]
         self.trees = [(x, -y) for x, y in self.trees]
+        if self.canopy is not None:
+            self.canopy = [(x, -y, h, r) for x, y, h, r in self.canopy]
         self.land = m(self.land)
 
     def _land(self):

@@ -211,7 +211,7 @@ def sha1(b):
 def main():
     clean, build, out_path, version = sys.argv[1:5]
     course = []
-    for flag in ("--course8", "--course9"):
+    for flag in ("--course8", "--course9", "--course10", "--course11"):
         if flag in sys.argv:
             folder = sys.argv[sys.argv.index(flag) + 1]
             spec = json.load(open(os.path.join(folder, "course.json")))
@@ -275,22 +275,37 @@ def main():
                   f" {len(entry['sources'])} game files, {sum(len(e['hex']) // 2 for e in entry['edits'])} bytes of"
                   f" our own")
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    data = bytearray()   # the created files' own bytes go in a gzip file next to the patch (tens of MB as hex)
+    # The created files' own bytes (tens of MB as hex) go in gzip files, one per top folder (a course: E, F, G, H),
+    # named by their hash under mod/data (v22; v11-v21 had one vN.data.gz next to the patch: four courses would
+    # pass GitHub's 100 MB a file). A course that doesn't change keeps its file from version to version, so it's
+    # neither uploaded nor downloaded again. Each create op's data offset counts through the parts joined in order.
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(out_path))), "data")
+    groups = {}
     for entry in patch["files"]:
         if entry["op"] == "create":
+            groups.setdefault(entry["path"].split("/")[1], []).append(entry)
+    parts, at = [], 0
+    for top in sorted(groups):
+        part = bytearray()
+        for entry in groups[top]:
             spans = []
-            entry["data"] = {"offset": len(data), "runs": spans}
+            entry["data"] = {"offset": at + len(part), "runs": spans}
             for e in entry.pop("edits"):
                 b = bytes.fromhex(e["hex"])
                 spans += [e["at"], len(b)]
-                data += b
-    if data:
-        data_path = os.path.splitext(out_path)[0] + ".data.gz"
-        gz = gzip.compress(bytes(data), 9, mtime=0)
-        open(data_path, "wb").write(gz)
-        patch["data"] = {"path": "mod/patches/" + os.path.basename(data_path), "size": len(data),
-                         "sha256": hashlib.sha256(gz).hexdigest()}
-        print(f"{data_path}: {len(data)} bytes of the course's own, {len(gz)} gzipped")
+                part += b
+        gz = gzip.compress(bytes(part), 9, mtime=0)
+        sha = hashlib.sha256(gz).hexdigest()
+        rel = f"mod/data/{top}-{sha[:16]}.gz"
+        os.makedirs(data_dir, exist_ok=True)
+        path = os.path.join(data_dir, os.path.basename(rel))
+        if not os.path.exists(path):
+            open(path, "wb").write(gz)
+        parts.append({"path": rel, "size": len(part), "sha256": sha})
+        at += len(part)
+        print(f"{rel}: {len(part)} bytes of {top}/'s own, {len(gz)} gzipped")
+    if parts:
+        patch["data"] = parts
     with open(out_path, "w", encoding="utf-8", newline="\r\n") as f:
         json.dump(patch, f, indent=1)
     print(f"wrote {out_path}")

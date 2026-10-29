@@ -120,11 +120,16 @@ if ($latest) {
 		if ([TTMod]::Sha256File($patchFile) -ne $latest.patch_sha256) { throw 'Patch download was corrupted; try again.' }
 		$patch = Get-Content -Raw $patchFile | ConvertFrom-Json
 		$data = $null
+		$dataFiles = @()
 		if ($patch.data) {
 			Say '  downloading the course data...'
-			$dataFile = Join-Path $dataDir (Split-Path -Leaf $patch.data.path)
-			Get-RepoFile $patch.data.path $dataFile
-			$data = Get-PatchData $patch $dataFile
+			foreach ($part in @($patch.data)) {
+				# one file per course (v22+), named by its contents: one kept from an earlier version isn't fetched again
+				$f = Join-Path $dataDir (Split-Path -Leaf $part.path)
+				if (-not (Test-Path $f) -or [TTMod]::Sha256File($f) -ne $part.sha256) { Get-RepoFile $part.path $f }
+				$dataFiles += $f
+			}
+			$data = Get-PatchData $patch $dataFiles
 		}
 		$src = [TTMod]::Open($GamePath)
 		try {
@@ -146,6 +151,9 @@ if ($latest) {
 		$config['installed_version'] = $latest.version
 		$config['installed_sha1'] = $latest.result_sha1
 		Save-Config
+		# course data files this version doesn't use any more
+		$keep = @($dataFiles | ForEach-Object { Split-Path -Leaf $_ })
+		Get-ChildItem $dataDir -Filter '*.gz' | Where-Object { $keep -notcontains $_.Name } | Remove-Item -Force -ErrorAction SilentlyContinue
 		Say "Mod v$($latest.version) ready: $out" Green
 	}
 	else { Say "Mod v$($latest.version) is up to date." Green }
