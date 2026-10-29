@@ -26,6 +26,18 @@ count and scorecard per team), so the game's own Doubles scoring, score panel, s
     and lie; the best shot is highlighted first: holed, then no penalty, then the distance to the pin weighted
     by the lie). Only the first member's swing counts a stroke (and a putt); a penalty counts only if the team
     takes that shot.
+
+v20 adds two more (the list has its own icon/help arrays now: the game's hold 10):
+  - Worst Ball (2v2): a scramble where the team plays its worst ball, taken at once without a menu: a ball not in
+    the hole before a holed one, then a penalty, then the farthest (by the lie); the hole is over only when every
+    member holes out from the same spot.
+  - Wolf (3 or 4 humans, no CPUs; Golf Digest's rules, as Andrew asked): a Skins game of everyone on their own ball.
+    The Wolf rotates (hole 1 the last player, hole 2 1P, ...) and tees off last; after each other player's drive,
+    in order, the Wolf's menu asks "team up with YP?" (No can't be taken back; No to the last = the Lone Wolf).
+    The hole is a best-ball match, Wolf's side against the rest: 1 point to each winner, 2 to a winning Lone Wolf,
+    1 to each of the others when the Lone Wolf loses, nothing for a tie. Skins' own scoring is swapped for stroke
+    play's per shot plus ours per hole; the points show where the game shows skins (score panel, the hole-end
+    scorecard counting them up, the results).
 """
 import os
 import struct
@@ -49,10 +61,23 @@ CAVES = {            # name: (address, size, first word)
     "data": (0x8003287C, 864, 0x7C0802A6),
     "text": (0x80018130, 456, 0x9421FFE8),
     "extra": (0x800268D0, 352, 0x9421FFD0),    # Doubles' own five choices' help (alternate shot)
+    # v20: Worst Ball and Wolf
+    "list": (0x80054EFC, 424, 0x7C0802A6),     # the Team Play list's own icon/help arrays (11 choices)
+    "worst": (0x8004FBF0, 352, 0x7C0802A6),    # Worst Ball: the worst shot
+    "wpick": (0x80096398, 436, 0x9421FFD0),    # Wolf: the shooter pick (tee order, the Wolf's choices)
+    "wmenu": (0x80090438, 404, 0x9421FFE0),    # Wolf: its menus
+    "wscore": (0x80093460, 392, 0x9421FFF0),   # Wolf: scoring a hole
+    "wshow": (0x800542C8, 364, 0x7C0802A6),    # Wolf: points on the panel, scorecard and results
+    "wdata": (0x800816FC, 352, 0x9421FFF0),    # Wolf: state and points
+    "wtext": (0x8005B7E4, 344, 0x7C0802A6),    # Worst Ball and Wolf texts
+    "worst2": (0x8003A480, 320, 0x7C0802A6),   # after every member has hit; Wolf's menu commit
+    "wstep": (0x80042AE4, 324, 0x7C0802A6),    # Wolf: running its menus
+    "wname": (0x800550A4, 320, 0x7C0802A6),    # Wolf: the scoring hook, players' names, team_of
+    "waward": (0x80067068, 324, 0x9421FFD8),   # Wolf: a hole's points
 }
 
 MODE_BYTE = 0xA7D            # setup block (main.dol 0x80175600) + 0xA7D = 0x8017607D: unused by the game
-BEST_BALL, SCRAMBLE, TEAM_SCRAMBLE = 1, 2, 3
+BEST_BALL, SCRAMBLE, TEAM_SCRAMBLE, WORST, WOLF = 1, 2, 3, 4, 5
 
 PLAYERS, PLAYER_SIZE = 0x804ECE70, 0x5204
 PLAYER_REC, PLAYER_BALL, PLAYER_PAD, PLAYER_INDEX, PLAYER_CONTROLLER = 0x8, 0x1C, 0x4F14, 0x5160, 0x5164
@@ -127,25 +152,34 @@ SCREEN_PUSH, COURSE_LIST = 0x80439C1C, 0x80413910
 SUBLIST_HOOK = (0x8041CAE4, 0x4E800020)      # blr ending the Doubles case of FUN_8041ca00
 SUB_TEX, SUB_HELP = 0x8044C50C, 0x8044C534   # 10 ints each: icon/label texture and help (message 0x22 + value)
 SUB_COUNTS = 0x8044617C                      # Doubles' choice count for 1..4 human players (words)
-SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (8, 9, 9, 9)
-CHOICE_BB_MATCH, CHOICE_BB_STROKE, CHOICE_SCRAMBLE, CHOICE_TEAM = 5, 6, 7, 8
+SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (9, 10, 11, 11)   # Team Scramble from 2 humans, Wolf from 3
+CHOICE_BB_MATCH, CHOICE_BB_STROKE, CHOICE_SCRAMBLE, CHOICE_WORST, CHOICE_TEAM, CHOICE_WOLF = 5, 6, 7, 8, 9, 10
+# The game keeps a sub-list's icons and help in two arrays of 10 (SUB_TEX, SUB_HELP, back to back); v20's 11
+# choices have their own (cave "list"), which the list's three readers load through a pointer (LIST_READERS).
+LIST_FILL = (0x8041CA00, 0x3CE08017)         # lis r7,0x8017: FUN_8041ca00's first instruction (fills the arrays)
+LIST_READERS = ((0x8041C4C0, 0x393CC50C, "tex_load"), (0x8041C5C4, 0x393CC50C, "tex_load"),   # the icons, labels
+                (0x8041DB60, 0x3929C534, "help_load"))                                         # and help line
+SUB_COUNT_DOUBLES = 5                        # Doubles' own choices
 
 ICONS, LABELS = "B/V/V", "B/V/W"             # the sub-lists' 96x96 CMPR icons and IA4 labels (25 each)
 FIRST_TEX = 25                               # ours: 25.. in NAMES order
-NAMES = ("Best Ball Match", "Best Ball Stroke", "Scramble", "Team Scramble")
-HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FE4)  # our help messages, answered by build_mod.py's message hook
+NAMES = ("Best Ball Match", "Best Ball Stroke", "Scramble", "Worst Ball", "Team Scramble", "Wolf")
+HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEB)  # our help messages, answered by build_mod.py's hook
 HELP_TEXTS = (
     b"\x074\x094Two-vs-two match: the best\x01ball on each hole wins it.\x00",
     b"\x074\x094Two-vs-two. Each team counts\x01its best score on every hole.\x00",
     b"\x074\x094Two-vs-two. All hit, then the\x01captain picks the ball.\x00",
+    b"\x074\x094Two-vs-two. All hit, then the\x01team plays its worst ball.\x00",
     b"\x074\x094One team: everyone hits, then\x011P picks the ball to play.\x00",
+    b"\x074\x0943-4 players. The Wolf picks a\x01partner, or goes Lone Wolf!\x00",
 )
+DATA_HELP_KEYS = (0, 1, 2, 4)                # HELP_TEXTS in cave "data" (v16's); the others are in "wtext"
 HEADER_TEXT = b"\x075Pick the team's ball:\x00"
 # The carousel entry is "Team Play" now (its name banner, B/V/T texture 9, and its help line, message 0x1D), and
 # Doubles' own five choices say they are alternate shot.
 BANNERS, TEAM_BANNER, TEAM_NAME = "B/V/T", 9, "Team Play"
 MSG_TEAM_HELP = 0x14 + 9
-TEAM_HELP = b"\x074\x094Team games: alternate shot,\x01best ball and scramble!\x00"
+TEAM_HELP = b"\x074\x094Best ball, scramble, wolf,\x01alternate shot and more!\x00"
 ALT_IDS = (0x7FE5, 0x7FE6, 0x7FE7, 0x7FE8, 0x7FE9)
 ALT_TEXTS = tuple(b"\x074\x094Alternate shot, two-vs-two:\x01" + rule + b"\x00" for rule in
                   (b"stroke-play rules.", b"match-play rules.", b"four-slot rules!", b"three-slot rules!",
@@ -215,8 +249,10 @@ def data_block():
     a.label("slots")
     a(*([0] * (4 * SLOT_SIZE // 4)))
     for k, text in enumerate(HELP_TEXTS):
-        _string(a, f"help_{k}", text)
+        if k in DATA_HELP_KEYS:
+            _string(a, f"help_{k}", text)
     _string(a, "header", HEADER_TEXT)
+    a.word("header_ptr", a.labels["header"])  # the captain's menu header row (v20: the Wolf's menus point it at theirs)
     _string(a, "team_help", TEAM_HELP)
     _string(a, "fmt_yards", b"\x075%s: %d yds, %s\x00")
     _string(a, "fmt_feet", b"\x075%s: %d ft, %s\x00")
@@ -545,6 +581,11 @@ def cam_code(d):
     _la(a, 12, d["choose_default"])
     a(ppc.lwz(29, 0, 12))
     a.label("cam_member")
+    hi, lo = ppc.hi_lo(d["team_mode"])         # v20: the Wolf's menu looks at one ball, its candidate's (slot 0's
+    a(ppc.lis(12, hi), ppc.lwz(12, lo, 12), ppc.cmpwi(12, WOLF))   # place: the candidate's own slot)
+    a.br("bne", "cam_team")
+    a(ppc.li(29, 0))
+    a.label("cam_team")
     _la(a, 12, d["choose_team"])
     a(ppc.lwz(28, 0, 12), ppc.addi(28, 28, -1))
     _lbz_abs(a, 12, D15)
@@ -769,15 +810,16 @@ def best_code(d, x):
     return choose, a
 
 
-def hooks_code(d, x, b, at, e):
-    """The hooks themselves (cave "hooks", after the menu runner at `at`)."""
+def hooks_code(d, x, b, at, w):
+    """The hooks themselves (cave "hooks", after the menu runner at `at`); `w` = the v20 caves' labels."""
     a = ppc.Asm(at)
-    beq_lr, blt_lr = ppc.BEQLR, ppc.BLTLR
 
     # -- round setup: replaces stb r0,0xD16(r31). r30 = setup block, r31 = golf state, cr0 = "not doubles"
     # (the beq right after skips halving the side count); keep cr0 unless we decide the side count ourselves.
     a.label("setup")
-    a(ppc.stb(0, STATE_D16, 31), ppc.mfcr(12), ppc.lbz(11, MODE_BYTE, 30))
+    a(ppc.stb(0, STATE_D16, 31), ppc.mfcr(12), ppc.mflr(10))
+    a.bl(w["wolf_reset"])                     # (keeps r0, r10, r12)
+    a(ppc.mtlr(10), ppc.lbz(11, MODE_BYTE, 30))
     _la(a, 10, d["team_mode"])
     a(ppc.stw(11, 0, 10), ppc.li(9, -1))      # (r0 is the player count the game halves next: keep it)
     _la(a, 10, d["bb_hole"])
@@ -842,7 +884,10 @@ def hooks_code(d, x, b, at, e):
     a.label("shot")
     _la(a, 12, d["team_mode"])
     a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, SCRAMBLE))
-    a.br("bge", "shot_scramble")
+    a.br("blt", "shot_game")
+    a(ppc.cmpwi(12, WOLF))                    # (Wolf: everyone plays their own ball, the game's way)
+    a.br("bne", "shot_scramble")
+    a.label("shot_game")
     a(SHOT_HOOK[1])
     a.b(SHOT_HOOK[0] + 4)
     a.label("shot_scramble")
@@ -888,6 +933,9 @@ def hooks_code(d, x, b, at, e):
     a(ppc.divw(11, 25, 24), ppc.mullw(11, 11, 24), ppc.subf(31, 11, 25))
     _la(a, 26, d["members"])
     a(ppc.lbzx(11, 26, 31), ppc.addi(11, 11, 1), ppc.stbx(11, 26, 31))
+    _la(a, 12, d["team_mode"])                # (Worst Ball: a holed ball waits for the others)
+    a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, WORST))
+    a.br("beq", "shot_more")
     a(ppc.lbz(0, 0x28, 27), ppc.cmpwi(0, 0))
     a.br("beq", "shot_more")
     a(ppc.divw(4, 25, 24), ppc.mr(3, 31))                   # in the hole: the holer's ball, now
@@ -897,12 +945,8 @@ def hooks_code(d, x, b, at, e):
     _lbz_abs(a, 12, D16)
     a(ppc.divw(12, 12, 24), ppc.cmpw(11, 12))
     a.br("blt", "shot_out")
-    a(ppc.mr(3, 31), ppc.mr(4, 11))                         # everyone has hit: the captain picks
-    a.bl(x["best_of"])
-    _la(a, 12, d["choose_default"])
-    a(ppc.stw(3, 0, 12), ppc.addi(0, 31, 1))
-    _la(a, 12, d["choose_team"])
-    a(ppc.stw(0, 0, 12))
+    a(ppc.mr(3, 31), ppc.mr(4, 11))                         # everyone has hit: the captain picks (Worst Ball:
+    a.bl(w["all_hit"])                                      # the worst ball, now)
     a.label("shot_out")
     a(ppc.lmw(24, 0x10, 1), ppc.addi(1, 1, 0x40))
     a.b(SHOT_DONE)
@@ -977,8 +1021,8 @@ def hooks_code(d, x, b, at, e):
     a.br("beq", "messages_game")
     a(ppc.cmpwi(3, MSG_OPTION + HEADER_CODE))
     a.br("bne", "messages_row")
-    _la(a, 3, d["header"])
-    a(ppc.BLR)
+    hi, lo = ppc.hi_lo(d["header_ptr"])
+    a(ppc.lis(3, hi), ppc.lwz(3, lo, 3), ppc.BLR)
     a.label("messages_row")
     a(ppc.addi(12, 3, -MSG_OPTION), ppc.cmplwi(12, 4))
     a.br("bge", "messages_game")
@@ -1001,6 +1045,12 @@ def hooks_code(d, x, b, at, e):
     a.label("commit_ours")
     a(ppc.cmpwi(9, CHOICE_TEAM))
     a.br("beq", "commit_team")
+    a(ppc.cmpwi(9, CHOICE_WOLF))
+    a.br("bne", "commit_teams")
+    a.b(w["commit_wolf"])
+    a.label("commit_teams")
+    a(ppc.li(0, WORST), ppc.cmpwi(9, CHOICE_WORST))
+    a.br("beq", "commit_on")
     a(ppc.li(0, SCRAMBLE), ppc.cmpwi(9, CHOICE_SCRAMBLE))
     a.br("beq", "commit_on")
     a(ppc.li(0, BEST_BALL), ppc.stb(0, MODE_BYTE, 11), ppc.cmpwi(9, CHOICE_BB_MATCH))
@@ -1015,27 +1065,654 @@ def hooks_code(d, x, b, at, e):
     a.bl(SCREEN_PUSH)
     a.bl(COURSE_LIST)
     a.b(COMMIT_END)
-    # The Doubles list's new choices (b from SUBLIST_HOOK, the end of its case).
-    a.label("sublist")
-    _la(a, 11, SUB_TEX)
-    _la(a, 12, SUB_HELP)
-    for k in range(len(NAMES)):
-        a(ppc.li(0, FIRST_TEX + k), ppc.stw(0, 4 * (5 + k), 11), ppc.li(0, HELP_IDS[k] - 0x22),
-          ppc.stw(0, 4 * (5 + k), 12))
-    a.b(e["sublist_alt"])
     return a
 
 
 def extra_code():
-    """Doubles' own choices' help: alternate shot (cave "extra"); then back to the game (r12 = SUB_HELP)."""
+    """Doubles' own choices' help texts: alternate shot (cave "extra")."""
     a = ppc.Asm(CAVES["extra"][0])
-    a.label("sublist_alt")
-    for k in range(len(ALT_IDS)):
-        a(ppc.li(0, ALT_IDS[k] - 0x22), ppc.stw(0, 4 * k, 12))
-    a(ppc.BLR)
     for k, text in enumerate(ALT_TEXTS):
         _string(a, f"alt_{k}", text)
     return a
+
+
+# ---- v20: Worst Ball (2v2, every member hits, the team plays its worst ball) and Wolf (3 or 4 players, each with
+# their own ball; the Wolf of each hole tees off last and, after each other player's drive, takes them as a partner
+# or not; nobody taken = the Lone Wolf. The game's Skins round underneath, with its scoring swapped for the Wolf's
+# points, so the score panel, the hole-end scorecard and the results show them; RE-NOTES "Team games")
+
+STATE_SUB_MODE = 0x804E66BC                  # the round's sub-mode word (3 Skins; the Wolf's scoring runs as 0)
+REC_HONOR, PLAYER_CARD = 0x1C1, 0x14         # record: tee order (lowest first); player: its scorecard (hole x 8)
+SKINS_POT, SKINS_TOTALS = 0x80523FF8, 0x80523FFC   # the Skins scorecard's carried skins and each player's total
+PICKER = (0x80402F1C, 0x9421FFA8)            # stwu r1,-88(r1): FUN_80402f1c(state), the shooter pick
+SCORE = (0x8046A0B8, 0x9421FFE8)             # stwu r1,-24(r1): FUN_8046a0b8(side), scoring after a shot
+POINTS_GET = (0x80469720, 0x9421FFD8)        # stwu r1,-40(r1): FUN_80469720(player), the panel's/results' score
+TOTALS = ((0x80472FD4, 0x80140A84), (0x8047362C, 0x80140A84))   # lwz r0,0xA84(r20): after the scorecards' totals
+TIE = (0x80474448, 0x39290001)               # addi r9,r9,1: the hole-end scorecard carries a tied hole's skin
+MARK, MARK_DRAW = (0x8047B314, 0x4800EB61), 0x80489E74   # bl: a skin's number on the scorecard (r28 hole, r8 player)
+WOLF_TEAM, OTHERS = 1, 2
+TEAM_WIN, LONE_WIN, LONE_LOSS = 1, 2, 1      # points (Golf Digest's): each winner of a 2-v-2 hole; a Lone Wolf who
+                                             # wins; each other player when the Lone Wolf loses (the same as a win)
+KIND_START, KIND_DECIDE = 1, 2               # the Wolf's menus: "X is the Wolf!" (OK), "team up with Y?"
+PLAYER_GOLFER = 0x51EF                       # player: its golfer code (byte)
+GOLFER_NAMES = ("Mario", "Waluigi", "Peach", "Luigi", "Bowser", "Wario", "Metal Mario", "Birdo", "Yoshi", "DK",
+                "Diddy", "Boo", "Petey", "Daisy", "Bowser Jr.", "Koopa", "Shy Guy", "Tony", "?")   # by golfer code
+WOLF_TEXTS = {
+    "fmt_start": b"\x075%s is the Wolf this hole!\x00",
+    "fmt_decide": b"\x075Wolf %s: team up with %s?\x00",
+    "row_ok": b"\x075OK\x00",
+    "row_yes": b"\x075Yes\x00",
+    "row_no": b"\x075No\x00",
+    "row_lone": b"\x075No, go Lone Wolf\x00",
+}
+# Worst Ball's worst shot: not in the hole first, then a penalty, then the distance to the pin, squared, times
+# these by the lie (as a scramble's best shot)
+WORST_WEIGHTS = tuple((code, w) for w, codes in LIE_WEIGHTS for code in codes)
+WORST_BIG = 1.0e9
+
+
+def lbzu(rd, d, ra):
+    return ppc._d(35, rd, d, ra)
+
+
+def stbu(rs, d, ra):
+    return ppc._d(39, rs, d, ra)
+
+
+def stwx(rs, ra, rb):
+    return 0x7C00012E | rs << 21 | ra << 16 | rb << 11
+
+
+def _clear(a, at, size):
+    """Zero `size` bytes at `at` (r0, r11, r12, ctr)."""
+    _la(a, 11, at - 4)
+    a(ppc.li(0, 0), ppc.li(12, size // 4), ppc.mtctr(12))
+    a.label(f"clear_{at:x}")
+    a(ppc.stwu(0, 4, 11))
+    a.br("bdnz", f"clear_{at:x}")
+
+
+BNELR = 0x4C820020
+
+
+def v20_code(d, t, x, cam, L):
+    """The v20 caves (built twice: `L` holds every label, from the first pass)."""
+    out = {}
+    tm_hi, tm_lo = ppc.hi_lo(d["team_mode"])
+
+    def mode_is(a, mode):                     # cr0 eq when the round's team mode is `mode` (r12)
+        a(ppc.lis(12, tm_hi), ppc.lwz(12, tm_lo, 12), ppc.cmpwi(12, mode))
+
+    # -- wdata: the Wolf's state
+    w = ppc.Asm(CAVES["wdata"][0])
+    W = CAVES["wdata"][0]
+    w.word("hole", -1)                        # the hole the state below is for
+    w.label("st")                             # bytes: the Wolf, partner (0xFF none), candidates offered, decided,
+    w(0, 0)                                   # scored, lone, menu kind, candidate
+    w.word("outs", 0)                         # players stopped because they can't help their team (bytes)
+    w.label("points")
+    w(*([0] * 4))
+    w.label("hole_points")                    # [hole][player] bytes: this hole's points
+    w(*([0] * (18 * 4 // 4)))
+    w.label("header_buf")
+    w(*([0] * 16))
+    w.label("name_a")
+    w(*([0] * 4))
+    w.label("name_b")
+    w(*([0] * 4))
+    names = b""
+    offsets = []
+    for name in GOLFER_NAMES:                 # the golfers' names, as the Wolf's menus call them
+        offsets.append(len(names))
+        names += name.encode() + b"\x00"
+    _string(w, "name_offsets", bytes(offsets))
+    _string(w, "names", names)
+    out["wdata"] = w
+    ST = w.labels["st"] - W
+    WOLF_, PARTNER, OFFERED, DECIDED, SCORED, LONE, KIND, CAND = (ST + k for k in range(8))
+    HOLE, OUTS, POINTS, HOLE_POINTS = (w.labels[k] - W for k in ("hole", "outs", "points", "hole_points"))
+    HEADER_BUF, NAME_A, NAME_B = (w.labels[k] - W for k in ("header_buf", "name_a", "name_b"))
+
+    # -- wtext: texts
+    s = ppc.Asm(CAVES["wtext"][0])
+    for k, text in enumerate(HELP_TEXTS):
+        if k not in DATA_HELP_KEYS:
+            _string(s, f"help_{k}", text)
+    for name, text in WOLF_TEXTS.items():
+        _string(s, name, text)
+    out["wtext"] = s
+    T = s.labels
+
+    # -- list (menu overlay): the Team Play list's arrays
+    a = ppc.Asm(CAVES["list"][0])
+    a.word("tex_ptr", SUB_TEX)
+    a.word("help_ptr", SUB_HELP)
+    a.label("new_tex")
+    a(*([0] * 11))
+    a.label("new_help")
+    a(*([0] * 11))
+    a.label("list_reset")                     # (b from LIST_FILL) every fill starts on the game's arrays
+    a.la(12, "tex_ptr")
+    a(ppc.lis(11, SUB_TEX >> 16), ppc.ori(11, 11, SUB_TEX & 0xFFFF), ppc.stw(11, 0, 12),
+      ppc.lis(11, SUB_HELP >> 16), ppc.ori(11, 11, SUB_HELP & 0xFFFF), ppc.stw(11, 4, 12))
+    a(LIST_FILL[1])
+    a.b(LIST_FILL[0] + 4)
+    a.label("tex_load")                       # (bl from LIST_READERS) r9 = the arrays in use
+    a.la(9, "tex_ptr")
+    a(ppc.lwz(9, 0, 9), ppc.BLR)
+    a.label("help_load")
+    a.la(9, "help_ptr")
+    a(ppc.lwz(9, 0, 9), ppc.BLR)
+    a.label("sublist")                        # (b from SUBLIST_HOOK, the end of the Doubles case) our arrays:
+    a.la(11, "new_tex")                       # Doubles' own five (their help says alternate shot), then ours
+    a.la(12, "new_help")
+    _la(a, 10, SUB_TEX)
+    for k in range(SUB_COUNT_DOUBLES):
+        a(ppc.lwz(0, 4 * k, 10), ppc.stw(0, 4 * k, 11), ppc.li(0, ALT_IDS[k] - 0x22), ppc.stw(0, 4 * k, 12))
+    for k in range(len(NAMES)):
+        at = 4 * (SUB_COUNT_DOUBLES + k)
+        a(ppc.li(0, FIRST_TEX + k), ppc.stw(0, at, 11), ppc.li(0, HELP_IDS[k] - 0x22), ppc.stw(0, at, 12))
+    a.la(10, "tex_ptr")
+    a(ppc.stw(11, 0, 10), ppc.stw(12, 4, 10), ppc.BLR)
+    out["list"] = a
+
+    # -- worst: the worst shot, and what happens once every member has hit
+    a = ppc.Asm(CAVES["worst"][0])
+    a.float("neg_one", -1.0)
+    a.float("neg_two", -2.0)
+    a.float("big", WORST_BIG)
+    a.label("weights")
+    for code, wt in WORST_WEIGHTS:
+        a(code, struct.unpack(">I", struct.pack(">f", wt))[0])
+    a(0xFFFFFFFF, struct.unpack(">I", struct.pack(">f", LIE_WEIGHT_OTHER))[0])
+    WB = CAVES["worst"][0]
+
+    # worst_of(r3 = team, r4 = members who hit) -> r3 = member: any ball not in the hole before a holed one, then
+    # a penalty, then the farthest (distance squared times the lie's weight)
+    a.label("worst_of")
+    _enter(a, 0x30, 26)
+    a(ppc.mr(31, 3), ppc.mr(29, 4), ppc.li(28, 0), ppc.li(27, 0))
+    _la(a, 26, WB)
+    a(ppc.lfs(1, a.labels["neg_two"] - WB, 26))
+    _lbz_abs(a, 30, D15)
+    a.label("wo_loop")
+    a(ppc.mullw(12, 30, 28), ppc.add(12, 12, 31))
+    _slot(a, 10, 12, d)
+    a(ppc.lbz(0, 0x28, 10), ppc.cmpwi(0, 0))
+    a.br("beq", "wo_out_hole")
+    a(ppc.lfs(2, a.labels["neg_one"] - WB, 26))
+    a.br("b", "wo_cmp")
+    a.label("wo_out_hole")
+    hi, lo = ppc.hi_lo(PIN_X)
+    a(ppc.lis(12, hi), ppc.lfs(3, lo, 12), ppc.lfs(2, 0, 10), ppc.fsubs(2, 2, 3))
+    hi, lo = ppc.hi_lo(PIN_Z)
+    a(ppc.lis(12, hi), ppc.lfs(3, lo, 12), ppc.lfs(4, 8, 10), ppc.fsubs(4, 4, 3))
+    a(ppc.fmuls(2, 2, 2), ppc.fmadds(2, 4, 4, 2), ppc.lwz(0, 0x2C, 10),
+      ppc.addi(12, 26, a.labels["weights"] - WB - 8))
+    a.label("wo_weight")
+    a(ppc.lwzu(9, 8, 12), ppc.cmpwi(9, -1))
+    a.br("beq", "wo_weighed")
+    a(ppc.cmpw(9, 0))
+    a.br("bne", "wo_weight")
+    a.label("wo_weighed")
+    a(ppc.lfs(3, 4, 12), ppc.fmuls(2, 2, 3), ppc.lbz(9, SLOT_PEN, 10), ppc.cmpwi(9, 0))
+    a.br("beq", "wo_cmp")
+    a(ppc.lfs(3, a.labels["big"] - WB, 26), ppc.fadds(2, 2, 3))
+    a.label("wo_cmp")
+    a(ppc.fcmpu(2, 1))
+    a.br("ble", "wo_next")
+    a(ppc.mr(27, 28), ppc.fmr(1, 2))
+    a.label("wo_next")
+    a(ppc.addi(28, 28, 1), ppc.cmpw(28, 29))
+    a.br("blt", "wo_loop")
+    a(ppc.mr(3, 27))
+    _leave(a, 0x30, 26)
+    out["worst"] = a
+
+    a = ppc.Asm(CAVES["worst2"][0])
+    # all_hit(r3 = team, r4 = members who hit): Worst Ball takes the worst ball now; a scramble asks its captain
+    a.label("all_hit")
+    _enter(a, 0x20, 30)
+    a(ppc.mr(31, 3))
+    mode_is(a, WORST)
+    a.br("bne", "ah_scramble")
+    a.bl(L["worst_of"])
+    a(ppc.mr(4, 3), ppc.mr(3, 31))
+    a.bl(x["take"])
+    a.br("b", "ah_out")
+    a.label("ah_scramble")
+    a.bl(x["best_of"])
+    _la(a, 12, d["choose_default"])
+    a(ppc.stw(3, 0, 12), ppc.addi(0, 31, 1))
+    _la(a, 12, d["choose_team"])
+    a(ppc.stw(0, 0, 12))
+    a.label("ah_out")
+    _leave(a, 0x20, 30)
+    a.label("commit_wolf")                    # (b from "commit", r11 = setup block) a Skins game of everyone,
+    a(ppc.li(0, WOLF), ppc.stb(0, MODE_BYTE, 11), ppc.li(0, 2), ppc.stw(0, 0xA80, 11), ppc.li(0, 3),   # each on
+      ppc.stw(0, 0xA84, 11), ppc.li(3, 3))   # their own ball (mode 2, sub-mode 3), straight to the course select
+    a.bl(SCREEN_PUSH)
+    a.bl(COURSE_LIST)
+    a.b(COMMIT_END)
+    a.label("wolf_clear")                     # the Wolf's texts' buffers (the game's text boxes show what is left
+    _clear(a, W + HEADER_BUF, 64)             # past a shorter string)
+    _clear(a, t["options"], 4 * OPTION_TEXT)
+    a(ppc.BLR)
+    a.label("wolf_cam_slot")                  # (r12 = candidate) the captain's menu camera flies to its ball
+    a(ppc.addi(0, 12, 1))                     # (cam_update: team = the candidate, its slot = where the ball is)
+    _la(a, 11, d["choose_team"])
+    a(ppc.stw(0, 0, 11), ppc.li(0, 0))
+    _la(a, 11, d["choose_default"])
+    a(ppc.stw(0, 0, 11))
+    _player(a, 10, 12)
+    a(ppc.lwz(10, PLAYER_BALL, 10))
+    _slot(a, 9, 12, d)
+    for off in (0, 4, 8):
+        a(ppc.lwz(0, 0x9C + off, 10), ppc.stw(0, off, 9))
+    a(ppc.BLR)
+    out["worst2"] = a
+
+    # -- wpick: the shooter pick (b from PICKER, r3 = golf state)
+    a = ppc.Asm(CAVES["wpick"][0])
+    a.label("wolf_pick")
+    mode_is(a, WOLF)
+    a.br("beq", "wp_go")
+    a(PICKER[1])
+    a.b(PICKER[0] + 4)
+    a.label("wp_go")
+    _enter(a, 0x30, 25)
+    a(ppc.mr(31, 3), ppc.lbz(30, STATE_D15, 31))           # r30 = players
+    _la(a, 28, W)
+    _lbz_abs(a, 29, HOLE_INDEX)
+    a(ppc.lwz(0, HOLE, 28), ppc.cmpw(0, 29))
+    a.br("beq", "wp_known")
+    # a new hole: its Wolf (on the first hole the last player, then 1P, 2P, ...), who tees off last
+    a(ppc.stw(29, HOLE, 28), ppc.add(12, 29, 30), ppc.addi(12, 12, -1), ppc.divw(11, 12, 30),
+      ppc.mullw(11, 11, 30), ppc.subf(12, 11, 12), ppc.stb(12, WOLF_, 28))
+    a(ppc.li(0, -1), ppc.stb(0, PARTNER, 28), ppc.li(0, 0))
+    for off in (OFFERED, DECIDED, SCORED, LONE):
+        a(ppc.stb(0, off, 28))
+    a(ppc.stw(0, OUTS, 28), ppc.li(27, 0))
+    a.label("wp_order")                       # tee order: the one after the Wolf first, ..., the Wolf last; and
+    _player(a, 26, 27)                        # the hole's result byte "no points" for now
+    a(ppc.lwz(25, PLAYER_REC, 26), ppc.lbz(12, WOLF_, 28), ppc.subf(11, 12, 27), ppc.addi(11, 11, -1),
+      ppc.add(11, 11, 30), ppc.add(11, 11, 30), ppc.divw(12, 11, 30), ppc.mullw(12, 12, 30), ppc.subf(11, 12, 11))
+    a(ppc.stb(11, REC_HONOR, 25), ppc.lwz(11, PLAYER_CARD, 26), ppc.slwi(12, 29, 3), ppc.li(0, 1),
+      ppc.stbx(0, 11, 12), ppc.addi(27, 27, 1), ppc.cmpw(27, 30))
+    a.br("blt", "wp_order")
+    a(ppc.li(3, KIND_START))
+    a.bl(L["wolf_open"])
+    a.br("b", "wp_none")
+    a.label("wp_known")
+    a(ppc.lbz(0, KIND, 28), ppc.cmpwi(0, 0))
+    a.br("beq", "wp_free")
+    a.bl(L["wolf_step"])
+    a(ppc.cmpwi(3, 0))
+    a.br("bne", "wp_none")
+    a.label("wp_free")                        # the next candidate has driven: the Wolf's call on them
+    a(ppc.lbz(0, DECIDED, 28), ppc.cmpwi(0, 0))
+    a.br("bne", "wp_game")
+    a(ppc.lbz(12, WOLF_, 28), ppc.lbz(11, OFFERED, 28), ppc.add(12, 12, 11), ppc.addi(12, 12, 1),
+      ppc.divw(11, 12, 30), ppc.mullw(11, 11, 30), ppc.subf(27, 11, 12))
+    _player(a, 26, 27)
+    a(ppc.lwz(25, PLAYER_REC, 26), ppc.lbz(0, REC_STROKES, 25), ppc.cmpwi(0, 0))
+    a.br("beq", "wp_game")
+    a(ppc.stb(27, CAND, 28), ppc.li(3, KIND_DECIDE))
+    a.bl(L["wolf_open"])
+    a.label("wp_none")                        # nobody's turn while a menu is up
+    a(ppc.li(0, -1), ppc.stb(0, STATE_D17, 31))
+    _leave(a, 0x30, 25)
+    a.label("wp_game")                        # the game's pick
+    a(ppc.mr(3, 31), ppc.lmw(25, 0x30 - 4 * 7, 1), ppc.lwz(0, 0x34, 1), ppc.mtlr(0), ppc.addi(1, 1, 0x30))
+    a(PICKER[1])
+    a.b(PICKER[0] + 4)
+    out["wpick"] = a
+
+    # wolf_step() -> r3 = 1 while the Wolf's menu is up, 0 once it has closed (its choice taken)
+    a = ppc.Asm(CAVES["wstep"][0])
+    a.label("wolf_step")
+    _enter(a, 0x20, 28)
+    _la(a, 28, W)
+    _la(a, 12, d["choose_menu"])
+    a(ppc.lwz(30, 0, 12), ppc.lwz(29, 0, 30), ppc.cmpwi(29, -1))
+    a.br("beq", "ws_open")
+    a(ppc.cmpwi(29, -3))
+    a.br("beq", "ws_open")
+    a(ppc.mr(3, 30))
+    a.bl(MENU_CLEANUP)
+    a(ppc.mr(3, 30))
+    a.bl(FREE)
+    a(ppc.li(0, 0))
+    hi, lo = ppc.hi_lo(CUR_MENU)
+    a(ppc.lis(12, hi), ppc.stw(0, lo, 12))
+    for name in ("choose_menu", "menu_open", "choose_team"):
+        _la(a, 12, d[name])
+        a(ppc.stw(0, 0, 12))
+    _la(a, 12, d["header_ptr"])
+    _la(a, 11, d["header"])
+    a(ppc.stw(11, 0, 12), ppc.lbz(31, KIND, 28), ppc.stb(0, KIND, 28), ppc.cmpwi(31, KIND_DECIDE))
+    a.br("bne", "ws_closed")
+    a(ppc.cmpwi(29, 0))                       # row 0, "Yes": that partner
+    a.br("bne", "ws_pass")
+    a(ppc.lbz(0, CAND, 28), ppc.stb(0, PARTNER, 28), ppc.li(0, 1), ppc.stb(0, DECIDED, 28))
+    a.br("b", "ws_closed")
+    a.label("ws_pass")                        # "No" (or B): the next one; after the last, the Lone Wolf
+    a(ppc.lbz(12, OFFERED, 28), ppc.addi(12, 12, 1), ppc.stb(12, OFFERED, 28))
+    _lbz_abs(a, 11, D15)
+    a(ppc.addi(11, 11, -1), ppc.cmpw(12, 11))
+    a.br("blt", "ws_closed")
+    a(ppc.li(0, 1), ppc.stb(0, LONE, 28), ppc.stb(0, DECIDED, 28))
+    a.label("ws_closed")
+    a(ppc.li(3, 0))
+    a.br("b", "ws_out")
+    a.label("ws_open")
+    a(ppc.lbz(0, KIND, 28), ppc.cmpwi(0, KIND_DECIDE))
+    a.br("bne", "ws_still")
+    a(ppc.mr(3, 30))
+    a.bl(cam["cam_update"])
+    a.label("ws_still")
+    a(ppc.li(3, 1))
+    a.label("ws_out")
+    _leave(a, 0x20, 28)
+    out["wstep"] = a
+
+    # -- wmenu: the Wolf's menus (the captain's menu's way: our header and rows, the Wolf's pad)
+    a = ppc.Asm(CAVES["wmenu"][0])
+    a.label("wolf_open")                      # (r3 = kind)
+    _enter(a, 0x40, 24)
+    a(ppc.mr(31, 3))
+    _la(a, 28, W)
+    a(ppc.stb(31, KIND, 28))
+    a.bl(L["wolf_clear"])
+    a(ppc.lbz(3, WOLF_, 28), ppc.addi(4, 28, NAME_A))
+    a.bl(L["name_of"])
+    a(ppc.lbz(3, CAND, 28), ppc.addi(4, 28, NAME_B))
+    a.bl(L["name_of"])
+    a(ppc.addi(3, 28, HEADER_BUF), ppc.cmpwi(31, KIND_DECIDE))
+    _la(a, 4, T["fmt_decide"])
+    a.br("beq", "wo_fmt")
+    _la(a, 4, T["fmt_start"])
+    a.label("wo_fmt")
+    a(ppc.addi(5, 28, NAME_A), ppc.addi(6, 28, NAME_B), ppc.CRCLR6)
+    a.bl(SPRINTF)
+    _la(a, 12, d["header_ptr"])
+    a(ppc.addi(0, 28, HEADER_BUF), ppc.stw(0, 0, 12))
+    _la(a, 3, t["options"])
+    a(ppc.cmpwi(31, KIND_DECIDE))
+    a.br("bne", "wo_ok")
+    _la(a, 4, T["row_yes"])
+    a.bl(L["strcpy"])
+    _la(a, 3, t["options"] + OPTION_TEXT)
+    _la(a, 4, T["row_no"])
+    a(ppc.lbz(12, OFFERED, 28))
+    _lbz_abs(a, 11, D15)
+    a(ppc.addi(11, 11, -2), ppc.cmpw(12, 11))
+    a.br("blt", "wo_no")
+    _la(a, 4, T["row_lone"])
+    a.label("wo_no")
+    a.bl(L["strcpy"])
+    a(ppc.li(27, 2))
+    a.br("b", "wo_menu")
+    a.label("wo_ok")
+    _la(a, 4, T["row_ok"])
+    a.bl(L["strcpy"])
+    a(ppc.li(27, 1))
+    a.label("wo_menu")                        # a header row and the rows, on the Wolf's pad
+    a(ppc.li(3, 0x90))
+    a.bl(ALLOC)
+    a(ppc.mr(26, 3), ppc.li(4, 2), ppc.lbz(12, WOLF_, 28))
+    _player(a, 12, 12)
+    a(ppc.lwz(5, PLAYER_PAD, 12))
+    a.bl(MENU_INIT)
+    a(ppc.addi(0, 27, 1), ppc.stb(0, MENU_COUNT, 26), ppc.li(0, HEADER_CODE), ppc.stw(0, MENU_CODES, 26),
+      ppc.li(0, 0), ppc.stw(0, MENU_CODES + 4, 26), ppc.li(0, 1), ppc.stw(0, MENU_CODES + 8, 26),
+      ppc.stw(0, MENU_CURSOR, 26))
+    hi, lo = ppc.hi_lo(CUR_MENU)
+    a(ppc.lis(12, hi), ppc.stw(26, lo, 12))
+    _la(a, 12, d["choose_menu"])
+    a(ppc.stw(26, 0, 12))
+    _la(a, 12, d["menu_open"])
+    a(ppc.stw(0, 0, 12), ppc.cmpwi(31, KIND_DECIDE))
+    a.br("bne", "wo_out")
+    a(ppc.lbz(12, CAND, 28))
+    a.bl(L["wolf_cam_slot"])
+    a.label("wo_out")
+    _leave(a, 0x40, 24)
+
+    out["wmenu"] = a
+
+    a = ppc.Asm(CAVES["wname"][0])
+    a.label("name_of")                        # (r3 = player, r4 = buffer) its golfer's name ("Mario")
+    _player(a, 12, 3)
+    a(ppc.lbz(12, PLAYER_GOLFER, 12), ppc.cmplwi(12, len(GOLFER_NAMES) - 1))
+    a.br("blt", "name_known")
+    a(ppc.li(12, len(GOLFER_NAMES) - 1))
+    a.label("name_known")
+    _la(a, 11, w.labels["name_offsets"])
+    a(ppc.lbzx(0, 11, 12), ppc.mr(3, 4))
+    _la(a, 4, w.labels["names"])
+    a(ppc.add(4, 4, 0))                       # (then strcpy, right below)
+    a.label("strcpy")                         # (r3 = to, r4 = from)
+    a(ppc.addi(3, 3, -1), ppc.addi(4, 4, -1))
+    a.label("strcpy_loop")
+    a(lbzu(0, 1, 4), stbu(0, 1, 3), ppc.cmpwi(0, 0))
+    a.br("bne", "strcpy_loop")
+    a(ppc.BLR)
+
+    # -- scoring (b from SCORE, r3 = side): stroke play's (sub-mode 0) for the shot, then the Wolf's
+    a.label("wolf_score")
+    mode_is(a, WOLF)
+    a.br("beq", "wsc_go")
+    a.label("wsc_game")
+    a(SCORE[1])
+    a.b(SCORE[0] + 4)
+    a.label("wsc_go")
+    _enter(a, 0x10, 30)
+    hi, lo = ppc.hi_lo(STATE_SUB_MODE)
+    a(ppc.mr(30, 3), ppc.lis(12, hi), ppc.li(0, 0), ppc.stw(0, lo, 12))
+    a.br("bl", "wsc_game")
+    a(ppc.mr(31, 3), ppc.lis(12, hi), ppc.li(0, 3), ppc.stw(0, lo, 12))
+    a.bl(L["wolf_check"])
+    # once the hole is scored, this player's result byte stays the Wolf's (0 = points), whatever stroke play's
+    # scoring writes for someone it sees as picked up (status 2: par x 3)
+    _la(a, 12, W)
+    a(ppc.lbz(0, SCORED, 12), ppc.cmpwi(0, 0))
+    a.br("beq", "wsc_out")
+    _lbz_abs(a, 11, HOLE_INDEX)
+    a(ppc.slwi(10, 11, 2), ppc.add(10, 10, 30), ppc.add(10, 10, 12), ppc.lbz(0, HOLE_POINTS, 10), ppc.li(9, 1),
+      ppc.cmpwi(0, 0))
+    a.br("beq", "wsc_card")
+    a(ppc.li(9, 0))
+    a.label("wsc_card")
+    _player(a, 10, 30)
+    a(ppc.lwz(10, PLAYER_CARD, 10), ppc.slwi(11, 11, 3), ppc.stbx(9, 10, 11))
+    a.label("wsc_out")
+    a(ppc.mr(3, 31))
+    _leave(a, 0x10, 30)
+
+    a.label("team_of")                        # (r27 = player, r28 = state) -> r12 = WOLF_TEAM / OTHERS
+    a(ppc.li(12, WOLF_TEAM), ppc.lbz(11, WOLF_, 28), ppc.cmpw(27, 11), ppc.BEQLR, ppc.lbz(11, PARTNER, 28),
+      ppc.cmpw(27, 11), ppc.BEQLR, ppc.li(12, OTHERS), ppc.BLR)
+
+    # wolf_check(): once the teams are set, stop anyone who can't better their team's holed score; when everyone is
+    # done, each team's score is its best (holed, or picked up at the limit) and the winners get their points
+    out["wname"] = a
+
+    a = ppc.Asm(CAVES["wscore"][0])
+    a.label("wolf_check")
+    _enter(a, 0x40, 20)
+    _la(a, 28, W)
+    a(ppc.lbz(0, SCORED, 28), ppc.cmpwi(0, 0))
+    a.br("bne", "wc_out")
+    a(ppc.lbz(0, DECIDED, 28), ppc.cmpwi(0, 0))
+    a.br("beq", "wc_out")
+    _lbz_abs(a, 30, D15)
+    a(ppc.li(25, 99), ppc.li(24, 99), ppc.li(27, 0))       # r25 / r24: the Wolf's team's / the others' best holed
+    a.label("wc_best")
+    _player(a, 26, 27)
+    a(ppc.lwz(26, PLAYER_REC, 26), ppc.lbz(0, REC_STATUS, 26), ppc.cmpwi(0, 1))
+    a.br("bne", "wc_best_next")
+    a(ppc.lbz(0, REC_STROKES, 26))
+    a.bl(L["team_of"])
+    a(ppc.cmpwi(12, WOLF_TEAM))
+    a.br("beq", "wc_best_wolf")
+    a(ppc.cmpw(0, 24))
+    a.br("bge", "wc_best_next")
+    a(ppc.mr(24, 0))
+    a.br("b", "wc_best_next")
+    a.label("wc_best_wolf")
+    a(ppc.cmpw(0, 25))
+    a.br("bge", "wc_best_next")
+    a(ppc.mr(25, 0))
+    a.label("wc_best_next")
+    a(ppc.addi(27, 27, 1), ppc.cmpw(27, 30))
+    a.br("blt", "wc_best")
+    a(ppc.li(23, 99), ppc.li(22, 99), ppc.li(21, 1), ppc.li(27, 0))   # r23 / r22 the teams' scores, r21 all done
+    a.label("wc_done")
+    _player(a, 26, 27)
+    a(ppc.lwz(26, PLAYER_REC, 26))
+    a.bl(L["team_of"])
+    a(ppc.mr(20, 25), ppc.cmpwi(12, WOLF_TEAM))
+    a.br("beq", "wc_team_best")
+    a(ppc.mr(20, 24))
+    a.label("wc_team_best")
+    a(ppc.lbz(0, REC_STATUS, 26), ppc.cmpwi(0, 0))
+    a.br("bne", "wc_finished")
+    a(ppc.lbz(9, REC_STROKES, 26), ppc.addi(9, 9, 1), ppc.cmpw(9, 20))
+    a.br("blt", "wc_playing")
+    a(ppc.li(0, 2), ppc.stb(0, REC_STATUS, 26), ppc.addi(11, 28, OUTS), ppc.li(0, 1), ppc.stbx(0, 11, 27))
+    a.br("b", "wc_next")
+    a.label("wc_playing")
+    a(ppc.li(21, 0))
+    a.br("b", "wc_next")
+    a.label("wc_finished")
+    a(ppc.addi(11, 28, OUTS), ppc.lbzx(0, 11, 27), ppc.cmpwi(0, 0))
+    a.br("bne", "wc_next")                    # (stopped by us: not a score)
+    a(ppc.lbz(9, REC_STROKES, 26), ppc.cmpwi(12, WOLF_TEAM))
+    a.br("beq", "wc_score_wolf")
+    a(ppc.cmpw(9, 22))
+    a.br("bge", "wc_next")
+    a(ppc.mr(22, 9))
+    a.br("b", "wc_next")
+    a.label("wc_score_wolf")
+    a(ppc.cmpw(9, 23))
+    a.br("bge", "wc_next")
+    a(ppc.mr(23, 9))
+    a.label("wc_next")
+    a(ppc.addi(27, 27, 1), ppc.cmpw(27, 30))
+    a.br("blt", "wc_done")
+    a(ppc.cmpwi(21, 0))
+    a.br("beq", "wc_out")
+    a.b(L["wc_award"])                        # (in cave "waward", on this frame)
+    a.label("wc_out")
+    _leave(a, 0x40, 20)
+    out["wscore"] = a
+
+    a = ppc.Asm(CAVES["waward"][0])
+    a.label("wc_award")
+    a(ppc.li(0, 1), ppc.stb(0, SCORED, 28), ppc.li(29, 0), ppc.li(31, TEAM_WIN), ppc.cmpw(23, 22))
+    a.br("blt", "wc_wolf_won")
+    a.br("bgt", "wc_others_won")
+    a.br("b", "wc_points")                    # a tie: nobody
+    a.label("wc_wolf_won")
+    a(ppc.li(29, WOLF_TEAM), ppc.lbz(0, LONE, 28), ppc.cmpwi(0, 0))
+    a.br("beq", "wc_points")
+    a(ppc.li(31, LONE_WIN))
+    a.br("b", "wc_points")
+    a.label("wc_others_won")
+    a(ppc.li(29, OTHERS), ppc.lbz(0, LONE, 28), ppc.cmpwi(0, 0))
+    a.br("beq", "wc_points")
+    a(ppc.li(31, LONE_LOSS))
+    a.label("wc_points")                      # winners: points, this hole's points, result byte 0 (a skin)
+    _lbz_abs(a, 21, HOLE_INDEX)
+    a(ppc.li(27, 0))
+    a.label("wc_aw")
+    _player(a, 26, 27)
+    a.bl(L["team_of"])
+    a(ppc.li(0, 1), ppc.cmpw(12, 29))
+    a.br("bne", "wc_aw_card")
+    a(ppc.slwi(11, 27, 2), ppc.addi(11, 11, POINTS), ppc.lwzx(0, 28, 11), ppc.add(0, 0, 31), stwx(0, 28, 11))
+    a(ppc.slwi(11, 21, 2), ppc.add(11, 11, 27), ppc.addi(11, 11, HOLE_POINTS), ppc.stbx(31, 28, 11), ppc.li(0, 0))
+    a.label("wc_aw_card")
+    a(ppc.lwz(11, PLAYER_CARD, 26), ppc.slwi(10, 21, 3), ppc.stbx(0, 11, 10), ppc.addi(27, 27, 1),
+      ppc.cmpw(27, 30))
+    a.br("blt", "wc_aw")
+    _leave(a, 0x40, 20)
+    out["waward"] = a
+
+    # -- wshow: the points where the game shows skins
+    a = ppc.Asm(CAVES["wshow"][0])
+    a.label("wolf_points")                    # (b from POINTS_GET, r3 = player) -> its points
+    mode_is(a, WOLF)
+    a.br("beq", "wpt_go")
+    a(POINTS_GET[1])
+    a.b(POINTS_GET[0] + 4)
+    a.label("wpt_go")
+    a(ppc.lwz(3, PLAYER_INDEX, 3), ppc.slwi(3, 3, 2))
+    _la(a, 12, W + POINTS)
+    a(ppc.lwzx(3, 12, 3), ppc.BLR)
+
+    a.label("wolf_totals")                    # (bl from TOTALS) the scorecard: points before this hole, and this
+    a(ppc.stwu(1, -0x40, 1), ppc.stw(11, 0x08, 1), ppc.stw(12, 0x0C, 1), ppc.stmw(24, 0x10, 1))   # hole's extra
+    mode_is(a, WOLF)                          # points as "carried skins", which the hole-end scorecard counts up
+    a.br("bne", "wt_out")
+    _la(a, 31, W)
+    _lbz_abs(a, 30, D15)
+    _lbz_abs(a, 29, HOLE_INDEX)
+    a(ppc.lbz(28, SCORED, 31))
+    _la(a, 27, SKINS_TOTALS)
+    a(ppc.li(26, 0), ppc.li(12, 0))
+    a.label("wt_loop")
+    a(ppc.slwi(25, 26, 2), ppc.addi(24, 31, POINTS), ppc.lwzx(24, 24, 25), ppc.cmpwi(28, 0))
+    a.br("beq", "wt_set")
+    a(ppc.slwi(11, 29, 2), ppc.add(11, 11, 26), ppc.add(11, 11, 31), ppc.lbz(0, HOLE_POINTS, 11),
+      ppc.subf(24, 0, 24), ppc.cmpwi(0, 0))
+    a.br("beq", "wt_set")
+    a(ppc.add(12, 12, 0), ppc.addi(12, 12, -1))
+    a.label("wt_set")
+    a(stwx(24, 27, 25), ppc.addi(26, 26, 1), ppc.cmpw(26, 30))
+    a.br("blt", "wt_loop")
+    a(ppc.stw(12, SKINS_POT - SKINS_TOTALS, 27))
+    a.label("wt_out")
+    a(ppc.lmw(24, 0x10, 1), ppc.lwz(12, 0x0C, 1), ppc.lwz(11, 0x08, 1), ppc.addi(1, 1, 0x40))
+    a(TOTALS[0][1], ppc.BLR)
+
+    a.label("wolf_tie")                       # (bl from TIE) a tied hole carries nothing
+    a(TIE[1])
+    mode_is(a, WOLF)
+    a(BNELR, ppc.addi(9, 9, -1), ppc.BLR)
+
+    a.label("wolf_mark")                      # (bl from MARK) a winner's number on the scorecard: its points
+    mode_is(a, WOLF)
+    a.br("bne", "wm_go")
+    a(ppc.slwi(12, 28, 2), ppc.add(12, 12, 8))
+    _la(a, 11, W + HOLE_POINTS)
+    a(ppc.lbzx(5, 11, 12))
+    a.label("wm_go")
+    a.b(MARK_DRAW)
+
+    a.label("wolf_reset")                     # (bl from "setup") a new round; keeps r0, r10, r12
+    _la(a, 11, W)
+    a(ppc.li(9, -1), ppc.stw(9, HOLE, 11), ppc.li(9, 0), ppc.stb(9, KIND, 11), ppc.addi(11, 11, POINTS - 4),
+      ppc.li(9, (HOLE_POINTS + 18 * 4 - POINTS) // 4), ppc.mtctr(9), ppc.li(9, 0))
+    a.label("wr_loop")
+    a(ppc.stwu(9, 4, 11))
+    a.br("bdnz", "wr_loop")
+    _la(a, 11, d["header_ptr"])
+    _la(a, 9, d["header"])
+    a(ppc.stw(9, 0, 11), ppc.BLR)
+    out["wshow"] = a
+    return out
+
+
+class _AnyLabel(dict):
+    """First-pass labels: any name is somewhere near (the second pass has the real ones)."""
+    def __init__(self, near):
+        super().__init__()
+        self.near = near
+
+    def __missing__(self, key):
+        return self.near
 
 
 def caves():
@@ -1056,19 +1733,28 @@ def caves():
     b_labels = {**bc.labels, **ba.labels}
     e = extra_code()
     e_code = e.assemble()
-    h = hooks_code(d, xl, b_labels, CAVES["hooks"][0] + len(s_code), e.labels)
+    # v20: Worst Ball and Wolf, assembled twice (their caves call each other): first for the labels
+    first = v20_code(d, t, x.labels, c.labels, _AnyLabel(CAVES["wpick"][0]))
+    for asm in first.values():
+        asm.assemble()
+    w_labels = {k: v for asm in first.values() for k, v in asm.labels.items()}
+    v20 = v20_code(d, t, x.labels, c.labels, w_labels)
+    v20_codes = [(name, asm.assemble()) for name, asm in v20.items()]
+    w_labels = {k: v for asm in v20.values() for k, v in asm.labels.items()}
+    h = hooks_code(d, xl, b_labels, CAVES["hooks"][0] + len(s_code), w_labels)
     h_code = s_code + h.assemble()
     out = []
     sizes = (("hooks", h_code), ("choose", bc_code), ("after", ba_code), ("pick", x_code), ("menu", m_code),
-             ("cam", c_code), ("data", data), ("text", text), ("extra", e_code))
+             ("cam", c_code), ("data", data), ("text", text), ("extra", e_code), *v20_codes)
     for name, code in sizes:
         at, size, first = CAVES[name]
         if len(code) > size:
             raise SystemExit(f"team games, cave {name}: {len(code)} bytes; only {size} fit")
         out.append((at, first, code))
     labels = {**h.labels, "stroke": t["stroke"], "mulligan": t["mulligan"], "cam_update": c.labels["cam_update"], **{f"best_{k}": v for k, v in b_labels.items()}, **{f"pick_{k}": v for k, v in x.labels.items()},
-              **{f"data_{k}": v for k, v in d.items()}}
-    labels["_texts"] = [(HELP_IDS[k], d[f"help_{k}"]) for k in range(len(NAMES))] + \
+              **{f"data_{k}": v for k, v in d.items()}, **{f"w_{k}": v for k, v in w_labels.items()}}
+    labels["_texts"] = [(HELP_IDS[k], d[f"help_{k}"] if k in DATA_HELP_KEYS else w_labels[f"help_{k}"])
+                        for k in range(len(NAMES))] + \
         [(MSG_TEAM_HELP, d["team_help"])] + [(ALT_IDS[k], e.labels[f"alt_{k}"]) for k in range(len(ALT_IDS))]
     labels["_sizes"] = {name: len(code) for name, code in sizes}
     return out, labels
@@ -1091,12 +1777,18 @@ def overlay_patches(rel, labels, word):
                                          (STROKE_HOOK, "stroke", True), (PUTT_HOOK, "stroke", True),
                                          (MULLIGAN_HOOK, "mulligan", True), (SHOT_HOOK, "shot", False),
                                          (AFTER_HOOK, "after", False), (FACE_HOOK, "face", False),
-                                         (MENU_HOOK, "menu_scene", True), (DRAW_HOOK, "menu_draw", True)) + \
-                tuple((hook, "best_glass_env", True) for hook in BOX_ALPHA_HOOKS):
+                                         (MENU_HOOK, "menu_scene", True), (DRAW_HOOK, "menu_draw", True),
+                                         (PICKER, "w_wolf_pick", False), (SCORE, "w_wolf_score", False),
+                                         (POINTS_GET, "w_wolf_points", False), (TIE, "w_wolf_tie", True),
+                                         (MARK, "w_wolf_mark", True)) + \
+                tuple((hook, "best_glass_env", True) for hook in BOX_ALPHA_HOOKS) + \
+                tuple((hook, "w_wolf_totals", True) for hook in TOTALS):
             out.append((site, (ppc.bl if link else ppc.b)(site, labels[stub]), old))
     elif rel == "B/U/C":
         for (site, old), stub, link in ((CLEAR_SUBLIST, "clear_sublist", True), (CLEAR_DIRECT, "clear_direct", True),
-                                         (COMMIT_HOOK, "commit", False), (SUBLIST_HOOK, "sublist", False)):
+                                         (COMMIT_HOOK, "commit", False), (SUBLIST_HOOK, "w_sublist", False),
+                                         (LIST_FILL, "w_list_reset", False)) + \
+                tuple(((site, old), "w_" + stub, True) for site, old, stub in LIST_READERS):
             out.append((site, (ppc.bl if link else ppc.b)(site, labels[stub]), old))
         for k, (old, new) in enumerate(zip(SUB_COUNTS_OLD, SUB_COUNTS_NEW)):
             out.append((SUB_COUNTS + 4 * k, new, old))
@@ -1150,8 +1842,9 @@ def encode_ia4(img):
     return tiles.tobytes()
 
 
-def icon_image(kind, size=96, scale=4):
+def icon_image(name, size=96, scale=4):
     """An orange button like the Doubles list's, with golf balls (and a star for the shot the team takes)."""
+    kind = NAMES.index(name)
     from PIL import Image, ImageDraw
     s = size * scale
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
@@ -1205,6 +1898,28 @@ def icon_image(kind, size=96, scale=4):
         ball(48 * u, 42 * u, 13 * u)
         ball(24 * u, 66 * u, 11 * u)
         ball(72 * u, 66 * u, 11 * u)
+    elif kind == 3:   # Worst Ball: three shots, a blue arrow down to the one the team must play
+        ball(24 * u, 30 * u, 11 * u)
+        ball(72 * u, 30 * u, 11 * u)
+        d.polygon([(40 * u, 14 * u), (56 * u, 14 * u), (56 * u, 34 * u), (66 * u, 34 * u), (48 * u, 52 * u),
+                   (30 * u, 34 * u), (40 * u, 34 * u)], fill=(40, 120, 230, 255), outline=(0, 0, 0, 255),
+                  width=line)
+        ball(48 * u, 70 * u, 14 * u)
+    elif kind == 5:   # Wolf: a grey wolf's head under a yellow moon
+        d.ellipse((58 * u, 12 * u, 80 * u, 34 * u), fill=(255, 238, 0, 255), outline=(0, 0, 0, 255), width=line)
+        head = [(22, 14), (36, 34), (60, 34), (74, 14), (78, 46), (70, 62), (58, 78), (48, 86), (38, 78),
+                (26, 62), (18, 46)]
+        d.polygon([(x * u, y * u) for x, y in head], fill=(120, 124, 136, 255), outline=(0, 0, 0, 255),
+                  width=line)
+        for ear in ([(26, 22), (34, 34), (28, 38)], [(70, 22), (62, 34), (68, 38)]):
+            d.polygon([(x * u, y * u) for x, y in ear], fill=(240, 160, 170, 255))
+        d.polygon([(x * u, y * u) for x, y in [(40, 56), (56, 56), (58, 70), (48, 82), (38, 70)]],
+                  fill=(225, 225, 230, 255))
+        for x in (36, 60):
+            d.ellipse(((x - 6) * u, 42 * u, (x + 6) * u, 52 * u), fill=(255, 220, 0, 255), outline=(0, 0, 0, 255),
+                      width=2 * scale)
+            d.ellipse(((x - 2) * u, 44 * u, (x + 2) * u, 50 * u), fill=(0, 0, 0, 255))
+        d.ellipse((43 * u, 60 * u, 53 * u, 68 * u), fill=(20, 20, 20, 255))
     else:             # Team Scramble: a whole team's balls round the starred one
         star(48 * u, 46 * u, 26 * u, 11 * u)
         ball(48 * u, 46 * u, 12 * u)
@@ -1261,7 +1976,7 @@ def icons_file(clean_files):
         raise SystemExit(f"{ICONS}: not the 25 96x96 CMPR icons")
     import shyguy
     template = bytes(blob[hs[0][0]:hs[0][0] + 0x24])
-    new = [(template, shyguy.cmpr(icon_image(k))) for k in range(len(NAMES))]
+    new = [(template, shyguy.cmpr(icon_image(name))) for name in NAMES]
     return lz.pack(kind, append_textures(blob, new))
 
 

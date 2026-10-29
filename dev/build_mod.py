@@ -117,6 +117,9 @@ Changes (v18):
 Changes (v19):
   - Tony's impact zone is 3 frames on every club (TONY_ZONE_COLUMN 2), 1 from a worse lie.
 
+Changes (v20):
+  - Team Play gets Worst Ball (2v2) and Wolf (3 or 4 players) (teams.py: eleven more dead functions).
+
 Patch code lives over dead functions (caves 1-14 below, and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.

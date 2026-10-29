@@ -46,14 +46,24 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003287C | 864 | FUN_8003287c | v16 team games' data: the mode, members, slots, help texts, menu strings ("data") |
 | 0x80018130 | 456 | FUN_80018130 | v16 the captain's menu rows ("text") |
 | 0x800268D0 | 352 | FUN_800268d0 | v16 Doubles' own choices' help: alternate shot ("extra") |
+| 0x80054EFC | 424 | FUN_80054efc | v20 the Team Play list's own icon/help arrays (11 choices) ("list") |
+| 0x8004FBF0 | 352 | FUN_8004fbf0 | v20 Worst Ball: the worst shot ("worst") |
+| 0x8003A480 | 320 | FUN_8003a480 | v20 after every member hits; Wolf's menu commit, text buffers, camera slot ("worst2") |
+| 0x80096398 | 436 | FUN_80096398 | v20 Wolf: the shooter pick ("wpick") |
+| 0x80042AE4 | 324 | FUN_80042ae4 | v20 Wolf: running its menus ("wstep") |
+| 0x80090438 | 404 | FUN_80090438 | v20 Wolf: opening its menus ("wmenu") |
+| 0x800550A4 | 320 | FUN_800550a4 | v20 Wolf: the scoring hook, golfers' names ("wname") |
+| 0x80093460 | 392 | FUN_80093460 | v20 Wolf: a hole's end ("wscore") |
+| 0x80067068 | 324 | FUN_80067068 | v20 Wolf: a hole's points ("waward") |
+| 0x800542C8 | 364 | FUN_800542c8 | v20 Wolf: points on the panel, scorecard, results ("wshow", full) |
+| 0x800816FC | 352 | FUN_800816fc | v20 Wolf: state, points, names ("wdata") |
+| 0x8005B7E4 | 344 | FUN_8005b7e4 | v20 Worst Ball and Wolf texts ("wtext") |
 
 Still free (DEAD in `find_dead_code.py`, run on `mod\ghidra_out\golf\unreferenced.tsv`; the list above v16 only
-named the 400-byte ones): 0x8003176C (316), 0x8003A480 (320), 0x8003F8C0 (300), 0x80042AE4
-(324), 0x800463C4 (312), 0x8004FBF0 (352), 0x800542C8 (364), 0x80054EFC (424), 0x800550A4 (320), 0x80055248
-(288), 0x80057A14 (712, used by the `draws` debug patch), 0x8005B7E4 (344), 0x8005DAFC (444, `messages` debug
-patch), 0x80067068 (324), 0x8006F468 (344), 0x80073ACC (344), 0x8007C758 (304), 0x8007CCC0 (308), 0x800816FC
-(352), 0x8008C898 (300), 0x80090438 (404), 0x80093460 (392), 0x80096398 (436). Do NOT use 0x80001800: it is
-wiped before the first frame.
+named the 400-byte ones): 0x8003176C (316), 0x8003F8C0 (300), 0x800463C4 (312), 0x80055248 (288), 0x80057A14
+(712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug patch), 0x8006F468 (344), 0x80073ACC
+(344), 0x8007C758 (304), 0x8007CCC0 (308), 0x8008C898 (300). Do NOT use 0x80001800: it is wiped before the first
+frame.
 
 ## Gotchas
 
@@ -650,6 +660,49 @@ Doubles (alternate shot) is the game's only team mode; v16 bends it into Best Ba
     (alternate shot; cave "extra" at 0x800268D0).
   Checked in game: Best Ball Match and Stroke, Scramble 2v2 (also with CPUs), Team Scramble of 2, 3 and 4, the
   captain's menu, camera and see-through box, an out-of-bounds member costing nothing, plain Doubles.
+
+**v20 Worst Ball and Wolf** (`teams.py`; modes 4 and 5 in 0x8017607D; Doubles list choices 8 Worst Ball, 9 Team
+Scramble, 10 Wolf; counts 9/10/11/11 for 1-4 humans: Team Scramble from 2, Wolf from 3):
+- **The list's arrays hold 10.** `FUN_8041ca00` fills the icon/label textures at 0x8044C50C and the help values
+  right after at 0x8044C534 (10 each; 0x8044C55C is a float of the menu's), so an 11th choice would overwrite
+  help[0]. Their only readers outside the side-games code: `addi r9,r28,-0x3AF4` at 0x8041C4C0 (icon) and 0x8041C5C4
+  (label), `addi r9,r9,-0x3ACC` at 0x8041DB60 (help line). v20 turns those into `bl` loads of a pointer (cave
+  "list"), which `FUN_8041ca00`'s first instruction resets to the game's arrays and the Doubles case's end points at
+  ours (Doubles' five, then ours). 11 icons fit the 16:9 screen (centres -40..680, the bar +-420 round 320).
+- **Worst Ball** is a scramble (team record, slots, members, one stroke a round) with no captain: after the last
+  member `all_hit` takes `worst_of` at once (a ball not in the hole before a holed one, then a penalty, then the
+  farthest by distance squared times the lie weight), and a holed ball waits for the others (the team holes only
+  when everyone holes from the same spot).
+- **Wolf** is the game's Skins round (mode 2, sub-mode 3, no doubles, 3 or 4 sides, no CPUs: commit straight to
+  the course select). Skins in the round:
+  - `FUN_8046a0b8(side)` scores after every shot (and the picker calls it for every side not done, every pick);
+    `FUN_8046a134` by sub-mode: 0 stroke (result byte = strokes when holed, par x 3 and status 2 at the limit,
+    returns 6 then), 3 skins (result byte 0 = won the skin, 1 = not; ends the hole for whoever can't win it).
+  - Skins shown: `FUN_80469720(player)` (score panel `FUN_8042e448`, results values 0x805240D0 in
+    `FUN_8048a9c8`/`FUN_8048b5ec`, ranked high first): holes won, each with the tied holes before it. The
+    scorecard's setup `FUN_80472b54`/`FUN_804731ac` (iVar11 == 3 branch, joins at 0x80472FD4 / 0x8047362C)
+    totals the holes before this one into 0x80523FFC[player] and the carry into 0x80523FF8; the hole-end scorecard
+    `FUN_80473ee8` counts them up (frame 30: +1 to each winner of this hole, or +1 to the carry when nobody won,
+    `addi r9,r9,1` at 0x80474448; then every 10 frames 1 of the carry to each winner); the scorecard grid
+    (`FUN_80479fd0`) draws each hole's winner's count with `bl FUN_80489e74` at 0x8047B314 (r28 hole, r8 player).
+    The game calls skins "Points" on screen ("Carry-over Points").
+  - v20: the scoring hook runs the shot as stroke play (sub-mode word 0x804E66BC = 0 around the call), then
+    `wolf_check`: once the teams are set, anyone whose strokes + 1 can't beat their team's best holed score stops
+    (status 2); when everyone is done, each team scores its best (holed, or at the limit), and the winners get 1
+    (a Lone Wolf 2; when the Lone Wolf loses, each other player 1): result byte 0 for them, 1 for the rest (kept
+    over stroke play's later par x 3 for stopped players). `FUN_80469720` answers the points; the scorecard's totals
+    get the points before this hole and the carry = this hole's points past 1 for each winner, so the count-up adds
+    exactly the hole's points; a tie carries nothing; the grid shows each winner's points.
+  - Tee order and the Wolf (`FUN_80402f1c`'s first instruction): the picker takes tee shots by priority 2 and equal
+    distance, lowest record +0x1C1 first, so on a new hole v20 writes +0x1C1 = (player - Wolf - 1) mod n (the
+    Wolf last; Wolf = (hole + n - 1) mod n: the last player on hole 1, then 1P, ...). While a menu of ours is up it
+    returns with nobody's turn (d17 = 0xFF; the caller ignores the return). After each candidate's drive (its
+    strokes > 0) the Wolf's menu (the captain's menu's way, on the Wolf's pad, the camera on that ball) asks
+    "Wolf X: team up with Y?"; No to the last = the Lone Wolf. A notice "X is the Wolf this hole!" opens with the
+    hole (over its intro).
+  - Player +0x51EF is the golfer code; the menus name golfers from our own table (the game's names are messages).
+  Checked in game (4 players, 2 holes): tee order, the notice, the Wolf passing then taking a partner, early stops,
+  1 point each; Lone Wolf passing all three and winning 2; the scoreboard, the scorecard grid and the results.
 
 ## HUD (v3)
 
