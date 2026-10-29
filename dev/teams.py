@@ -60,7 +60,7 @@ CAVES = {            # name: (address, size, first word)
     "after": (0x800133F0, 412, 0x9421FFA8),    # Best Ball: after a shot
     "data": (0x8003287C, 864, 0x7C0802A6),
     "text": (0x80018130, 456, 0x9421FFE8),
-    "extra": (0x800268D0, 352, 0x9421FFD0),    # Doubles' own five choices' help (alternate shot)
+    "extra": (0x800268D0, 352, 0x9421FFD0),    # Doubles' own five choices' help (alternate shot); v21 row_x
     # v20: Worst Ball and Wolf
     "list": (0x80054EFC, 424, 0x7C0802A6),     # the Team Play list's own icon/help arrays (11 choices)
     "worst": (0x8004FBF0, 352, 0x7C0802A6),    # Worst Ball: the worst shot
@@ -78,6 +78,7 @@ CAVES = {            # name: (address, size, first word)
 
 MODE_BYTE = 0xA7D            # setup block (main.dol 0x80175600) + 0xA7D = 0x8017607D: unused by the game
 BEST_BALL, SCRAMBLE, TEAM_SCRAMBLE, WORST, WOLF = 1, 2, 3, 4, 5
+TEAM_WORST = 6               # v21, the setup byte only: the round plays it as WORST with one side
 
 PLAYERS, PLAYER_SIZE = 0x804ECE70, 0x5204
 PLAYER_REC, PLAYER_BALL, PLAYER_PAD, PLAYER_INDEX, PLAYER_CONTROLLER = 0x8, 0x1C, 0x4F14, 0x5160, 0x5164
@@ -152,25 +153,33 @@ SCREEN_PUSH, COURSE_LIST = 0x80439C1C, 0x80413910
 SUBLIST_HOOK = (0x8041CAE4, 0x4E800020)      # blr ending the Doubles case of FUN_8041ca00
 SUB_TEX, SUB_HELP = 0x8044C50C, 0x8044C534   # 10 ints each: icon/label texture and help (message 0x22 + value)
 SUB_COUNTS = 0x8044617C                      # Doubles' choice count for 1..4 human players (words)
-SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (9, 10, 11, 11)   # Team Scramble from 2 humans, Wolf from 3
-CHOICE_BB_MATCH, CHOICE_BB_STROKE, CHOICE_SCRAMBLE, CHOICE_WORST, CHOICE_TEAM, CHOICE_WOLF = 5, 6, 7, 8, 9, 10
+SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (9, 11, 12, 12)   # the one-team games from 2 humans, Wolf from 3
+CHOICE_BB_MATCH, CHOICE_BB_STROKE, CHOICE_SCRAMBLE, CHOICE_WORST = 5, 6, 7, 8
+CHOICE_TEAM, CHOICE_TEAM_WORST, CHOICE_WOLF = 9, 10, 11
 # The game keeps a sub-list's icons and help in two arrays of 10 (SUB_TEX, SUB_HELP, back to back); v20's 11
 # choices have their own (cave "list"), which the list's three readers load through a pointer (LIST_READERS).
 LIST_FILL = (0x8041CA00, 0x3CE08017)         # lis r7,0x8017: FUN_8041ca00's first instruction (fills the arrays)
 LIST_READERS = ((0x8041C4C0, 0x393CC50C, "tex_load"), (0x8041C5C4, 0x393CC50C, "tex_load"),   # the icons, labels
                 (0x8041DB60, 0x3929C534, "help_load"))                                         # and help line
 SUB_COUNT_DOUBLES = 5                        # Doubles' own choices
+# v21: the sub-list row lays its icons out at x = 72 i - 36 count + 356 (centred on 320; FUN_8041c2xx, the only
+# place): 12 icons ran the end ones' labels off the 16:9 screen, so 11 or more take 60 apart (60 i - 30 count + 350).
+ROW_X = (0x8041C3A0, 0x39290164)             # addi r9,r9,356 (r30 = icon, r23 = 0x80450000; cr0 is read after it)
+ROW_COUNT = 0x8044C440                       # the row's icon count
+ROW_TIGHT, ROW_STEP = 11, 60
 
 ICONS, LABELS = "B/V/V", "B/V/W"             # the sub-lists' 96x96 CMPR icons and IA4 labels (25 each)
 FIRST_TEX = 25                               # ours: 25.. in NAMES order
-NAMES = ("Best Ball Match", "Best Ball Stroke", "Scramble", "Worst Ball", "Team Scramble", "Wolf")
-HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEB)  # our help messages, answered by build_mod.py's hook
+NAMES = ("Best Ball Match", "Best Ball Stroke", "Scramble", "Worst Ball", "Team Scramble", "Team Worst Ball",
+         "Wolf")
+HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEC, 0x7FEB)  # our help messages, answered by build_mod.py's hook
 HELP_TEXTS = (
     b"\x074\x094Two-vs-two match: the best\x01ball on each hole wins it.\x00",
     b"\x074\x094Two-vs-two. Each team counts\x01its best score on every hole.\x00",
     b"\x074\x094Two-vs-two. All hit, then the\x01captain picks the ball.\x00",
     b"\x074\x094Two-vs-two. All hit, then the\x01team plays its worst ball.\x00",
     b"\x074\x094One team: everyone hits, then\x011P picks the ball to play.\x00",
+    b"\x074\x094One team: everyone hits, then\x01the team plays its worst ball.\x00",
     b"\x074\x0943-4 players. The Wolf picks a\x01partner, or goes Lone Wolf!\x00",
 )
 DATA_HELP_KEYS = (0, 1, 2, 4)                # HELP_TEXTS in cave "data" (v16's); the others are in "wtext"
@@ -819,7 +828,10 @@ def hooks_code(d, x, b, at, w):
     a.label("setup")
     a(ppc.stb(0, STATE_D16, 31), ppc.mfcr(12), ppc.mflr(10))
     a.bl(w["wolf_reset"])                     # (keeps r0, r10, r12)
-    a(ppc.mtlr(10), ppc.lbz(11, MODE_BYTE, 30))
+    a(ppc.mtlr(10), ppc.lbz(11, MODE_BYTE, 30), ppc.cmpwi(11, TEAM_WORST))
+    a.br("bne", "setup_mode")
+    a(ppc.li(11, WORST))                      # (Team Worst Ball: Worst Ball with one side)
+    a.label("setup_mode")
     _la(a, 10, d["team_mode"])
     a(ppc.stw(11, 0, 10), ppc.li(9, -1))      # (r0 is the player count the game halves next: keep it)
     _la(a, 10, d["bb_hole"])
@@ -831,7 +843,9 @@ def hooks_code(d, x, b, at, w):
     _la(a, 10, d["menu_open"])
     a(ppc.stw(9, 0, 10))
     _la(a, 10, d["starts"])
-    a(ppc.stw(9, 0, 10), ppc.cmpwi(11, TEAM_SCRAMBLE))
+    a(ppc.stw(9, 0, 10), ppc.lbz(9, MODE_BYTE, 30), ppc.cmpwi(9, TEAM_WORST))
+    a.br("beq", "setup_team")
+    a(ppc.cmpwi(11, TEAM_SCRAMBLE))
     a.br("beq", "setup_team")
     a(ppc.mtcrf(0xFF, 12), ppc.BLR)
     a.label("setup_team")                     # one shared ball: doubles on, one side
@@ -966,9 +980,11 @@ def hooks_code(d, x, b, at, w):
     # and a partner's; the partner's is whoever is up when it isn't the lead.
     a.label("face")
     _la(a, 12, d["team_mode"])
-    a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, TEAM_SCRAMBLE))
+    a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, SCRAMBLE))   # (one team: Team Scramble, Team Worst Ball)
+    a.br("blt", "face_game")
+    a(ppc.lis(12, 0x804E), ppc.lbz(11, D15 & 0xFFFF, 12), ppc.cmpwi(11, 1))
     a.br("bne", "face_game")
-    a(ppc.lis(12, 0x804E), ppc.lbz(11, D15 & 0xFFFF, 12), ppc.cmpw(3, 11))
+    a(ppc.cmpw(3, 11))
     a.br("blt", "face_game")
     a(ppc.lbz(12, D17 & 0xFFFF, 12), ppc.cmpw(12, 11))
     a.br("blt", "face_game")
@@ -1045,6 +1061,8 @@ def hooks_code(d, x, b, at, w):
     a.label("commit_ours")
     a(ppc.cmpwi(9, CHOICE_TEAM))
     a.br("beq", "commit_team")
+    a(ppc.cmpwi(9, CHOICE_TEAM_WORST))
+    a.br("beq", "commit_team_worst")
     a(ppc.cmpwi(9, CHOICE_WOLF))
     a.br("bne", "commit_teams")
     a.b(w["commit_wolf"])
@@ -1060,8 +1078,13 @@ def hooks_code(d, x, b, at, w):
     a(ppc.stb(0, MODE_BYTE, 11))
     a.label("commit_tail")                    # stroke rules: mode 0 is already set
     a.b(COMMIT_TAIL)
+    a.label("commit_team_worst")
+    a(ppc.li(0, TEAM_WORST))
+    a.br("b", "commit_team_on")
     a.label("commit_team")                    # one team of everyone: a plain stroke game, straight to the course
-    a(ppc.li(0, TEAM_SCRAMBLE), ppc.stb(0, MODE_BYTE, 11), ppc.li(3, 3))
+    a(ppc.li(0, TEAM_SCRAMBLE))
+    a.label("commit_team_on")
+    a(ppc.stb(0, MODE_BYTE, 11), ppc.li(3, 3))
     a.bl(SCREEN_PUSH)
     a.bl(COURSE_LIST)
     a.b(COMMIT_END)
@@ -1069,10 +1092,17 @@ def hooks_code(d, x, b, at, w):
 
 
 def extra_code():
-    """Doubles' own choices' help texts: alternate shot (cave "extra")."""
+    """Doubles' own choices' help texts: alternate shot (cave "extra"); v21 the row's spacing for long lists."""
     a = ppc.Asm(CAVES["extra"][0])
     for k, text in enumerate(ALT_TEXTS):
         _string(a, f"alt_{k}", text)
+    a.label("row_x")                          # (bl from ROW_X) r9 = 72 i - 36 count: the icon's x, less 356
+    a(ppc.lwz(12, ROW_COUNT - 0x80450000, 23), 0x2C800000 | 12 << 16 | ROW_TIGHT)   # cmpwi cr1,r12,ROW_TIGHT
+    a(0x41840000 | 4 * 6)                     # blt cr1, row_x_game (cr0 is the caller's)
+    a(ppc.mulli(9, 30, ROW_STEP), ppc.mulli(12, 12, ROW_STEP // 2), ppc.subf(9, 12, 9),
+      ppc.addi(9, 9, 320 + ROW_STEP // 2), ppc.BLR)
+    a.label("row_x_game")
+    a(ROW_X[1], ppc.BLR)
     return a
 
 
@@ -1188,9 +1218,9 @@ def v20_code(d, t, x, cam, L):
     a.word("tex_ptr", SUB_TEX)
     a.word("help_ptr", SUB_HELP)
     a.label("new_tex")
-    a(*([0] * 11))
+    a(*([0] * (SUB_COUNT_DOUBLES + len(NAMES))))
     a.label("new_help")
-    a(*([0] * 11))
+    a(*([0] * (SUB_COUNT_DOUBLES + len(NAMES))))
     a.label("list_reset")                     # (b from LIST_FILL) every fill starts on the game's arrays
     a.la(12, "tex_ptr")
     a(ppc.lis(11, SUB_TEX >> 16), ppc.ori(11, 11, SUB_TEX & 0xFFFF), ppc.stw(11, 0, 12),
@@ -1757,6 +1787,7 @@ def caves():
                         for k in range(len(NAMES))] + \
         [(MSG_TEAM_HELP, d["team_help"])] + [(ALT_IDS[k], e.labels[f"alt_{k}"]) for k in range(len(ALT_IDS))]
     labels["_sizes"] = {name: len(code) for name, code in sizes}
+    labels["row_x"] = e.labels["row_x"]
     return out, labels
 
 
@@ -1787,7 +1818,7 @@ def overlay_patches(rel, labels, word):
     elif rel == "B/U/C":
         for (site, old), stub, link in ((CLEAR_SUBLIST, "clear_sublist", True), (CLEAR_DIRECT, "clear_direct", True),
                                          (COMMIT_HOOK, "commit", False), (SUBLIST_HOOK, "w_sublist", False),
-                                         (LIST_FILL, "w_list_reset", False)) + \
+                                         (LIST_FILL, "w_list_reset", False), (ROW_X, "row_x", True)) + \
                 tuple(((site, old), "w_" + stub, True) for site, old, stub in LIST_READERS):
             out.append((site, (ppc.bl if link else ppc.b)(site, labels[stub]), old))
         for k, (old, new) in enumerate(zip(SUB_COUNTS_OLD, SUB_COUNTS_NEW)):
@@ -1844,7 +1875,7 @@ def encode_ia4(img):
 
 def icon_image(name, size=96, scale=4):
     """An orange button like the Doubles list's, with golf balls (and a star for the shot the team takes)."""
-    kind = NAMES.index(name)
+    kind = name
     from PIL import Image, ImageDraw
     s = size * scale
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
@@ -1882,30 +1913,30 @@ def icon_image(name, size=96, scale=4):
                   fill=(255, 255, 255, 255))
 
     u = s / 96
-    if kind == 0:     # Best Ball Match: two balls on a red-edged burst, like Match Play's
+    if kind == "Best Ball Match":  # two balls on a red-edged burst, like Match Play's
         star(48 * u, 48 * u, 42 * u, 22 * u, fill=(255, 238, 0, 255), points=8)
         d.polygon([(48 * u + 30 * u * np.cos(np.pi * k / 8 - np.pi / 2) * (1 if k % 2 == 0 else 0.55),
                     48 * u + 30 * u * np.sin(np.pi * k / 8 - np.pi / 2) * (1 if k % 2 == 0 else 0.55))
                    for k in range(16)], fill=(230, 30, 20, 255))
         ball(36 * u, 56 * u, 15 * u)
         ball(62 * u, 44 * u, 13 * u)
-    elif kind == 1:   # Best Ball Stroke: two balls, the better one under a star
+    elif kind == "Best Ball Stroke":  # two balls, the better one under a star
         star(62 * u, 34 * u, 26 * u, 11 * u)
         ball(36 * u, 60 * u, 17 * u)
         ball(62 * u, 62 * u, 13 * u)
-    elif kind == 2:   # Scramble: three shots, the team takes the starred one
+    elif kind == "Scramble":  # three shots, the team takes the starred one
         star(48 * u, 40 * u, 30 * u, 13 * u)
         ball(48 * u, 42 * u, 13 * u)
         ball(24 * u, 66 * u, 11 * u)
         ball(72 * u, 66 * u, 11 * u)
-    elif kind == 3:   # Worst Ball: three shots, a blue arrow down to the one the team must play
+    elif kind == "Worst Ball":  # three shots, a blue arrow down to the one the team must play
         ball(24 * u, 30 * u, 11 * u)
         ball(72 * u, 30 * u, 11 * u)
         d.polygon([(40 * u, 14 * u), (56 * u, 14 * u), (56 * u, 34 * u), (66 * u, 34 * u), (48 * u, 52 * u),
                    (30 * u, 34 * u), (40 * u, 34 * u)], fill=(40, 120, 230, 255), outline=(0, 0, 0, 255),
                   width=line)
         ball(48 * u, 70 * u, 14 * u)
-    elif kind == 5:   # Wolf: a grey wolf's head under a yellow moon
+    elif kind == "Wolf":  # a grey wolf's head under a yellow moon
         d.ellipse((58 * u, 12 * u, 80 * u, 34 * u), fill=(255, 238, 0, 255), outline=(0, 0, 0, 255), width=line)
         head = [(22, 14), (36, 34), (60, 34), (74, 14), (78, 46), (70, 62), (58, 78), (48, 86), (38, 78),
                 (26, 62), (18, 46)]
@@ -1920,6 +1951,13 @@ def icon_image(name, size=96, scale=4):
                       width=2 * scale)
             d.ellipse(((x - 2) * u, 44 * u, (x + 2) * u, 50 * u), fill=(0, 0, 0, 255))
         d.ellipse((43 * u, 60 * u, 53 * u, 68 * u), fill=(20, 20, 20, 255))
+    elif kind == "Team Worst Ball":   # a whole team's balls, a blue arrow down to the one it must play
+        for x, y in ((18, 26), (78, 26), (20, 62), (76, 62)):
+            ball(x * u, y * u, 9 * u)
+        d.polygon([(41 * u, 10 * u), (55 * u, 10 * u), (55 * u, 32 * u), (65 * u, 32 * u), (48 * u, 50 * u),
+                   (31 * u, 32 * u), (41 * u, 32 * u)], fill=(40, 120, 230, 255), outline=(0, 0, 0, 255),
+                  width=line)
+        ball(48 * u, 70 * u, 14 * u)
     else:             # Team Scramble: a whole team's balls round the starred one
         star(48 * u, 46 * u, 26 * u, 11 * u)
         ball(48 * u, 46 * u, 12 * u)

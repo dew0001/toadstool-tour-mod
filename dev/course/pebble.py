@@ -17,6 +17,8 @@ from shapely.ops import unary_union
 
 import osm
 
+NAME = "Pebble Beach"         # the course's name in the game
+DISC = "E"                    # its files' top folder on the disc
 # The card (yards from the regular "blue" tees, then the championship tees, par) - pebblebeach.com scorecard.
 CARD = {1: (380, 380, 4), 2: (511, 516, 5), 3: (404, 404, 4), 4: (331, 331, 4), 5: (195, 195, 3),
         6: (523, 523, 5), 7: (109, 109, 3), 8: (428, 428, 4), 9: (505, 526, 4), 10: (446, 495, 4),
@@ -41,12 +43,16 @@ def _poly(f):
 
 
 class Course:
+    COURSE_NAME = "Pebble Beach Golf Course"   # the OSM golf course
+    LODGE = (-1046, -289)     # The Lodge (x east, y south): holegen.py gives it its own walls
+    WATER_KINDS = ("water",)  # kinds drawn and played as water
+
     def __init__(self):
         data = json.load(open(os.path.join(osm.DATA, "features.json")))
         self.features = data["features"]
         self.points = data["points"]
         course = next(f for f in self.features if f["tags"].get("leisure") == "golf_course"
-                      and f["tags"].get("name") == "Pebble Beach Golf Course")
+                      and f["tags"].get("name") == self.COURSE_NAME)
         self.area = _poly(course)
         self.holes = {}
         for f in self.features:

@@ -1,6 +1,7 @@
-"""Merge the OSM tiles in pebble-data into one feature list (ways and multipolygon relations with their tags and
-coordinates), in a local metric frame (metres east, metres north of ORIGIN).
-python -I osm.py   -> pebble-data/features.json, and prints a summary of golf features."""
+"""Merge the OSM tiles in a course's data folder into one feature list (ways and multipolygon relations with their
+tags and coordinates), in a local metric frame (metres east, metres north of ORIGIN).
+The course is TTMOD_COURSE (pebble, the default, or pasadena: COURSES); every generator script follows it.
+python -I osm.py   -> <data>/features.json, and prints a summary of golf features."""
 import glob
 import json
 import math
@@ -9,8 +10,13 @@ import xml.etree.ElementTree as ET
 from collections import Counter
 
 ROOT = os.environ.get("TTMOD_ROOT", os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")))
-DATA = os.path.join(ROOT, "mod", "course-data", "pebble")   # fetch_data.py downloads it
-ORIGIN = (36.566, -121.938)   # lat, lon
+COURSES = {                   # course -> the local frame's origin (lat, lon), near the course's middle
+    "pebble": (36.566, -121.938),       # Pebble Beach Golf Links (course code 8)
+    "pasadena": (29.6165, -95.1768),    # Pasadena Municipal Golf Course, Pasadena, Texas (course code 9)
+}
+COURSE = os.environ.get("TTMOD_COURSE", "pebble")
+DATA = os.path.join(ROOT, "mod", "course-data", COURSE)   # fetch_data.py downloads it
+ORIGIN = COURSES[COURSE]      # lat, lon
 R = 6378137.0
 
 

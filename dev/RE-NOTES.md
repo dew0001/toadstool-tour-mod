@@ -25,7 +25,7 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | --- | --- | --- | --- |
 | 0x8006EAB4 | 736 | SDK torus helper | v1 widescreen stubs (ortho, matrix, aspect) |
 | 0x8003E86C | 1104 | `C_MTX44Concat` | v2 camera data block, fast-forward (v17: held C-stick up, the mod's RT, or R; was A), follow camera |
-| 0x8003AE84 | 1872 | `OSCheckActiveThreads` | v2/v3/v4 putt aim view, replay prompt, message hook, HUD anchors, see-through draw |
+| 0x8003AE84 | 1872 | `OSCheckActiveThreads` | v2/v3/v4 putt aim view, replay prompt, message hook (v21: our messages from an (id, address) table), HUD anchors, see-through draw |
 | 0x80021C60 | 2200 | printf-style formatter | v3 HUD anchor table (data only) |
 | 0x800411B8 | 1076 | FUN_800411b8 | v4 quarter-step power |
 | 0x8003CA40 | 684 | FUN_8003ca40 | v4 See-Through setting and pause-menu row |
@@ -33,9 +33,11 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x80093938 | 648 | FUN_80093938 | v6 yardage box (rounded, fitted to the number) |
 | 0x80040CE8 | 600 | FUN_80040ce8 | v7 Shy Guy's link record for the select screen, v9 his animation sound list (`--shyguy` only) |
 | 0x8003CDE4 | 540 | FUN_8003cde4 | v9 Shy Guy's power shot: sound, star burst, star colours (`--shyguy` only) |
-| 0x80069F4C | 560 | FUN_80069f4c | v11 8th course: hole info, file IDs, golf lookup and resolver stubs (`--course8` only) |
-| 0x8006A834 | 464 | FUN_8006a834 | v11 8th course: the course select list (8 entries) and the menu lookup stubs |
-| 0x80084B2C | 464 | FUN_80084b2c | v11 8th course: list append, music, sky, name, hole-in-one guard; v12 auto-aim score stub (0x80084C20) |
+| 0x80069F4C | 560 | FUN_80069f4c | v11 8th course: hole info (v21: both courses'), the golf info and ID lookups (`--course8` only) |
+| 0x8006A834 | 464 | FUN_8006a834 | v11 8th course: the course select list (7 + ours) and the menu's info lookup |
+| 0x80084B2C | 464 | FUN_80084b2c | v11 8th course: list append, music, sky, hole-in-one guard; v17 reach, v18 Star row (v12's auto-aim score and the cards moved to cave 16 in v21) |
+| 0x80073ACC | 344 | FUN_80073acc | v21 our courses' hole files and the resolver stub (course8.py cave 15) |
+| 0x8007C758 | 304 | FUN_8007c758 | v21 the menu's ID lookup, HUD cards, the auto-aim score stub, the preview movie choice, the course names (course8.py cave 16) |
 | 0x80053528 | 476 | FUN_80053528 | v13 Tony's entry in the link record, his B-only power press, impact zone and faster meter (`--tony` only) |
 | 0x80014324 | 1632 | FUN_80014324 | v16 team games: the captain's menu runner, then the hooks (`teams.py` "hooks") |
 | 0x8003BD84 | 736 | FUN_8003bd84 | v16 the captain's menu camera ("cam") |
@@ -46,7 +48,7 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003287C | 864 | FUN_8003287c | v16 team games' data: the mode, members, slots, help texts, menu strings ("data") |
 | 0x80018130 | 456 | FUN_80018130 | v16 the captain's menu rows ("text") |
 | 0x800268D0 | 352 | FUN_800268d0 | v16 Doubles' own choices' help: alternate shot ("extra") |
-| 0x80054EFC | 424 | FUN_80054efc | v20 the Team Play list's own icon/help arrays (11 choices) ("list") |
+| 0x80054EFC | 424 | FUN_80054efc | v20 the Team Play list's own icon/help arrays (v21: 12 choices) ("list") |
 | 0x8004FBF0 | 352 | FUN_8004fbf0 | v20 Worst Ball: the worst shot ("worst") |
 | 0x8003A480 | 320 | FUN_8003a480 | v20 after every member hits; Wolf's menu commit, text buffers, camera slot ("worst2") |
 | 0x80096398 | 436 | FUN_80096398 | v20 Wolf: the shooter pick ("wpick") |
@@ -61,8 +63,8 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 
 Still free (DEAD in `find_dead_code.py`, run on `mod\ghidra_out\golf\unreferenced.tsv`; the list above v16 only
 named the 400-byte ones): 0x8003176C (316), 0x8003F8C0 (300), 0x800463C4 (312), 0x80055248 (288), 0x80057A14
-(712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug patch), 0x8006F468 (344), 0x80073ACC
-(344), 0x8007C758 (304), 0x8007CCC0 (308), 0x8008C898 (300). Do NOT use 0x80001800: it is wiped before the first
+(712, used by the `draws` debug patch), 0x8005DAFC (444, `messages` debug patch), 0x8006F468 (344), 0x8007CCC0
+(308), 0x8008C898 (300). Do NOT use 0x80001800: it is wiped before the first
 frame.
 
 ## Gotchas
@@ -497,7 +499,30 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
 
 - **Course codes:** 1-7 the seven courses, 8 and 9 cut 3-hole sets no menu reaches, 10 the practice holes. The
   menu's course index is code - 1; the code goes to the round through the setup block (main.dol 0x80176079).
-  v11 makes the new course code 8.
+  v11 makes the new course code 8 (Pebble Beach), v21 code 9 (Pasadena Municipal). Their hole IDs are
+  1101 + 18 x (code - 8) + hole (1101-1118, 1119-1136); `course8.py` serves both from one set of stubs.
+- **v21, the 9th course (code 9, menu index 8).** What code 9 meets that code 8 didn't:
+  - Hole info: one table of 36 entries in cave 11 (contiguous IDs, so the ID lookup is one range); the ID-by-hole
+    stubs answer codes 8 and 9. The file IDs (6 bytes a hole) moved to cave 15 with the resolver.
+  - Course list: 9 entries in cave 12; the list append adds index 7 then 8 (`FUN_8041358c` each).
+  - Icon: `FUN_80412640` binds texture <index> of `B/W/R` (`FUN_8000c27c(0x8044ABB4, idx)`), so index 8 needs a
+    texture 8: v21 appends a 68x68 RGB5A3 one (the loader `FUN_8000bed8(0x8044ABB4, 0x9E3)` takes the bigger file).
+  - Star overlay and toggle: `DAT_80234a72 >> idx & 1`, a byte, so index 8 never has one.
+  - Name: 0xA8 + 8 = 0xB0 ("Approach Practice"); the name stubs swap 0xAF and 0xB0. Training's banner names its
+    lessons with a plain `li` (0x8048C75C), not through the course sites, so the swap can't reach it.
+  - Preview: the word at 0x8041445C (`addi r28,r9,0x3E0`, r0 = index, r9 = 0) is a `bl` to a stub: index 7 Blooper
+    Bay's A/T/F (0x3E6), else Lakitu Valley's A/T/C.
+  - Emblem table entry 9 and card switch entry 9 (was Cheep Cheep Falls' card, B/B/C) point at `F/S/B`, `F/S/A`;
+    music column 1 (Lakitu Valley); the hole-in-one guard, reach and
+    Star-row stubs test code - 8 <= 1.
+  - Sky: the loader keeps two models, the dome at loader +0x5F1C and the backdrop at +0x5F20, each drawn only when
+    set (`FUN_80006084(id)` loads one). Congo Canopy loads one model (0x8D3, B/R/L) and no backdrop. Lakitu Valley's
+    backdrop (A/X/J) has big mountains, and Blooper Bay's (B/I/L) is a sea that stands in front of anything past
+    about 1 km of flat land. So course 9 loads Blooper Bay's dome (0x6FD, B/I/K) alone and stores 0 as the
+    backdrop (cave 13 `sky_dome`, continuing at 0x804463E0); its own far land, skyline ring and refineries
+    (dev/course/industry.py) make the horizon. The camera's far plane (camera +0x34) is 12800 ft (3.9 km).
+  - Its files live under a second new top folder, `F` (holes `F/A`..`F/R`, card `F/S/A`, emblem `F/S/B`);
+    `TTMod.Build` appends any number of new folders (each with parent 0).
 - **Hole info** (par, yards, back-tee yards, course, hole number, Ring Attack group; 141 x 12 bytes): golf
   0x804CCD60, an identical copy in the menu at 0x80444E60. `FUN_80406f90(id)` finds an entry by hole ID,
   `FUN_80407048(course, hole0)` gives the hole ID (the hole order); the menu's copies are `FUN_8040094c` and
@@ -537,7 +562,8 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
   106x106 RGB5A3 texture set holding the course select icon. `FUN_8048c354` loads it by the round's course byte
   (0x804E68F4) into 0x80523E4C; Shot Practice's three lessons load 0x12BB/D/F instead. The square icon at the top left
   of the hole intro is not the emblem: it is the mode's icon, file IDs at 0x804D5FF8[mode slot 4-15].
-- **Music:** main.dol `FUN_80011a94(situation, course)`, a 16 x 7 song table; v11 plays Blooper Bay's for 8.
+- **Music:** main.dol `FUN_80011a94(situation, course)`, a 16 x 7 song table; v11 plays Blooper Bay's for 8, v21
+  Lakitu Valley's for 9.
 - **Saves:** the hole-in-one mask store (golf 0x804682F4) would wrap course 8 onto Lakitu Valley's; v11 skips it.
 - **Reach** (v17): a club's reach is `FUN_8044c344(player, club)` = `FUN_80009c58(drive, club, set)` (one call, at
   0x8044C434, for the 16 golfers' drives from 0x804D2980 + id x 0x1C and link golfers' from their record +0x1A).
@@ -546,7 +572,8 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
   the player's option bits (golf 0x804E667C + player +0x5160), which `FUN_8044c278` adds to the golfer's drive row
   (even rows normal, odd Star); `STAR_ROW_HOOK` (the `lwzx r9,r29,r9` at 0x8044C40C, r29 = row x 28; r0 live past
   it) reads the row before. Checked on Pebble Beach's 1st tee: Mario and Star Mario 262 (212 / 280 elsewhere), Tony
-  350.
+  350. v21: the bonus is per course (a float per code after the stub: Pebble 50, Pasadena 40, Andrew: "make it +20
+  except for Tony", then "+40"; both use the Star row rule: "star power should also be ignored on Pasadena").
 - **Auto-aim** (v12): every new shot starts from `FUN_804abd70(setup, player)`: yaw (setup +0x1D8) at the pin, then
   by case: pin in reach (2) the power is fitted; out of reach (3, 4) it searches the hole's collision for a landing
   spot. `FUN_804a7874` classes every collision triangle by its surface's score (method [11], called at
@@ -703,6 +730,10 @@ Scramble, 10 Wolf; counts 9/10/11/11 for 1-4 humans: Team Scramble from 2, Wolf 
   - Player +0x51EF is the golfer code; the menus name golfers from our own table (the game's names are messages).
   Checked in game (4 players, 2 holes): tee order, the notice, the Wolf passing then taking a partner, early stops,
   1 point each; Lone Wolf passing all three and winning 2; the scoreboard, the scorecard grid and the results.
+
+**v21 Team Worst Ball** (choice 10, from 2 humans; Wolf moves to 11; counts 9/11/12/12): the commit writes
+0x8017607D = 6, which only the round's `setup` reads: it plays as Worst Ball (team mode 4) with one side, as Team
+Scramble does. The score panel's face swap (`face`) now runs for any scramble-kind mode with one side.
 
 ## HUD (v3)
 

@@ -1,9 +1,10 @@
-"""Generate a Pebble Beach hole for Toadstool Tour: hole model (+0), collision (+4), flyover camera (+C).
+"""Generate a hole of a real course for Toadstool Tour: hole model (+0), collision (+4), flyover camera (+C).
 
-Real data: OSM shapes (pebble.py) on real elevation (dem.py). Frame: metres east (x) and south (y) of the hole's
-tee (pebble.Course's frame); game units are 32 ft (UNIT_M metres): game X = east, game Z = south, game Y = up.
+Real data: OSM shapes (pebble.py, pasadena.py: the course is TTMOD_COURSE, coursesite.py) on real elevation (dem.py).
+Frame: metres east (x) and south (y) of the hole's tee (pebble.Course's frame); game units are 32 ft (UNIT_M metres):
+game X = east, game Z = south, game Y = up.
 
-python -I holegen.py <out folder> [hole numbers]   -> <out>/E/<hole letter>/{A,B,C} and preview images
+python -I holegen.py <out folder> [hole numbers]   -> <out>/<disc folder>/<hole letter>/{A,B,C}
 """
 import json
 import math
@@ -24,8 +25,9 @@ import collision as col
 import dem
 import holedata
 import holeterrain as ht
+import coursesite
+import industry
 import modlink
-import pebble
 import scenery
 import textures as tx
 
@@ -48,6 +50,9 @@ TEX = {
     "foam": ("B/G/S", 1),
     "wall": ("gen", "wall"), "lodge": ("gen", "lodge"), "roof": ("gen", "roof"), "asphalt": ("gen", "asphalt"),
 }
+if getattr(coursesite.Course, "INDUSTRY", False):   # Pasadena's tanks, sheds and refineries (industry.py)
+    TEX.update({name: ("gen", name) for name in industry.GENERATED})
+    scenery.GENERATED.update(industry.GENERATED)
 TEX_ORDER = list(TEX)
 MATS = [(1.0, 1.0), (0.5, 0.5), (0.25, 0.25), (2.0, 2.0)]   # texcoord unit = 4 m: tile 4 m, 8 m, 16 m, 2 m
 # surface -> (texture, material, game surface code, zone)
@@ -111,7 +116,7 @@ def make_points(c, line):
     minx, miny, maxx, maxy = region.bounds
     outline = []
     near = line.buffer(DETAIL + 40)
-    for kind in ("green", "tee", "bunker", "fairway", "rough", "beach", "rock", "water"):
+    for kind in ("green", "tee", "bunker", "fairway", "rough", "beach", "rock") + c.WATER_KINDS:
         for p, t in c.kinds.get(kind, []):
             if p.intersects(region):
                 g = p.intersection(region)
@@ -256,7 +261,7 @@ class Hole:
 
 
 def build(n, out_dir):
-    c = build.course = getattr(build, "course", None) or pebble.Course()
+    c = build.course = getattr(build, "course", None) or coursesite.Course()
     line = c.hole(n)
     ox, oy = line.coords[0]
     pts, region = make_points(c, line)
@@ -313,7 +318,7 @@ def build(n, out_dir):
     tees = c.tees_of(n) + [Point(ox, oy).buffer(2)]    # the OSM hole line starts on the back tee
     green = c.green_of(n)
     gc = green.centroid
-    yards, back_yards, par = pebble.CARD[n]
+    yards, back_yards, par = coursesite.CARD[n]
     along = lambda p: p.centroid.distance(gc) / 0.9144     # tee to the middle of the green, yards
     regular = min(tees, key=lambda p: abs(along(p) - yards)).centroid
     back = min(tees, key=lambda p: abs(along(p) - back_yards) - 0.01 * along(p)).centroid
@@ -321,22 +326,50 @@ def build(n, out_dir):
     # ----- scenery: houses, the far landscape and sea, the mountains
     rng2 = np.random.default_rng(77 + n)
     extra = []      # (texture, material, surface code, points (k,3) metres as (x, h, y), tris, uv, rgb)
-    lodge_pt = Point(-1046, -289)     # The Lodge (x east, y south)
+    lodge_pt = Point(*c.LODGE) if c.LODGE else None   # Pebble's Lodge
     houses_coll = []
     house_parts = []
+    mid = np.array(line.interpolate(0.5, normalized=True).coords[0])
+    industrial = getattr(c, "INDUSTRY", False)
+    fine_ground = lambda x, y: dem.fine().sample(x, y)
+    if industrial:   # storage tanks (OSM circles) as tanks, hangars and industrial buildings as metal sheds
+        for poly in c.tanks:
+            if poly.intersects(region):
+                one = industry.Parts(mid)
+                industry.osm_tank(one, poly, fine_ground, rng2)
+                for part in one.parts():
+                    house_parts.append(part)
+                    if line.distance(poly) < COLL:
+                        houses_coll.append((part[3], part[4], line.distance(poly)))
     for poly, tags in c.kinds.get("building", []):
-        if not poly.intersects(region) or poly.area > 6000:
+        if industrial and tags.get("man_made") == "storage_tank":
             continue
-        lodge = poly.distance(lodge_pt) < 90 and poly.area > 400
+        shed = industrial and (tags.get("building") in ("hangar", "industrial", "warehouse")
+                               or c.industrial.contains(poly.centroid))
+        if not poly.intersects(region) or poly.area > (30000 if shed else 6000):
+            continue
+        if shed:
+            one = industry.Parts(mid)
+            industry.osm_shed(one, poly, fine_ground, rng2, tags.get("building") == "hangar")
+            for part in one.parts():
+                house_parts.append(part)
+                if line.distance(poly) < COLL:
+                    houses_coll.append((part[3], part[4], line.distance(poly)))
+            continue
+        lodge = lodge_pt is not None and poly.distance(lodge_pt) < 90 and poly.area > 400
         for kind, (P, tris_, uv_, rgb) in scenery.house_mesh(poly, lambda x, y: dem.fine().sample(x, y), rng2,
                                                              lodge).items():
             house_parts.append((kind, 3 if kind == "roof" else 0, 0x06, P, tris_, uv_, rgb))
             if line.distance(poly) < COLL:
                 houses_coll.append((P, tris_, line.distance(poly)))
-    mid = np.array(line.interpolate(0.5, normalized=True).coords[0])
     far_parts = far_landscape(c, region, pts, h, mid)
-    for d0, d1, radius, colour in ((scenery.FAR, 9000, scenery.RING_NEAR, (70, 95, 62)),
-                                   (9000, 40000, scenery.RING_FAR, (120, 140, 160))):
+    if industrial:   # refineries on the horizon
+        sky = industry.Parts(mid)
+        sites = industry.skyline(sky, mid, lambda x, y: np.maximum(scenery.elevation(x, y), 0.8), c.area, line)
+        far_parts += sky.parts() + industry.horizon_ring(mid, scenery.RING_NEAR)
+        print("refineries", sites)
+    for d0, d1, radius, colour in () if industrial else ((scenery.FAR, 9000, scenery.RING_NEAR, (70, 95, 62)),
+                                                         (9000, 40000, scenery.RING_FAR, (120, 140, 160))):
         prof = scenery.horizon(mid, 15.0, d0, d1)
         P, tris_, uv_, rgb = scenery.mountain_ring(mid, radius, prof, colour)
         if tris_:
@@ -452,15 +485,16 @@ def build(n, out_dir):
     yards = int(round(math.dist(tee_ft[0][::2], pin_ft[0][::2]) / 3))
     back_yards = int(round(math.dist(tee_ft[1][::2], pin_ft[0][::2]) / 3))
     letter = chr(65 + n - 1)
-    d = os.path.join(out_dir, "E", letter)
+    d = os.path.join(out_dir, coursesite.DISC, letter)
     os.makedirs(d, exist_ok=True)
     open(os.path.join(d, "A"), "wb").write(model)
     json.dump({"copies": [["files/" + r, so, do, ln] for r, so, do, ln in L_.prov]},
               open(os.path.join(d, "A.prov.json"), "w"))
     col.save_packed(os.path.join(d, "B"), blob, relocs)
     open(os.path.join(d, "C"), "wb").write(cam_packed)
-    info = {"hole": n, "par": pebble.CARD[n][2], "yards": yards, "back": back_yards,
-            "model": f"E/{letter}/A", "collision": f"E/{letter}/B", "flyover": f"E/{letter}/C",
+    top = coursesite.DISC
+    info = {"hole": n, "par": coursesite.CARD[n][2], "yards": yards, "back": back_yards,
+            "model": f"{top}/{letter}/A", "collision": f"{top}/{letter}/B", "flyover": f"{top}/{letter}/C",
             "points": len(pts), "triangles": len(T), "collision_triangles": len(faces),
             "model_bytes": len(L_.blob), "tees_ft": tee_ft, "pins_ft": pin_ft}
     print(json.dumps({k: v for k, v in info.items() if k not in ("tees_ft", "pins_ft")}))

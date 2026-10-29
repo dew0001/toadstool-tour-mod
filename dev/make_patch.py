@@ -1,6 +1,7 @@
 """Turn a built mod tree into a patch file (format 2): only the mod's byte changes, never game data.
 
 Usage: python -I make_patch.py <clean disc dir> <build dir> <out vN.json> <version> [--course8 <course folder>]
+                              [--course9 <course folder>]
 
 Each changed disc file becomes an "edit" op: runs of new bytes (diffed in decoded form for
 compressed files) plus the SHA-1 the patched file must have. A compressed file that changes size or
@@ -8,7 +9,7 @@ relocation table (Shy Guy's models) becomes a "rebuild" op instead: its new deco
 original moved elsewhere ("copies", so the patch carries no game data), edits on top, and the
 relocation table's edits; "base" names another file of the game to start from instead (Shy Guy's files are
 built from Koopa Troopa's). An uncompressed file that changes size (Shy Guy's voice samples) becomes a "replace"
-op with the new file in base64. A file the game doesn't have (the 8th course's, under files/E/) becomes a
+op with the new file in base64. A file the game doesn't have (our courses', under files/E/ and files/F/) becomes a
 "create" op: its decoded size, copies from "sources" (other files of the game, decoded) and the mod's own bytes as
 edits over zeros; the course generator records which ranges it copied from which game file (<file>.prov.json in
 the course folder), and "search" lists game files to look for longer matches in. The created files' own bytes
@@ -46,7 +47,7 @@ FILES = [  # (disc path, compressed?) - every file build_mod.py touches
     ("files/C/Y/T", False),
     ("files/B/T/O", False),   # the common sound set: his call on the select screen, one sample in place
     ("files/B/T/P", False),
-    ("files/B/W/R", True),    # course select icons: the 8th course's (build_mod.py --course8)
+    ("files/B/W/R", True),    # course select icons: our courses' (build_mod.py --course8, --course9)
     # Tony the Tiger, golfer 17 (build_mod.py --tony)
     ("files/C/W/F", True),
     ("files/C/W/G", True),
@@ -151,6 +152,8 @@ def create_entry(clean, rel, b, course):
     import fnmatch
     kind = b[0]
     new, end = lz.decompress(b) if kind in (1, 2) else (b, None)
+    course = next((c for c in course or () if any(fnmatch.fnmatch(rel[len("files/"):], p) for p in c["patch"])),
+                  None)   # the course folder this file comes from
     spec = course.get("patch", {}) if course else {}
     prov, search = [], []
     for pattern, how in spec.items():
@@ -207,11 +210,13 @@ def sha1(b):
 
 def main():
     clean, build, out_path, version = sys.argv[1:5]
-    course = None
-    if "--course8" in sys.argv:
-        folder = sys.argv[sys.argv.index("--course8") + 1]
-        course = json.load(open(os.path.join(folder, "course.json")))
-        course["_folder"] = folder
+    course = []
+    for flag in ("--course8", "--course9"):
+        if flag in sys.argv:
+            folder = sys.argv[sys.argv.index(flag) + 1]
+            spec = json.load(open(os.path.join(folder, "course.json")))
+            spec["_folder"] = folder
+            course.append(spec)
     patch = {"format": 2, "name": "Toadstool Tour Mod", "version": int(version), "game_id": "GFTE01",
              "new_game_id": "GFTEMD", "files": [], "clean_manifest": {}, "result_sha1": None}
     for rel, compressed in FILES:
@@ -255,7 +260,7 @@ def main():
             continue
         print(f"{rel}: {entry['op']}, {len(entry['edits'])} edit runs, {sum(len(e['hex']) // 2 for e in entry['edits'])} bytes"
               + (f", {len(entry['copies'])} copies ({moved} bytes)" if "copies" in entry else ""))
-    # files the game doesn't have (the 8th course: files/E/...)
+    # files the game doesn't have (our courses: files/E/..., files/F/...)
     for top, dirs, names in sorted(os.walk(os.path.join(build, "files"))):
         dirs.sort()
         for name in sorted(names):

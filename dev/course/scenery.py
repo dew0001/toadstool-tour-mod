@@ -15,6 +15,8 @@ import dem  # noqa: E402
 FAR = 2050.0          # far landscape radius round the hole's middle (m)
 RING_NEAR = 2150.0    # mountain rings (m)
 RING_FAR = 2300.0
+FINE_BOX = {"pebble": (-2200, 2100, -1800, 1600),        # where the fine elevation tiles have data (x, y south)
+            "pasadena": (-1400, 1450, -1850, 1850)}
 
 
 # ---------------------------------------------------------------- textures (our own art)
@@ -182,8 +184,9 @@ def elevation(x, y):
     lat_ok = None
     hf = f.sample(x, y)
     hc = dem.coarse().sample(x, y)
-    # the fine mosaic covers roughly x -2300..2200, y -1900..1700 round the origin (y south)
-    inside = (np.asarray(x) > -2200) & (np.asarray(x) < 2100) & (np.asarray(y) > -1800) & (np.asarray(y) < 1600)
+    # the fine mosaic covers roughly Pebble's x -2300..2200, y -1900..1700 round the origin (y south)
+    x0, x1, y0, y1 = FINE_BOX.get(dem.osm.COURSE, FINE_BOX["pebble"])
+    inside = (np.asarray(x) > x0) & (np.asarray(x) < x1) & (np.asarray(y) > y0) & (np.asarray(y) < y1)
     return np.where(inside, hf, hc)
 
 

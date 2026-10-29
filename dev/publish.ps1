@@ -10,6 +10,7 @@
 #     [-ShyGuyMpt <Mario Power Tennis disc for his model; default: gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso
 #      two folders above the repo; '' builds him from the OBJ in -ShyGuy instead>]
 #     [-Course8 <the 8th course's folder from dev\course\holegen.py; default: mod\course8 next to the repo; '' for none>]
+#     [-Course9 <the 9th course's folder (TTMOD_COURSE=pasadena); default: mod\course9 next to the repo; '' for none>]
 #     [-Tony <folder with Tony the Tiger's source\untitled.glb; default: assets\tony-the-tiger next to the repo; '' for none>]
 param(
 	[Parameter(Mandatory)] [int] $Version,
@@ -23,6 +24,7 @@ param(
 	[string] $ShyGuyVoice = (Join-Path $PSScriptRoot '..\..\assets\shy-guy\mario-power-tennis-shy-guy-voice.zip'),
 	[string] $ShyGuyMpt = (Join-Path $PSScriptRoot '..\..\..\gamecube_games\Mario Power Tennis (USA) (Rev 1).ciso'),
 	[string] $Course8 = (Join-Path $PSScriptRoot '..\..\mod\course8'),
+	[string] $Course9 = (Join-Path $PSScriptRoot '..\..\mod\course9'),
 	[string] $Tony = (Join-Path $PSScriptRoot '..\..\assets\tony-the-tiger')
 )
 $ErrorActionPreference = 'Stop'
@@ -46,6 +48,10 @@ if (-not $SkipBuild) {
 	if ($Course8) {
 		if (-not (Test-Path (Join-Path $Course8 'course.json'))) { throw "No 8th course at $Course8 (run dev\course\holegen.py, or pass -Course8 '')" }
 		$course = @('--course8', (Resolve-Path $Course8).Path)
+		if ($Course9) {
+			if (-not (Test-Path (Join-Path $Course9 'course.json'))) { throw "No 9th course at $Course9 (run dev\course\holegen.py with TTMOD_COURSE=pasadena, or pass -Course9 '')" }
+			$course += @('--course9', (Resolve-Path $Course9).Path)
+		}
 	}
 	$tonyArgs = @()
 	if ($Tony) {

@@ -1,9 +1,10 @@
-"""Download the real-world data the 8th course is built from, into <TTMOD_ROOT>/mod/course-data/pebble:
+"""Download the real-world data a course is built from, into <TTMOD_ROOT>/mod/course-data/<course>
+(TTMOD_COURSE, osm.py: pebble or pasadena):
 
-  - OpenStreetMap data round Pebble Beach Golf Links (16 tiles from the OSM editing API's /map call; the area is
-    over its 50,000-node limit in one piece). (c) OpenStreetMap contributors, ODbL.
+  - OpenStreetMap data round the course (tiles from the OSM editing API's /map call; Pebble's area is over its
+    50,000-node limit in one piece). (c) OpenStreetMap contributors, ODbL.
   - Elevation: Terrarium tiles from the AWS Terrain Tiles open dataset (USGS 3DEP and others; Mapzen format),
-    zoom 15 over the course and zoom 11 for the mountains round Carmel Bay.
+    zoom 15 over the course and zoom 11 for the land round it (Pebble: the mountains round Carmel Bay).
 
 Then merges the OSM tiles into features.json (osm.py). Re-running skips files already there.
 python -I fetch_data.py
@@ -18,9 +19,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import osm  # noqa: E402
 
 AGENT = "ttmod-course-data/1.0 (Toadstool Tour fan mod)"
-OSM_BOX = (36.552, -121.958, 36.580, -121.918)       # south, west, north, east
+AREAS = {   # course: (OSM box south, west, north, east; elevation tiles {zoom: (N, W, S, E)})
+    "pebble": ((36.552, -121.958, 36.580, -121.918),
+               {15: (36.582, -121.962, 36.548, -121.912), 11: (36.80, -122.10, 36.30, -121.55)}),
+    "pasadena": ((29.603, -95.188, 29.631, -95.165),
+                 {15: (29.634, -95.192, 29.599, -95.161), 11: (29.80, -95.40, 29.43, -94.95)}),
+}
+OSM_BOX, DEM = AREAS[osm.COURSE]
 OSM_STEP = (0.007, 0.010)
-DEM = {15: (36.582, -121.962, 36.548, -121.912), 11: (36.80, -122.10, 36.30, -121.55)}   # zoom: N, W, S, E
 
 
 def get(url, path):

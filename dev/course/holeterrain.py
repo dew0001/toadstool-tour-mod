@@ -16,8 +16,8 @@ from shapely import contains_xy
 from shapely.geometry import Point
 from shapely.ops import unary_union
 
+import coursesite
 import dem
-import pebble
 
 SEA, BEACH, ROCK, NATURAL, ROUGH, CUT, FAIRWAY, FRINGE, GREEN, BUNKER, TEE, PATH, ROAD, WATER, BUILDING = range(15)
 # v12: another hole's fairway, fringe and green (they play as their own surface, marked so the game's auto-aim
@@ -70,7 +70,7 @@ def classify(course, xs, ys, n=None):
     paint(greens, GREEN)
     paint([p for p, t in k.get("tee", [])], TEE)
     paint([p for p, t in k.get("bunker", [])], BUNKER)
-    paint([p for p, t in k.get("water", [])], WATER)
+    paint([p for kind in course.WATER_KINDS for p, t in k.get(kind, [])], WATER)
     roads = [ls.buffer(3.0 if kind in ("residential", "unclassified", "tertiary", "secondary", "primary",
                                        "service") else 2.0) for ls, kind in course.roads]
     paint(roads, ROAD)
@@ -89,7 +89,7 @@ def heights(course, xs, ys, codes):
 
 
 def build(n, fine=FINE, coarse=COARSE):
-    c = pebble.Course() if not hasattr(build, "course") else build.course
+    c = coursesite.Course() if not hasattr(build, "course") else build.course
     build.course = c
     line = c.hole(n)
     ox, oy = line.coords[0]

@@ -3,7 +3,8 @@
 Usage: python -I build_mod.py <clean disc dir> <build dir> [--version N] [--no-unlock] [--no-aspect-write] [--keep-id]
                               [--shyguy <folder with Shy Guy.obj and its texture>] [--shyguy-voice <zip of WAV clips>]
                               [--shyguy-mpt <Mario Power Tennis disc: his model from there instead of the OBJ>]
-                              [--course8 <course folder>] [--tony <folder with Tony the Tiger's .glb>]
+                              [--course8 <course folder>] [--course9 <course folder>]
+                              [--tony <folder with Tony the Tiger's .glb>]
 The build dir must already hold a copy of the clean tree (robocopy); this script only rewrites
 the files it changes, reading every original from <clean disc dir>.
 
@@ -120,6 +121,11 @@ Changes (v19):
 Changes (v20):
   - Team Play gets Worst Ball (2v2) and Wolf (3 or 4 players) (teams.py: eleven more dead functions).
 
+Changes (v21):
+  - Team Worst Ball (one team of 2-4) in Team Play (teams.py).
+  - With --course9 <folder> (and --course8): a 9th course, Pasadena Municipal Golf Course (course code 9; course8.py
+    serves both real courses, caves 11-13, 15 and 16; its files from dev/course with TTMOD_COURSE=pasadena).
+
 Patch code lives over dead functions (caves 1-14 below, and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -161,6 +167,7 @@ SHYGUY_VOICE = sys.argv[sys.argv.index("--shyguy-voice") + 1] if "--shyguy-voice
 SHYGUY_MPT = sys.argv[sys.argv.index("--shyguy-mpt") + 1] if "--shyguy-mpt" in sys.argv else None
 TONY = sys.argv[sys.argv.index("--tony") + 1] if "--tony" in sys.argv else None   # folder with his .glb (with --shyguy)
 COURSE8 =sys.argv[sys.argv.index("--course8") + 1] if "--course8" in sys.argv else None   # folder or "placeholder"
+COURSE9 = sys.argv[sys.argv.index("--course9") + 1] if "--course9" in sys.argv else None   # folder (v21, with --course8)
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
 
@@ -1342,18 +1349,25 @@ def cave3_code(zoom, v6, texts=(), more_messages=None):
     a(ppc.lis(3, hi), ppc.addi(3, 3, lo))
     a.label("text_ghost_done")
     a(ppc.BLR)
-    a.label("text_game")
-    for k, (msg, at) in enumerate(texts):   # v11: messages of our own, e.g. the 8th course's name (course8.py)
-        a(ppc.cmpwi(3, msg))
-        a.br("bne", f"text_more_{k}")
-        hi, lo = ppc.hi_lo(at)
-        a(ppc.lis(3, hi), ppc.addi(3, 3, lo), ppc.BLR)
-        a.label(f"text_more_{k}")
+    a.label("text_game")   # v11: messages of our own, e.g. our courses' names (course8.py); v21 from a table
+    a.la(12, "text_table")
+    a(ppc.addi(12, 12, -8))
+    a.label("text_next")
+    a(ppc.lwzu(0, 8, 12), ppc.cmpwi(0, 0))
+    a.br("beq", "text_none")
+    a(ppc.cmpw(0, 3))
+    a.br("bne", "text_next")
+    a(ppc.lwz(3, 4, 12), ppc.BLR)
+    a.label("text_none")
     if more_messages:
         a.b(more_messages)
     else:
         a(MSG_LOOKUP_FIRST)
         a.b(MSG_LOOKUP + 4)
+    a.label("text_table")   # (message id, string address) pairs, then 0
+    for msg, at in texts:
+        a(msg, at)
+    a(0)
 
     # Replaces REPLAY_CHECK (the game replays the shot on any B press). Now, on the result screen, the
     # shooter's B opens a Continue / Watch Replay menu, and only Watch Replay sets the replay flag.
@@ -1794,7 +1808,8 @@ def patch_ids(clean_sys, build_sys, clean_files, build_files):
 def main():
     args = [a for i, a in enumerate(sys.argv[1:], 1)
             if not a.startswith("--") and sys.argv[i - 1] not in ("--version", "--shyguy", "--shyguy-voice",
-                                                                    "--shyguy-mpt", "--course8", "--tony")]
+                                                                    "--shyguy-mpt", "--course8", "--course9",
+                                                                    "--tony")]
     clean, build = args[:2]
     ppc.selftest()
     proj_sites = projection_call_sites(clean)
@@ -1809,9 +1824,13 @@ def main():
     if COURSE8:
         import course8
         golf = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
-        holes, files, course_files = course8.load(COURSE8, golf)
-        course = course8.caves(holes, files)
-        print(f"caves 11-13: the 8th course ({COURSE8}), {len(holes)} holes, {len(course_files)} files")
+        loaded = [course8.load(folder, golf) for folder in (COURSE8, COURSE9) if folder]
+        course = course8.caves([(holes, files) for holes, files, _ in loaded])
+        course_files = {path: src for _, _, made in loaded for path, src in made.items()}
+        print(f"caves 11-13, 15, 16: {len(loaded)} courses of our own ({COURSE8}, {COURSE9}), {len(course_files)} files: "
+              + ", ".join(f"cave {k} {v}" for k, v in course[1]["_sizes"].items()))
+    elif COURSE9:
+        raise SystemExit("--course9 needs --course8")
     team = teams.caves()
     print("team games: " + ", ".join(f"{name} {size} of {teams.CAVES[name][1]} bytes at 0x{teams.CAVES[name][0]:08X}"
                                      for name, size in team[1]["_sizes"].items()))
@@ -1862,12 +1881,15 @@ def main():
                       (teams.BANNERS, teams.banners_file)):
         open(os.path.join(build, "files", *rel.split("/")), "wb").write(make(os.path.join(clean, "files")))
     if course:
-        open(os.path.join(build, "files", "B", "W", "R"), "wb").write(course8.icons_file(os.path.join(clean, "files")))
-        card = os.path.join(build, "files", *course8.CARD_FILE.split("/"))
-        os.makedirs(os.path.dirname(card), exist_ok=True)
-        open(card, "wb").write(course8.card_file(os.path.join(clean, "files")))
-        open(os.path.join(build, "files", *course8.EMBLEM_FILE.split("/")), "wb").write(
-            course8.emblem_file(os.path.join(clean, "files")))
+        count = course[1]["_count"]
+        open(os.path.join(build, "files", "B", "W", "R"), "wb").write(
+            course8.icons_file(os.path.join(clean, "files"), count))
+        for k in range(count):
+            card = os.path.join(build, "files", *course8.COURSES[k]["card"].split("/"))
+            os.makedirs(os.path.dirname(card), exist_ok=True)
+            open(card, "wb").write(course8.card_file(os.path.join(clean, "files"), k))
+            open(os.path.join(build, "files", *course8.COURSES[k]["emblem"].split("/")), "wb").write(
+                course8.emblem_file(os.path.join(clean, "files"), k))
     for rel, src in (course_files or {}).items():
         dst = os.path.join(build, "files", *rel.split("/"))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
