@@ -175,7 +175,7 @@ def make_points(c, line):
 
 # ---------------------------------------------------------------- heights
 
-def heights(c, pts, codes_v):
+def heights(c, pts, codes_v, start=None):
     d = dem.fine()
     h = d.sample(pts[:, 0], pts[:, 1])
     land = contains_xy(c.land, pts[:, 0], pts[:, 1])
@@ -201,10 +201,37 @@ def heights(c, pts, codes_v):
         if inside.any():
             dd = distance(p.boundary, shp_points(pts[inside]))
             h[inside] -= 0.6 * np.clip(dd / 1.5, 0, 1)
-    for p, t in c.kinds.get("tee", []):
-        inside = contains_xy(p, pts[:, 0], pts[:, 1])
-        if inside.sum() >= 3:
-            h[inside] = h[inside].mean() + 0.25
+    # v23: every tee is a level pad 0.25 m up from edge to edge (its outline points too, which v11-v22 left on the
+    # raw ground, so small tees tilted), with a 3 m ramp down to the ground round it; the hole line's start gets a
+    # pad too when no tee is there (Andrew: "check every tee box on all courses and make sure they are flat")
+    pads = [p for p, t in c.kinds.get("tee", [])]
+    if start is not None and not any(p.buffer(1.0).contains(start) for p in pads):
+        pads.append(start.buffer(3.0))
+    levels = []
+    box = Polygon.from_bounds(pts[:, 0].min(), pts[:, 1].min(), pts[:, 0].max(), pts[:, 1].max())
+    for p in pads:
+        zone = p.buffer(1.0)
+        if not zone.intersects(box):
+            continue
+        minx, miny, maxx, maxy = p.bounds
+        gx, gy = np.meshgrid(np.arange(minx, maxx + 1.0, 1.0), np.arange(miny, maxy + 1.0, 1.0))
+        gx, gy = gx.ravel(), gy.ravel()
+        inside_g = contains_xy(p, gx, gy)
+        if inside_g.any():
+            gx, gy = gx[inside_g], gy[inside_g]
+        else:
+            gx, gy = np.array([p.centroid.x]), np.array([p.centroid.y])
+        level = max(float(np.mean(d.sample(gx, gy))), 0.8) + 0.25
+        near = np.nonzero(contains_xy(zone.buffer(3.0), pts[:, 0], pts[:, 1]))[0]
+        if not len(near):
+            continue
+        dd = distance(zone, shp_points(pts[near]))
+        w = np.clip(1 - dd / 3.0, 0, 1)
+        h[near] = h[near] * (1 - w) + level * w
+        levels.append((zone, level))
+    for zone, level in levels:          # then each pad exactly level (a neighbour's ramp may have reached it)
+        inside = contains_xy(zone, pts[:, 0], pts[:, 1])
+        h[inside] = level
     return h
 
 
@@ -289,7 +316,7 @@ def build(n, out_dir):
     cen = cen[keep]
     codes_t = ht.classify(c, cen[:, 0], cen[:, 1], n)
     codes_v = ht.classify(c, pts[:, 0], pts[:, 1], n)
-    h = heights(c, pts, codes_v)
+    h = heights(c, pts, codes_v, Point(ox, oy))
     # orientation: (p1 - p0) x (p2 - p0) must point down in the game's axes (x, h, y)
     P3 = np.stack([pts[:, 0], h, pts[:, 1]], 1)
     a, b, cc = P3[T[:, 0]], P3[T[:, 1]], P3[T[:, 2]]
@@ -336,8 +363,9 @@ def build(n, out_dir):
     gc = green.centroid
     yards, back_yards, par = coursesite.CARD[n]
     along = lambda p: p.centroid.distance(gc) / 0.9144     # tee to the middle of the green, yards
-    regular = min(tees, key=lambda p: abs(along(p) - yards)).centroid
-    back = min(tees, key=lambda p: abs(along(p) - back_yards) - 0.01 * along(p)).centroid
+    synthetic = tees[-1]       # (a real tee within 8 yards of the card beats the line's start: it's a level pad)
+    regular = min(tees, key=lambda p: abs(along(p) - yards) + (8 if p is synthetic else 0)).centroid
+    back = min(tees, key=lambda p: abs(along(p) - back_yards) - 0.01 * along(p) + (8 if p is synthetic else 0)).centroid
 
     # ----- scenery: houses, the far landscape and sea, the mountains
     rng2 = np.random.default_rng(77 + n)
@@ -596,6 +624,22 @@ def place_props(c, line, region, pts, h, tri, n, regular, back, gc):
     playing = unary_union([p for k in ("fairway", "green", "tee", "bunker") for p, t in c.kinds.get(k, [])
                            if p.intersects(region)] or [Polygon()]).buffer(8)
     keep_out = unary_union([buildings.buffer(3), roads, playing])
+    # v23: nothing in front of a tee (Andrew: "tree in front of hole 2 tee box on battleground"): a 6 m circle round
+    # each tee spot and a lane widening from 12 to 33 m over the 70 m toward the hole line 150 m on
+    lanes = []
+    for t in (regular, back):
+        ahead = line.interpolate(min(line.project(t) + 150.0, line.length))
+        dx, dy = ahead.x - t.x, ahead.y - t.y
+        L = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / L, dy / L
+        nx, ny = -uy, ux
+        a0, a1 = 6.0, 16.5
+        lanes.append(Polygon([(t.x - ux * 4 + nx * a0, t.y - uy * 4 + ny * a0), (t.x + ux * 70 + nx * a1, t.y + uy * 70 + ny * a1),
+                              (t.x + ux * 70 - nx * a1, t.y + uy * 70 - ny * a1), (t.x - ux * 4 - nx * a0, t.y - uy * 4 - ny * a0)]))
+        lanes.append(t.buffer(6.0))
+    tee_lanes = unary_union(lanes)
+    keep_out = unary_union([keep_out, tee_lanes])
+    playing = unary_union([playing, tee_lanes])
     heights = {name: prop_height(name) for name in TREES}
     out = {name: [] for name in TREES}
     place_props.reach = 0.0
@@ -603,8 +647,8 @@ def place_props(c, line, region, pts, h, tri, n, regular, back, gc):
         clear = unary_union([buildings.buffer(2), roads] +
                             [p.buffer(0 if k == "fairway" else 1.5) for k in ("fairway", "green", "tee", "bunker")
                              for p, t in c.kinds.get(k, []) if p.intersects(region)] +
-                            [p for k in c.WATER_KINDS for p, t in c.kinds.get(k, []) if p.intersects(region)]
-                            or [Polygon()])
+                            [p for k in c.WATER_KINDS for p, t in c.kinds.get(k, []) if p.intersects(region)] +
+                            [tee_lanes])
         chosen, place_props.reach = forest.pick(c, line, region, clear, lambda xs, ys: contains_xy(c.land, xs, ys))
         place_props.clear = clear
         for x, y, tall, crown in chosen:

@@ -133,6 +133,11 @@ Changes (v22):
   - With --course10 and --course11 <folder> (after --course8, --course9): Battleground (Deer Park) and Timber Creek
     (Friendswood), menu indexes 9 and 10, played as course code 9 with a variant byte (course8.py, caves 18-22).
 
+Changes (v23):
+  - The aim arrows leave the wind out again (judging it is the player's skill; v22's wind also hid the arrow trail),
+    and the swing takes the D-pad plan only while the stick is centred: holding the stick shapes the shot again.
+  - Tees flattened edge to edge, no trees in front of them (dev/course: holegen, forest).
+
 Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -578,7 +583,7 @@ def cave14_code(record):
     return code, a.labels
 
 
-# ---- v22: the aim arrows show where a clean hit lands (cave 17)
+# ---- v22/v23: the aim arrows show the shot's real start line and curve (cave 17)
 # Andrew: "when shot shaping or just hitting in general the arrows arent accurate". While a human aims (views 5-10),
 # FUN_80423bbc builds a preview shot each frame (mode 6/7, the shared shot 0x805052AC) and flies it (FUN_80415790):
 # that is the arrows, the landing star and its yards. Measured (scripts\arrow_test.ps1, perfect hits): no wind and no
@@ -591,12 +596,16 @@ def cave14_code(record):
 #    FUN_80412f6c sets every frame of the meter from the control stick (0x804146B8..0x804147BC: a stick under 0.1
 #    gives none). So a D-pad plan alone was never hit, and a stick touched during the swing curved shots the arrows
 #    didn't show. For human players the swing now takes the plan (SWING_SHAPE); CPUs (port 4) and replays as before.
+# v23 (Andrew: "i wanted the flight arrows to be accurate if i move the dpad i want to see the real start line and
+# flight like there should still be skill in calculating for wind", and "add back holding the stick curves the ball"):
+# the wind is out of the preview again (v22's PREVIEW_FLAGS stub also made the arrow trail disappear: only the star
+# was drawn), and the swing takes the D-pad plan only while the stick stays in the game's dead zone (x^2 + y^2 <=
+# 0.01, the threshold at STICK_DEAD); a tilted stick shapes the shot as the game always did.
 CAVE17 = 0x80055248         # dead FUN_80055248 (find_dead_code.py: DEAD)
 CAVE17_SIZE = 288
 CAVE17_FIRST = 0x7C0802A6
-PREVIEW_FLAGS = 0x8042493C
-PREVIEW_FLAGS_WORD = 0x997D0055     # stb r11,0x55(r29); cr0 (andi. r9,r11,0x10) is live past it
-SWING_SHAPE = 0x804146B8            # first instruction of the stick read (not a replay); r0 and r9 are free here
+SWING_SHAPE = 0x804146B8            # first instruction of the stick read (not a replay); r0, r9, f0, f8, f9 are free
+STICK_DEAD = 0x804DAE90             # 0.01: the stick read's dead zone (x^2 + y^2)
 SWING_SHAPE_WORD = 0xC11F0120       # lfs f8,0x120(r31)
 SWING_SHAPE_DONE = 0x804147C0
 PLAYER_PORT = 0x5164                # player record: controller port, 4 = CPU
@@ -605,11 +614,13 @@ CPU_PORT = 4
 
 def cave17_code():
     a = ppc.Asm(CAVE17)
-    a.label("preview_flags")       # bl from PREVIEW_FLAGS: r11 = the flags, r29 = the preview shot
-    a(ppc.ori(12, 11, 1), ppc.stb(12, 0x55, 29), 0x4E800020)
     a.label("swing_shape")         # b from SWING_SHAPE: r31 = the setup
     a(ppc.lwz(9, 0x25C, 31), ppc.lwz(0, PLAYER_PORT, 9), ppc.cmpwi(0, CPU_PORT))
     a.br("beq", "swing_cpu")
+    hi, lo = ppc.hi_lo(STICK_DEAD)
+    a(ppc.lfs(8, 0x120, 31), ppc.lfs(9, 0x124, 31), ppc.fmuls(8, 8, 8), ppc.fmadds(8, 9, 9, 8))
+    a(ppc.lis(9, hi), ppc.lfs(0, lo, 9), ppc.fcmpu(8, 0))
+    a.br("bgt", "swing_cpu")      # the stick is tilted: the game's own stick shaping
     a(ppc.lwz(0, 0x21C, 31), ppc.lwz(9, 0x220, 31), ppc.stw(0, 0x224, 31), ppc.stw(9, 0x228, 31))
     a.b(SWING_SHAPE_DONE)
     a.label("swing_cpu")
@@ -1782,7 +1793,6 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
             put(buf, OVERLAY_BASE, site, new, old)
         for site, old, stub in ((BOX_HIDE_HOOK, BOX_HIDE_WORD, "box_hide"), (BOX_TEXT_HOOK, BOX_TEXT_WORD, "box_text")):
             put(buf, OVERLAY_BASE, site, ppc.bl(site, v4[stub]), old)
-        put(buf, OVERLAY_BASE, PREVIEW_FLAGS, ppc.bl(PREVIEW_FLAGS, v17["preview_flags"]), PREVIEW_FLAGS_WORD)
         put(buf, OVERLAY_BASE, SWING_SHAPE, ppc.b(SWING_SHAPE, v17["swing_shape"]), SWING_SHAPE_WORD)
         if v9:  # golfer 16 (Shy Guy) behaves like Koopa Troopa, with his own files
             for k in range(VTABLE_METHODS):
@@ -1909,7 +1919,7 @@ def main():
     print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
     print(f"cave 8: {len(cave8)} of {CAVE8_SIZE} bytes at 0x{CAVE8:08X} (yardage box 0x{v8['box_text']:08X})")
     cave17, v17 = cave17_code()
-    print(f"cave 17: {len(cave17)} of {CAVE17_SIZE} bytes at 0x{CAVE17:08X} (aim arrows: wind, D-pad spin and curve)")
+    print(f"cave 17: {len(cave17)} of {CAVE17_SIZE} bytes at 0x{CAVE17:08X} (the swing takes the D-pad spin and curve)")
     cave9 = v9 = cave10 = cave14 = None
     if TONY and not SHYGUY:
         raise SystemExit("--tony needs --shyguy (Tony is the second golfer of Shy Guy's link record)")

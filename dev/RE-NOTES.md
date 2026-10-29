@@ -164,6 +164,12 @@ run without the size filter would find more. Do NOT use 0x80001800: it is wiped 
   v22 (cave 17): the preview flies with the wind (bit 0 set at 0x8042493C) and a human's swing takes the D-pad plan
   (`b` at 0x804146B8: +0x224 / +0x228 = +0x21C / +0x220 unless the player's port, record +0x5164, is 4 = CPU).
   Checked: wind, curve and spin both ways, and a stick held during the swing all land within 1.3 ft of the star.
+  But with bit 0 set the arrow trail is no longer drawn (only the star and its yards), and Andrew wanted the wind
+  left to the player ("there should still be skill in calculating for wind") and the stick's shaping back ("add back
+  holding the stick curves the ball"). v23: no wind bit (the trail is back); the stub takes the plan only while the
+  stick is in the game's dead zone (main stick x^2 + y^2 <= 0.01, the float at 0x804DAE90), else it runs the game's
+  stick read. Checked on Lakitu 1, no wind: D-pad curve + spin with the stick left alone 0.2 ft from the star; the
+  stick held right curves the ball 9 yd off the straight arrows (the game's way); 6 mph of wind 8 yd off.
 - **v4 quarter steps** (cave 5, state block at 0x800411B8: player, club, step, quarter, quarter table):
   - `fine_step` (replaces `lbz r0,0x184(r31)` at 0x80414538): the stick moves quarters; the game's step only
     moves when they roll over. Same player, club and step as last time keeps the quarter. Not for the putter.
