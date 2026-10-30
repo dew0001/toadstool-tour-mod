@@ -59,13 +59,14 @@ FILES = [  # (disc path, compressed?) - every file build_mod.py touches
     ("files/B/V/V", True),
     ("files/B/V/W", True),
     ("files/B/V/T", True),    # the carousel's "Doubles" banner says "Team Play"
+    ("files/A/T/L", False),   # v24: the opening movie, made from the logo movie: its disc space holds new files
 ]
 MIN_COPY = 64   # shorter matches with the original stay as edits
 # Files the build makes from another file of the game: the patch starts from that one ("base"), so what they share
 # goes in as copies. Shy Guy's golfer 16 files are built from Koopa Troopa's (dev/shyguy.py SOURCES), Tony's
 # golfer 17 files from his base golfer's (dev/tony.py BASE and SOURCES: Waluigi's or Donkey Kong's).
 BASE = {"files/C/W/B": "files/C/V/S", "files/C/W/E": "files/C/V/Z", "files/B/V/K": "files/B/V/D",
-        "files/C/W/A": "files/C/V/R"}
+        "files/C/W/A": "files/C/V/R", "files/A/T/L": "files/A/T/K"}
 import tony  # noqa: E402
 BASE.update({f"files/{ours}": f"files/{theirs}" for ours, theirs in tony.SOURCES.items()})
 
@@ -74,6 +75,8 @@ def runs(old, new):
     """Byte-diff two equal-length buffers into {at, hex} runs (gaps under 8 bytes merged)."""
     if len(old) != len(new):
         raise SystemExit("decoded file changed size; use a 'rebuild' op for that")
+    if old == new:
+        return []
     out, i, n = [], 0, len(old)
     while i < n:
         if old[i] == new[i]:
@@ -96,10 +99,11 @@ def runs(old, new):
     return out
 
 
-def copies(old, new):
+def copies(old, new, base=None):
     """Runs of at least MIN_COPY bytes of `new` that are found in `old` at another place, where `new` differs from
-    `old` resized: [(from, to, length)]."""
-    base = old[:len(new)] + bytes(max(0, len(new) - len(old)))
+    `base` (default `old` resized: what the file holds before the copies): [(from, to, length)]."""
+    if base is None:
+        base = old[:len(new)] + bytes(max(0, len(new) - len(old)))
     index = {}
     for o in range(0, len(old) - 16, 2):
         key = old[o:o + 16]
@@ -147,8 +151,17 @@ def provenance_copies(sources, prov, new):
     return out
 
 
-def create_entry(clean, rel, b, course):
-    """A file the game doesn't have: its decoded bytes from copies of game files plus the mod's own edits."""
+def table_of(tables, k):
+    """Colour table k (as build_mod.py saved them: differences from the index) as the full table."""
+    import numpy as np
+    d = np.frombuffer(tables[k * 131072:(k + 1) * 131072], ">u2").astype(np.int64)
+    return ((np.arange(65536) + d) & 0xFFFF).astype(np.uint16)
+
+
+def create_entry(clean, rel, b, course, extra=None, recolours=None, tables=None):
+    """A file the game doesn't have: its decoded bytes from copies of game files plus the mod's own edits. extra:
+    game files to copy from besides the course's (v24: a costume's golfer file, whose relocation table its own
+    starts from)."""
     import fnmatch
     kind = b[0]
     new, end = lz.decompress(b) if kind in (1, 2) else (b, None)
@@ -163,20 +176,45 @@ def create_entry(clean, rel, b, course):
                 if os.path.exists(pf):
                     prov = json.load(open(pf))["copies"]
             search += how.get("search", [])
+    search += [p for p in extra or () if p not in search]
+    search += [r["src"] for r in recolours or () if r["src"] not in search]
     names = sorted({p for p, *_ in prov} | set(search))
     sources = {}
     for path in names:
         raw = open(os.path.join(clean, *path.split("/")), "rb").read()
         sources[path] = lz.decompress(raw)[0] if raw[0] in (1, 2) else raw
     moved = provenance_copies(sources, prov, new)
-    work = bytearray(len(new))
-    for path, so, do, ln in moved:
-        work[do:do + ln] = sources[path][so:so + ln]
+    if extra and not moved:   # v24 costumes: the golfer's own file in place first (a costume is mostly that file)
+        moved.append((extra[0], 0, 0, min(len(sources[extra[0]]), len(new))))
+    steps, painted = [], []
+    if recolours:           # v24 costumes: game texture bytes through a colour table, done by Play.bat (app 10)
+        import looks
+        for r in recolours:
+            chunk = bytearray(sources[r["src"]][r["from"]:r["from"] + r["len"]])
+            if len(chunk) != r["len"]:
+                raise SystemExit(f"{rel}: recolour step past the end of {r['src']}")
+            lut = table_of(tables, r["table"])
+            (looks.recolour if r["format"] == 14 else looks.recolour5a3)(chunk, 0, len(chunk), lut)
+            painted.append((r["to"], bytes(chunk)))
+            steps.append({"src": r["src"], "from": r["from"], "to": r["to"], "len": r["len"], "table": r["table"],
+                          "format": r["format"]})
+
+    def replay():           # the file as Play.bat makes it before the edits: copies (grouped by source, the groups
+        out = bytearray(len(new))   # in order of first use), then recolours
+        for group in dict.fromkeys(p for p, *_ in moved):
+            for path, so, do, ln in moved:
+                if path == group:
+                    out[do:do + ln] = sources[path][so:so + ln]
+        for to, chunk in painted:
+            out[to:to + len(chunk)] = chunk
+        return out
+    work = replay()
     for path in search:   # longer matches with game files the generator didn't record
-        for so, do, ln in copies(sources[path], bytes(new)):
+        for so, do, ln in copies(sources[path], bytes(new), bytes(work)):
             if work[do:do + ln] != new[do:do + ln]:
                 moved.append((path, so, do, ln))
                 work[do:do + ln] = sources[path][so:so + ln]
+    work = replay()
     entry = {"path": rel, "op": "create", "compressed": kind in (1, 2), "result_sha1": sha1(b)}
     if kind in (1, 2):
         entry["type"] = kind
@@ -184,12 +222,22 @@ def create_entry(clean, rel, b, course):
             table = relocation_table(b)
             if lz.pack(2, new, table) != b:
                 raise SystemExit(f"{rel}: build file is not our compressor's output")
-            entry["relocs"] = {"count": len(table) // 8, "edits": runs(bytes(len(table)), table)}
+            if extra:   # from the source file's own table (launcher app 10)
+                base_table = relocation_table(open(os.path.join(clean, *extra[0].split("/")), "rb").read())
+                padded = base_table[:len(table)] + bytes(max(0, len(table) - len(base_table)))
+                entry["relocs"] = {"base": names.index(extra[0]), "count": len(table) // 8,
+                                   "edits": runs(padded, table)}
+            else:
+                entry["relocs"] = {"count": len(table) // 8, "edits": runs(bytes(len(table)), table)}
         elif lz.pack(1, new) != b:
             raise SystemExit(f"{rel}: build file is not our compressor's output")
     entry["size"] = len(new)
     entry["sources"] = names
     entry["copies"] = [{"src": names.index(p), "from": so, "to": do, "len": ln} for p, so, do, ln in moved]
+    if steps:
+        for st in steps:
+            st["src"] = names.index(st["src"])
+        entry["recolours"] = steps
     entry["edits"] = runs(bytes(work), bytes(new))
     return entry
 
@@ -217,6 +265,14 @@ def main():
             spec = json.load(open(os.path.join(folder, "course.json")))
             spec["_folder"] = folder
             course.append(spec)
+    import costumes
+    golf = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
+    menu = lz.decompress(open(os.path.join(clean, "files", "B", "U", "C"), "rb").read())[0]
+    costume_src = costumes.sources(golf, menu)
+    steps_path = os.path.join(build, costumes.STEPS_FILE)
+    recolour_steps = json.load(open(steps_path)) if os.path.exists(steps_path) else {}
+    tables_path = os.path.join(build, costumes.TABLES_FILE)
+    recolour_tables = open(tables_path, "rb").read() if os.path.exists(tables_path) else b""
     patch = {"format": 2, "name": "Toadstool Tour Mod", "version": int(version), "game_id": "GFTE01",
              "new_game_id": "GFTEMD", "files": [], "clean_manifest": {}, "result_sha1": None}
     for rel, compressed in FILES:
@@ -249,6 +305,13 @@ def main():
                     entry["relocs"] = {"count": len(new_table) // 8, "edits": runs(padded, new_table)}
             else:
                 entry["edits"] = runs(old, new)
+        elif base != rel:   # an uncompressed file made from another game file (v24: the opening movie from the logos')
+            moved = [] if b == a[:len(b)] else copies(a, b)
+            work = bytearray(a[:len(b)] + bytes(max(0, len(b) - len(a))))
+            for src, dst, n in moved:
+                work[dst:dst + n] = a[src:src + n]
+            entry.update(op="rebuild", size=len(b), copies=[{"from": s, "to": d, "len": n} for s, d, n in moved],
+                         edits=runs(bytes(work), b))
         elif len(a) != len(b):   # a new uncompressed file of the mod's own (Shy Guy's voice samples)
             entry.update(op="replace", data=base64.b64encode(b).decode("ascii"))
         else:
@@ -268,7 +331,8 @@ def main():
             rel = os.path.relpath(path, build).replace(os.sep, "/")
             if os.path.exists(os.path.join(clean, *rel.split("/"))):
                 continue
-            entry = create_entry(clean, rel, open(path, "rb").read(), course)
+            entry = create_entry(clean, rel, open(path, "rb").read(), course, costume_src.get(rel),
+                                 recolour_steps.get(rel), recolour_tables)
             patch["files"].append(entry)
             moved = sum(c["len"] for c in entry["copies"])
             print(f"{rel}: create, {entry['size']} bytes: {len(entry['copies'])} copies ({moved} bytes) from"
@@ -287,6 +351,12 @@ def main():
     parts, at = [], 0
     for top in sorted(groups):
         part = bytearray()
+        if top == "I" and recolour_tables:     # the costumes' colour tables (65536 x u16 each)
+            base = at
+            part += recolour_tables
+            for entry in groups[top]:
+                for st in entry.get("recolours", ()):
+                    st["table"] = base + st["table"] * 131072
         for entry in groups[top]:
             spans = []
             entry["data"] = {"offset": at + len(part), "runs": spans}

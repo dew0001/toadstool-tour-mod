@@ -138,6 +138,13 @@ Changes (v23):
     and the swing takes the D-pad plan only while the stick is centred: holding the stick shapes the shot again.
   - Tees flattened edge to edge, no trees in front of them (dev/course: holegen, forest).
 
+Changes (v24):
+  - The aim arrows are a setting: an "Arrows: On/Off" row in the Start menu under See-Through (code 11, caves 6
+    and 17; a full menu gives up its Rules row for it); off, the arrow trail isn't drawn (the landing star and its
+    yards still are).
+  - The opening movie (never played by the mod) becomes a copy of the logo movie, and its disc space holds new
+    files (OPENING_MOVIE; launcher app 10).
+
 Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's and teams.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
@@ -151,6 +158,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import camelot_lz as lz  # noqa: E402
 import ppc  # noqa: E402
+import costumes  # noqa: E402
 import teams  # noqa: E402
 
 CAVE = 0x8006EAB4          # dead SDK function (GXDrawTorus-style helper)
@@ -367,6 +375,27 @@ MSG_GHOST_ITEM, MSG_GHOST_HELP = 0x10D + GHOST_ITEM, 0x118 + GHOST_ITEM
 GHOST_TEXT_ON = b"\x074\x094See-Through: On\x00"
 GHOST_TEXT_OFF = b"\x074\x094See-Through: Off\x00"
 GHOST_TEXT_HELP = b"\x074\x094See through your golfer\x01while putting.\x00"
+# ---- v24: the aim arrows on and off (Andrew: "make the arrows on and off a setting")
+# The player draw queues the arrow trail (FUN_804168fc, which adds the drawer FUN_804160f4) with the `bl` at
+# ARROWS_DRAW while a human aims a non-putt; the landing star (FUN_80448b2c) is drawn on its own. A second row in
+# the pause menu, code 11 (no game list uses it), flips arrows_on (cave 6). The menu's art has six row slots (a 7th
+# row lands in the help box), and Stroke Play's five rows plus See-Through fill them, so a full menu drops its Rules
+# row (code 1; it explains the game's own modes, wrong for the team modes anyway) for Arrows. Code 11's own messages
+# would be 0x118 (Scorecard's help) and 0x123 (Give Up's "not yet" help), so the menu's row text and help calls go
+# through stubs that give our row our own messages, and its icon load takes Controls' icon (cave 17).
+ARROWS_ITEM = 11
+PAUSE_RULES = 1
+ARROWS_DRAW = 0x80426040        # bl FUN_804168fc (r3 = the preview's flight) in the player draw
+ARROWS_DRAW_TARGET = 0x804168FC
+ARROWS_ROW_TEXT = 0x80475A18    # bl SET_TEXT for each row as the menu opens (r4 = code + 0x10D)
+ARROWS_HELP_TEXT = 0x80477890   # bl SET_TEXT for the help line as the cursor moves (r25 = menu)
+ARROWS_ICON = 0x804756A0        # lwzx r4,r9,r0: a row's icon file (r9 = the icon table 0x804D5FCC, r0 = code x 4)
+ARROWS_ICON_WORD = 0x7C89002E
+ARROWS_ICON_CODE = 2            # Controls' icon
+MSG_ARROWS_ON, MSG_ARROWS_OFF, MSG_ARROWS_HELP = 0x7FD0, 0x7FD1, 0x7FD2
+ARROWS_TEXT_ON = b"\x074\x094Arrows: On\x00"
+ARROWS_TEXT_OFF = b"\x074\x094Arrows: Off\x00"
+ARROWS_TEXT_HELP = b"\x074\x094Show the flight arrows\x01while you aim.\x00"
 # ---- v5: the zoom view goes up the aim line to the landing spot (cave 7)
 # The zoom amount (setup +0x16C) grows while the view's stick is held (about 1.15 a second; the first press jumps
 # it to about 0.13) and stays when let go. v4 kept the game's path and looked at the ground; v5 builds its own:
@@ -612,7 +641,7 @@ PLAYER_PORT = 0x5164                # player record: controller port, 4 = CPU
 CPU_PORT = 4
 
 
-def cave17_code():
+def cave17_code(v6):
     a = ppc.Asm(CAVE17)
     a.label("swing_shape")         # b from SWING_SHAPE: r31 = the setup
     a(ppc.lwz(9, 0x25C, 31), ppc.lwz(0, PLAYER_PORT, 9), ppc.cmpwi(0, CPU_PORT))
@@ -626,6 +655,45 @@ def cave17_code():
     a.label("swing_cpu")
     a(SWING_SHAPE_WORD)
     a.b(SWING_SHAPE + 4)
+
+    # v24: the arrows setting (arrows_on, cave 6). Replaces `bl FUN_804168fc` at ARROWS_DRAW: the trail is queued
+    # only while it's on.
+    on_hi, on_lo = ppc.hi_lo(v6["arrows_on"])
+    a.label("arrows_draw")
+    a(ppc.lis(12, on_hi), ppc.lwz(0, on_lo, 12), ppc.cmpwi(0, 0))
+    a.br("beq", "arrows_none")
+    a.b(ARROWS_DRAW_TARGET)
+    a.label("arrows_none")
+    a(ppc.BLR)
+    # Replaces `bl SET_TEXT` at ARROWS_ROW_TEXT: our row's text is ours (On or Off).
+    a.label("arrows_row")
+    a(ppc.cmpwi(4, 0x10D + ARROWS_ITEM))
+    a.br("bne", "arrows_set")
+    a(ppc.lis(12, on_hi), ppc.lwz(0, on_lo, 12), ppc.cmpwi(0, 0), ppc.li(4, MSG_ARROWS_OFF))
+    a.br("beq", "arrows_set")
+    a(ppc.li(4, MSG_ARROWS_ON))
+    a.label("arrows_set")
+    a.b(SET_TEXT)
+    # Replaces `bl SET_TEXT` at ARROWS_HELP_TEXT (r25 = menu): on our row the help line is ours.
+    a.label("arrows_help")
+    hi, lo = ppc.hi_lo(PAUSE_LIST)
+    a(ppc.lwz(12, PAUSE_CURSOR, 25), ppc.slwi(12, 12, 2), ppc.lis(11, hi), ppc.add(12, 12, 11), ppc.lwz(12, lo, 12),
+      ppc.cmpwi(12, ARROWS_ITEM))
+    a.br("bne", "arrows_set")
+    a(ppc.li(4, MSG_ARROWS_HELP))
+    a.b(SET_TEXT)
+    # Replaces `lwzx r4,r9,r0` at ARROWS_ICON (r0 = code x 4): our row shows Controls' icon.
+    a.label("arrows_icon")
+    a(ppc.cmpwi(0, 4 * ARROWS_ITEM))
+    a.br("bne", "arrows_icon_game")
+    a(ppc.li(0, 4 * ARROWS_ICON_CODE))
+    a.label("arrows_icon_game")
+    a(ARROWS_ICON_WORD, ppc.BLR)
+    for name, text in (("arrows_text_on", ARROWS_TEXT_ON), ("arrows_text_off", ARROWS_TEXT_OFF),
+                       ("arrows_text_help", ARROWS_TEXT_HELP)):
+        a.label(name)
+        text += b"\x00" * (-len(text) % 4)
+        a(*struct.unpack(f">{len(text) // 4}I", text))
     code = a.assemble()
     if len(code) > CAVE17_SIZE:
         raise SystemExit(f"cave 17 code is {len(code)} bytes; only {CAVE17_SIZE} fit")
@@ -1263,6 +1331,7 @@ def cave6_code():
     a = ppc.Asm(CAVE6)
     a.word("ghost_mode", GHOST_PUTTS)   # the setting (on by default; lasts until the game is turned off)
     a.word("ghost_item")                # 1 while the pause menu lists our row
+    a.word("arrows_on", 1)              # v24: the arrows setting (on by default; lasts until the game is turned off)
     for name, text in (("ghost_text_on", GHOST_TEXT_ON), ("ghost_text_off", GHOST_TEXT_OFF),
                        ("ghost_help", GHOST_TEXT_HELP)):
         a.label(name)
@@ -1289,7 +1358,29 @@ def cave6_code():
     a.label("gm_add")
     a(ppc.slwi(8, 11, 2), ppc.add(8, 8, 10), ppc.li(0, GHOST_ITEM), ppc.stw(0, 0, 8))
     a(ppc.addi(11, 11, 1), ppc.stb(11, PAUSE_COUNT, 31), ppc.li(0, 1), ppc.stw(0, 0, 12))
-    a.label("gm_done")
+    a.label("gm_done")              # v24: then the Arrows row (code 11, which no game list uses); a full menu
+    hi, lo = ppc.hi_lo(PAUSE_LIST)  # gives up its Rules row for it
+    a(ppc.lis(10, hi), ppc.addi(10, 10, lo), ppc.lbz(11, PAUSE_COUNT, 31), ppc.cmpwi(11, PAUSE_ROWS_MAX))
+    a.br("blt", "gm_arrows")
+    a(ppc.li(9, 0))
+    a.label("gm_rules")
+    a(ppc.cmpw(9, 11))
+    a.br("bge", "gm_out")           # full and no Rules row: no Arrows row
+    a(ppc.slwi(8, 9, 2), ppc.add(8, 8, 10), ppc.lwz(0, 0, 8), ppc.cmpwi(0, PAUSE_RULES))
+    a.br("beq", "gm_drop")
+    a(ppc.addi(9, 9, 1))
+    a.br("b", "gm_rules")
+    a.label("gm_drop")              # move the rows after Rules up one
+    a(ppc.addi(9, 9, 1), ppc.cmpw(9, 11))
+    a.br("bge", "gm_dropped")
+    a(ppc.slwi(8, 9, 2), ppc.add(8, 8, 10), ppc.lwz(0, 0, 8), ppc.stw(0, -4, 8))
+    a.br("b", "gm_drop")
+    a.label("gm_dropped")
+    a(ppc.addi(11, 11, -1))
+    a.label("gm_arrows")
+    a(ppc.slwi(8, 11, 2), ppc.add(8, 8, 10), ppc.li(0, ARROWS_ITEM), ppc.stw(0, 0, 8), ppc.addi(11, 11, 1),
+      ppc.stb(11, PAUSE_COUNT, 31))
+    a.label("gm_out")
     a(ppc.lwz(31, 12, 1), ppc.lwz(0, 20, 1), ppc.mtlr(0), ppc.addi(1, 1, 16), ppc.BLR)
 
     # Replaces `bl PAUSE_RUN_TARGET` just before the menu runs the chosen row (r25 = menu). Our row flips the
@@ -1297,13 +1388,15 @@ def cave6_code():
     a.label("ghost_select")
     a(ppc.stwu(1, -16, 1), ppc.mflr(0), ppc.stw(0, 20, 1))
     a.bl(PAUSE_RUN_TARGET)
+    hi, lo = ppc.hi_lo(PAUSE_LIST)
+    a(ppc.lwz(10, PAUSE_CURSOR, 25), ppc.slwi(10, 10, 2), ppc.lis(11, hi), ppc.addi(11, 11, lo), ppc.add(11, 11, 10),
+      ppc.lwz(0, 0, 11), ppc.cmpwi(0, ARROWS_ITEM))
+    a.br("beq", "gs_arrows")
+    a(ppc.cmpwi(0, GHOST_ITEM))
+    a.br("bne", "gs_game")
     a.la(12, "ghost_item")
     a(ppc.lwz(0, 0, 12), ppc.cmpwi(0, 0))
     a.br("beq", "gs_game")
-    hi, lo = ppc.hi_lo(PAUSE_LIST)
-    a(ppc.lwz(10, PAUSE_CURSOR, 25), ppc.slwi(10, 10, 2), ppc.lis(11, hi), ppc.addi(11, 11, lo), ppc.add(11, 11, 10),
-      ppc.lwz(0, 0, 11), ppc.cmpwi(0, GHOST_ITEM))
-    a.br("bne", "gs_game")
     a.la(12, "ghost_mode")
     a(ppc.lwz(0, 0, 12), ppc.cmpwi(0, GHOST_OFF), ppc.li(0, GHOST_PUTTS))
     a.br("beq", "gs_set")
@@ -1315,6 +1408,16 @@ def cave6_code():
     a.bl(SET_TEXT)
     a(ppc.lwz(3, PAUSE_HELP, 25), ppc.li(4, MSG_GHOST_HELP), ppc.li(5, 0), ppc.li(6, 0x20), ppc.li(7, 2))
     a.bl(SET_TEXT)
+    a.br("b", "gs_menu")
+    a.label("gs_arrows")            # v24: the Arrows row flips its setting and shows the new text
+    a.la(12, "arrows_on")
+    a(ppc.lwz(0, 0, 12), ppc.cmpwi(0, 0), ppc.li(0, 1), ppc.li(4, MSG_ARROWS_ON))
+    a.br("beq", "gs_arrows_set")
+    a(ppc.li(0, 0), ppc.li(4, MSG_ARROWS_OFF))
+    a.label("gs_arrows_set")
+    a(ppc.stw(0, 0, 12), ppc.add(10, 10, 25), ppc.lwz(3, PAUSE_ROWS, 10), ppc.li(5, 0), ppc.li(6, 0x20), ppc.li(7, 3))
+    a.bl(SET_TEXT)
+    a.label("gs_menu")
     hi, lo = ppc.hi_lo(PAUSE_RUN_DEFAULT)
     a(ppc.addi(1, 1, 16), ppc.lis(12, hi), ppc.addi(12, 12, lo), ppc.mtlr(12), ppc.BLR)
     a.label("gs_game")
@@ -1710,7 +1813,7 @@ def check_matrix_site(buf, base, hook):
 
 
 def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None,
-              cave10=None, course=None, cave14=None, team=None, cave17=None):
+              cave10=None, course=None, cave14=None, team=None, cave17=None, costume=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1721,7 +1824,7 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
                               (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9),
                               (CAVE10, CAVE10_FIRST, cave10), (CAVE14, CAVE14_FIRST, cave14),
                               (CAVE17, CAVE17_FIRST, cave17)) + \
-            tuple(course[0] if course else ()) + tuple(team[0] if team else ()):
+            tuple(course[0] if course else ()) + tuple(team[0] if team else ()) + tuple(costume[0] if costume else ()):
         if code is None:
             continue
         if word(data, base, addr) != first:  # still the original (dead) function
@@ -1755,7 +1858,8 @@ def float_word(v):
     return struct.unpack(">I", struct.pack(">f", v))[0]
 
 
-def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None, team=None, v17=None):
+def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None, team=None, v17=None,
+                  costume=None):
     raw = open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     kind, _ = lz.header(raw)
     blob, _ = lz.decompress(raw)
@@ -1794,6 +1898,10 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
         for site, old, stub in ((BOX_HIDE_HOOK, BOX_HIDE_WORD, "box_hide"), (BOX_TEXT_HOOK, BOX_TEXT_WORD, "box_text")):
             put(buf, OVERLAY_BASE, site, ppc.bl(site, v4[stub]), old)
         put(buf, OVERLAY_BASE, SWING_SHAPE, ppc.b(SWING_SHAPE, v17["swing_shape"]), SWING_SHAPE_WORD)
+        for site, target, stub in ((ARROWS_DRAW, ARROWS_DRAW_TARGET, "arrows_draw"), (ARROWS_ROW_TEXT, SET_TEXT, "arrows_row"),
+                                   (ARROWS_HELP_TEXT, SET_TEXT, "arrows_help")):
+            put(buf, OVERLAY_BASE, site, ppc.bl(site, v17[stub]), ppc.bl(site, target))
+        put(buf, OVERLAY_BASE, ARROWS_ICON, ppc.bl(ARROWS_ICON, v17["arrows_icon"]), ARROWS_ICON_WORD)
         if v9:  # golfer 16 (Shy Guy) behaves like Koopa Troopa, with his own files
             for k in range(VTABLE_METHODS):
                 koopa = word(buf, OVERLAY_BASE, KOOPA_VTABLE + 4 * k)
@@ -1847,6 +1955,9 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
     if team:     # v16: Best Ball and Scramble (teams.py)
         for addr, new, old in teams.overlay_patches(rel, team[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
+    if costume:  # v24: Halloween costumes (costumes.py)
+        for addr, new, old in costumes.overlay_patches(rel, costume[1], lambda a: word(buf, OVERLAY_BASE, a)):
+            put(buf, OVERLAY_BASE, addr, new, old)
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -1868,6 +1979,14 @@ def patch_ids(clean_sys, build_sys, clean_files, build_files):
     bnr[long_name:long_name + 0x40] = BANNER_TITLE.ljust(0x40, b"\x00")
     open(os.path.join(build_files, "opening.bnr"), "wb").write(bnr)
     print(f"game ID {boot[:6].decode()}, banner title {BANNER_TITLE.decode()!r}")
+
+
+# ---- v24: disc space. The free area between the file table and the first file was down to 11.6 MB (v23). The
+# opening movie A/T/L (276 MB) plays only at boot, which v2 skips (traced with Dolphin's FileMon log: the clean game
+# opens it at boot; the mod never does, title idle included), so it becomes a copy of the logo movie A/T/K (4.5 MB;
+# whatever might still play it gets a real movie) and TTMod.Build (launcher app 10) puts new and grown files in the
+# space it frees once the free area is full. A/T/N (260 MB, likely the ending) stays.
+OPENING_MOVIE, LOGO_MOVIE = "A/T/L", "A/T/K"
 
 
 def main():
@@ -1901,10 +2020,20 @@ def main():
     elif COURSE9:
         raise SystemExit("--course9 needs --course8")
     team = teams.caves()
+    golf_clean = lz.decompress(open(os.path.join(clean, "files", "C", "L", "V"), "rb").read())[0]
+    menu_clean = lz.decompress(open(os.path.join(clean, "files", "B", "U", "C"), "rb").read())[0]
+    have = {g: k for g, k in costumes.kinds_of(golf_clean).items()
+            if g < 16 or (g == 16 and SHYGUY) or (g == 17 and TONY)}
+    costume = costumes.caves(golf_clean, menu_clean, have)
+    print("costumes: " + ", ".join(f"cave {name} {size} of {costumes.CAVES[name][1]} bytes at 0x{costumes.CAVES[name][0]:08X}"
+                                   for name, size in costume[1]["_sizes"].items()) + f", {len(have)} golfers")
     print("team games: " + ", ".join(f"{name} {size} of {teams.CAVES[name][1]} bytes at 0x{teams.CAVES[name][0]:08X}"
                                      for name, size in team[1]["_sizes"].items()))
-    cave3, v3 = cave3_code(v7["zoom"], v6, (course8.texts(course[1]) if course else []) + teams.texts(team[1]),
-                           teams.message_hook(team[1]))
+    cave17, v17 = cave17_code(v6)
+    arrows_texts = [(MSG_ARROWS_ON, v17["arrows_text_on"]), (MSG_ARROWS_OFF, v17["arrows_text_off"]),
+                    (MSG_ARROWS_HELP, v17["arrows_text_help"])]
+    cave3, v3 = cave3_code(v7["zoom"], v6, (course8.texts(course[1]) if course else []) + teams.texts(team[1])
+                           + arrows_texts, teams.message_hook(team[1]))
     cave, stubs = build_cave()
     cave2, v2 = cave2_code(v3["aim_place"])
     print(f"cave 2: {len(cave2)} of {CAVE2_SIZE} bytes at 0x{CAVE2:08X} (fast-forward 0x{v2['ff']:08X},"
@@ -1918,8 +2047,8 @@ def main():
           f" pause menu row 0x{v6['ghost_menu']:08X})")
     print(f"cave 7: {len(cave7)} of {CAVE7_SIZE} bytes at 0x{CAVE7:08X} (zoom view 0x{v7['zoom']:08X})")
     print(f"cave 8: {len(cave8)} of {CAVE8_SIZE} bytes at 0x{CAVE8:08X} (yardage box 0x{v8['box_text']:08X})")
-    cave17, v17 = cave17_code()
-    print(f"cave 17: {len(cave17)} of {CAVE17_SIZE} bytes at 0x{CAVE17:08X} (the swing takes the D-pad spin and curve)")
+    print(f"cave 17: {len(cave17)} of {CAVE17_SIZE} bytes at 0x{CAVE17:08X} (the swing takes the D-pad spin and curve,"
+          f" the arrows setting's stubs and texts)")
     cave9 = v9 = cave10 = cave14 = None
     if TONY and not SHYGUY:
         raise SystemExit("--tony needs --shyguy (Tony is the second golfer of Shy Guy's link record)")
@@ -1944,10 +2073,10 @@ def main():
         print(f"cave 10: {len(cave10)} of {CAVE10_SIZE} bytes at 0x{CAVE10:08X} (Shy Guy's power shot"
               f" 0x{v10['power_burst']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14, team, cave17)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14, team, cave17, costume)
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course,
-                      team, v17)
+                      team, v17, costume)
     for rel, make in ((teams.ICONS, teams.icons_file), (teams.LABELS, teams.labels_file),
                       (teams.BANNERS, teams.banners_file)):
         open(os.path.join(build, "files", *rel.split("/")), "wb").write(make(os.path.join(clean, "files")))
@@ -1967,12 +2096,29 @@ def main():
         shutil.copyfile(src, dst)
     patch_ids(os.path.join(clean, "sys"), os.path.join(build, "sys"),
               os.path.join(clean, "files"), os.path.join(build, "files"))
+    shutil.copyfile(os.path.join(clean, "files", *LOGO_MOVIE.split("/")),
+                    os.path.join(build, "files", *OPENING_MOVIE.split("/")))
     if SHYGUY:
         made = shyguy.build(os.path.join(clean, "files"), SHYGUY, SHYGUY_VOICE, SHYGUY_MPT)
         if TONY:
             made.update(tony.build(os.path.join(clean, "files"), TONY, made))
         for rel, data in made.items():
             open(os.path.join(build, "files", *rel.split("/")), "wb").write(data)
+    # v24: every golfer's costume (Shy Guy's and Tony's from their models as built above). The recolour steps and
+    # colour tables go next to the build for make_patch.py (the patch has Play.bat do the recolouring).
+    worn, steps, tables = costumes.build(os.path.join(clean, "files"), golf_clean, menu_clean, made if SHYGUY else {})
+    for rel, data in worn.items():
+        dst = os.path.join(build, "files", *rel.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        open(dst, "wb").write(data)
+    import json
+    keys = sorted(tables)
+    json.dump({f"files/{rel}": [{"src": f"files/{src}", "from": a, "to": b, "len": n, "table": keys.index(t),
+                                 "format": t[1]} for src, a, b, n, t in ops] for rel, ops in steps.items()},
+              open(os.path.join(build, costumes.STEPS_FILE), "w"), indent=0)
+    open(os.path.join(build, costumes.TABLES_FILE), "wb").write(b"".join(tables[k] for k in keys))
+    print(f"costumes: {len(worn)} files under I/ ({sum(len(d) for d in worn.values()) / 1e6:.1f} MB),"
+          f" {sum(len(v) for v in steps.values())} recolour steps, {len(tables)} colour tables")
 
 
 if __name__ == "__main__":

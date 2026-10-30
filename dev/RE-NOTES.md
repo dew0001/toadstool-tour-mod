@@ -28,7 +28,7 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003AE84 | 1872 | `OSCheckActiveThreads` | v2/v3/v4 putt aim view, replay prompt, message hook (v21: our messages from an (id, address) table), HUD anchors, see-through draw |
 | 0x80021C60 | 2200 | printf-style formatter | v3 HUD anchor table (data only) |
 | 0x800411B8 | 1076 | FUN_800411b8 | v4 quarter-step power |
-| 0x8003CA40 | 684 | FUN_8003ca40 | v4 See-Through setting and pause-menu row |
+| 0x8003CA40 | 684 | FUN_8003ca40 | v4 See-Through setting and pause-menu row; v24 the Arrows setting and row |
 | 0x800757BC | 704 | FUN_800757bc | v5 zoom view camera |
 | 0x80093938 | 648 | FUN_80093938 | v6 yardage box (rounded, fitted to the number) |
 | 0x80040CE8 | 600 | FUN_80040ce8 | v7 Shy Guy's link record for the select screen, v9 his animation sound list (`--shyguy` only) |
@@ -60,7 +60,7 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x800542C8 | 364 | FUN_800542c8 | v20 Wolf: points on the panel, scorecard, results ("wshow", full) |
 | 0x800816FC | 352 | FUN_800816fc | v20 Wolf: state, points, names ("wdata") |
 | 0x8005B7E4 | 344 | FUN_8005b7e4 | v20 Worst Ball and Wolf texts ("wtext") |
-| 0x80055248 | 288 | FUN_80055248 | v22 cave 17: the aim arrows (the preview's wind flag, the swing takes the D-pad's spin and curve) |
+| 0x80055248 | 288 | FUN_80055248 | v22 cave 17: the aim arrows (the swing takes the D-pad's spin and curve); v24 the Arrows setting's stubs and texts (268 used) |
 | 0x8003F8C0 | 300 | FUN_8003f8c0 | v22 course 2's hole info (Battleground), the golf info lookup (course8.py cave 18) |
 | 0x8008C898 | 300 | FUN_8008c898 | v22 course 3's hole info (Timber Creek), the golf ID lookup (cave 19) |
 | 0x800463C4 | 312 | FUN_800463c4 | v22 courses 2 and 3's hole files, the menu's ID lookup (cave 20) |
@@ -649,6 +649,47 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
   so the course's files live under a new top-level folder `E` (IDs from 5408). `TTMod.Build` appends them to the
   file table (0x20440, free space up to 0x28000) and updates boot.bin's FST size.
 
+## Costumes (v24)
+
+Halloween costumes: Y on the character select puts the picking player's golfer in costume (`costumes.py` caves
+"data" 0x80023518, "menu" 0x80037EDC, "round" 0x80023188; the looks in `looks.py`).
+- **Select screen.** `FUN_8040b9ec` reads the pad's new presses in r30; Y (0x800) is never read there. The Star (R,
+  0x20) and lefty (L, 0x40) checks start at 0x8040CBE0 / 0x8040CC64 (per-player words 0x8044BA68 / 0x8044BA90 by
+  the picking player 0x8044BA44). Our stub on 0x8040CC64 (`lwz r0,-17744(r31)`, the page flag) flips the player's
+  costume word on Y and jumps to 0x8040D3C0, the cursor-move tail: cursor sound, `FUN_8040a76c` (show the golfer
+  under the cursor: flips 0x8044BA34 between model slots 4 and 5 and requests the golfer there), and at
+  0x8040D3EC the other slot (state 2) is set to 3 (unload). Model slots: `FUN_804031c8`, 6 of 0xA8 at 0x804490E4
+  (+0x58 state: -1 idle, 0 load, 1 loading, 2 shown, 3-5 unloading; +0x94 the character code); state 0 loads
+  0x804459A0[code] (`lwzx r4,r11,r9` at 0x80403224, r31 = slot, then `bl FUN_8000f044`). Slots 0-3 are per player
+  on the team and CPU screens, 4/5 the character select's.
+- **Option byte.** 0x80176044 + player: bit 0 Star, 1 lefty (picking: `FUN_8040b56c`, which clears and rewrites it,
+  then `bl FUN_800130f8` at 0x8040B6B0), bit 2 human / bit 3 CPU (course select commit). The round's copy is
+  0x804E667C + player (+0x5160 = index): player +0x51EE = lefty, +0x51ED = bit 2 | bit 3 >> 2 (2 = CPU). Debug
+  names: [AB][NS]-(RIGHT|LEFT). v24 uses bit 4 (0x10) = costume.
+- **Round.** `FUN_80426104(player, index, port)` makes each golfer (`bl FUN_804074a8` at 0x80426240, r31 = player;
+  players are made in rank order, not index order) and asks its vtable [22] model, [23] bank, [24] second model
+  (methods `lis r3,0; addi r3,r3,ID; blr`, r3 = the object; again in state 3, `FUN_80423bbc`). Golfers 2 (Peach)
+  and 8 (Yoshi) have neither bank nor second model ([23] the shared `li r3,-1`, [24] another function). v24
+  rewrites each simple method as `mr r4,r3; li r3,ID; b costume_map` and notes costume players' objects at
+  0x80426240 (dropping old entries at the same address). Golfer 7 (Birdo) is vtable 0x804CA770 (constructor
+  `FUN_804c1e18`), files C/T/U, C/T/T, C/T/X.
+- **The opening movie** is A/T/L (276 MB; Dolphin's FileMon log: the clean game opens it at boot after the logos
+  A/T/K; the mod never opens it, title idle included, since v2 skips the loop). A/T/N (260 MB) is likely the
+  ending. v24 makes A/T/L a copy of A/T/K and TTMod.Build fills the freed space.
+- **Rigid groups** draw through the bone's animated matrix times its +0x04 matrix. In most models +0x04 is the
+  inverse of the bone's rest pose (vertices in model space), but some select screen models store another (Petey's
+  B/V/J, Tony's B/V/L, DK's B/U/Z): our vertices go through inverse(+0x04) * inverse(rest) first. Select
+  screen skeletons can also be laid out or posed differently from the in-round ones (Peach's lacks two root
+  bones, DK's is crouched, Petey's is compressed): pieces are carried by vertices paired by texcoord (the same mesh).
+- **Texture sets** (model root +0x8C): +4 count, +8 offset of the (header offset, 0) pairs (always 0xC), headers of
+  0x24 right after the pairs. To add one, move the header right after the pairs to the end of the module. A
+  header's +8 is the data: high bit = in the golfer's bank file, else from the set's start. Golf models mix both.
+- **Not skin matrices:** model instance +0x30 (player +0x518C's) holds pose data per matrix slot (a unit
+  quaternion first), not the skin matrices.
+- **Testing a look from the front:** the aim camera's right stick only tilts it while held; Dolphin's Free Look
+  (test profiles: FreeLook.ini [General] Enabled, BackgroundInput; pad 2 moves/turns it) gives any view
+  (`scripts\costume_front.ps1`).
+
 ## Menus
 
 - **Post-shot menu** `FUN_80483564(menu, type, pad)` / `FUN_804835f4`: +0x46 option count, +0x50/+0x54/+0x58
@@ -665,6 +706,20 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
 - v4 adds code 10 as "See-Through: On/Off" when the list has room and doesn't use 10 (`ghost_menu` on both
   `FUN_80473918` calls; `ghost_select` on the `bl FUN_80019bf8` at 0x80476E48 toggles and re-shows the texts,
   then returns to 0x80477894). The message hook supplies its texts while it's listed.
+- The menu opens in `FUN_80475504`: the icons (file IDs `0x804D5FCC[code]`, `lwzx r4,r9,r0` at 0x804756A0, handles
+  at 0x80523E70 + 4 x row), the rows' texts (`bl FUN_80024cfc` at 0x80475A18, r4 = code + 0x10D), the help line
+  (0x80475A74, list[0] + 0x118). Moving the cursor re-shows the help (`bl FUN_80024cfc` at 0x80477890, r25 = menu,
+  r9 = list[cursor], or 11 for Give Up before the first stroke: message 0x123). Only the highlighted row's icon is
+  drawn (big, at a fixed spot). Rows are at y = 150 + 28 x row (float 0x804E045C; the cursor moves by 28.0, 0x804DFDFC),
+  the help line at 336 (0x804E0468), and the menu's art has six row slots with lines between them: a 7th row lands
+  in the help box (checked). Codes 11 and up have no messages of their own (0x10D + 11 is 0x118, Scorecard's help),
+  and the icon table runs on into the mode icons (0x804D5FF8). The game's lists hold 5 rows at most.
+- v24 adds code 11, "Arrows: On/Off", after See-Through (cave 6 `ghost_menu` / `gs_arrows`, cave 17); a full menu
+  (Stroke Play: 5 rows + See-Through) drops its Rules row (code 1) for it. The row text and help calls above go
+  through stubs that give it messages 0x7FD0-0x7FD2, its icon load takes
+  Controls' (code 2), and while it's off the player draw's `bl FUN_804168fc` at 0x80426040 (queues the arrow trail,
+  drawer `FUN_804160f4`, while a human aims a non-putt) is skipped; the landing star (`FUN_80448b2c` at
+  0x80425FDC) still draws.
 
 ## Team games (v16 Best Ball and Scramble)
 

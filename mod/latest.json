@@ -1,15 +1,15 @@
 {
   "name": "Toadstool Tour Mod",
-  "version": 23,
-  "patch": "mod/patches/v23.json",
-  "patch_sha256": "4c39e2bc8f7c085569ae8b6f88765e161d06c9f25e3431d00403ebbb89b68ead",
-  "result_sha1": "6cb6ad3b1c545e33d1c62e1036f4c88109dc5f20",
-  "app_version": 9,
+  "version": 24,
+  "patch": "mod/patches/v24.json",
+  "patch_sha256": "99438684e381076879f42bcbcede934c2d9298d55e567837d2ca9e15bdd4618b",
+  "result_sha1": "d1c3ab17964867bd119dbe149ff04a397787923c",
+  "app_version": 10,
   "app_files": {
     "app/play.ps1": "d3a6ec83dbe0f0f6d2cc0aefce755bb17f81d0de8377f77cdbc4224cfdb463fa",
-    "app/common.ps1": "894dfde7080aaca161371a93608b8778cbddac2fe366269a297764e8ffb79011",
-    "app/TTMod.cs": "05f55300f74450e1bb6cd95e5916a5c3405fa949e0f2d10da587e68fdb2b439a",
-    "app/version.txt": "2e6d31a5983a91251bfae5aefa1c0a19d8ba3cf601d0e8a706b4cfa9661a6b8a"
+    "app/common.ps1": "0955b809305021d144ec4fc3c96c5752302d063647513c68ee628fc4e3b16e8a",
+    "app/TTMod.cs": "27f007343a86894d09797499402c69c28cab7efdd85b7b409743cae2dc22a443",
+    "app/version.txt": "917df3320d778ddbaa5c5c7742bc4046bf803c36ed2b050f30844ed206783469"
   },
   "dolphin": "2606a",
   "textures": {

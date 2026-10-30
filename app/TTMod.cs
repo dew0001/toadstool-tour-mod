@@ -270,6 +270,7 @@ public static class TTMod
 
     // Write a complete disc image: Nintendo's layout kept, changed files rewritten in place or, if
     // they grew, moved into the empty area between the file table and the first file (as are new files).
+    // When that area is full, they go into the space a file that shrank no longer uses (first fit, in disc order).
     // Everything not written is zero, so the result depends only on file contents (identical for every friend).
     public static void Build(Source s, Disc d, Dictionary<string, byte[]> changed, string outPath)
     {
@@ -291,13 +292,15 @@ public static class TTMod
 
         long lowest = d.DolOffset;
         foreach (Entry e in d.Files) lowest = Math.Min(lowest, e.Offset);
-        long freeAt = Align(Math.Max(0x2440 + d.Apploader.Length, d.FstOffset + fst.Length), 0x8000);
+        Space space = new Space(Align(Math.Max(0x2440 + d.Apploader.Length, d.FstOffset + fst.Length), 0x8000), lowest);
+        List<Entry> byOffset = new List<Entry>(d.Files);
+        byOffset.Sort(delegate (Entry a, Entry b) { return a.Offset.CompareTo(b.Offset); });
+        foreach (Entry e in byOffset)
+            if (changed.ContainsKey(e.Path) && changed[e.Path].Length < e.Length)
+                space.Holes.Add(new long[] { Align(e.Offset + changed[e.Path].Length, 0x20), e.Offset + e.Length });
 
         long dolOffset = d.DolOffset;
-        if (dol.Length > d.Dol.Length)
-        {
-            dolOffset = freeAt; freeAt = Align(freeAt + dol.Length, 0x20);
-        }
+        if (dol.Length > d.Dol.Length) dolOffset = space.Take(dol.Length);
         Dictionary<string, long> placed = new Dictionary<string, long>();
         foreach (Entry e in d.Files)
         {
@@ -306,7 +309,7 @@ public static class TTMod
             else if (changed.ContainsKey(e.Path))
             {
                 len = changed[e.Path].Length;
-                if (len > e.Length) { off = freeAt; freeAt = Align(freeAt + len, 0x20); }
+                if (len > e.Length) off = space.Take(len);
             }
             placed[e.Path] = off;
             PutBE32(fst, e.Index * 12 + 4, off);
@@ -315,12 +318,12 @@ public static class TTMod
         foreach (string p in added)
         {
             long len = changed[p].Length;
-            placed[p] = freeAt;
-            PutBE32(fst, addedIndex[p] * 12 + 4, freeAt);
+            long off = space.Take(len);
+            placed[p] = off;
+            PutBE32(fst, addedIndex[p] * 12 + 4, off);
             PutBE32(fst, addedIndex[p] * 12 + 8, len);
-            freeAt = Align(freeAt + len, 0x20);
         }
-        if (freeAt > lowest) throw new InvalidOperationException("mod files don't fit on the disc");
+        SpaceLeft = space.Left();
         PutBE32(boot, 0x420, dolOffset);
 
         string tmp = outPath + ".part";
@@ -574,6 +577,85 @@ public static class TTMod
     }
 
     static long Align(long v, long a) { return (v + a - 1) / a * a; }
+
+    // App 10, costume textures: src[from, from + len) copied to work[to] through a colour table (65536 u16
+    // differences from the index, big-endian, at data[table]). Format 14 (CMPR): each 8-byte block's two end
+    // colours; a 4-colour block (c0 > c1) whose new ends would order the other way swaps them and flips each
+    // index's low bit, equal new ends become (c, c - 1); a 3-colour block that would flip swaps them and
+    // exchanges indices 0 and 1. Format 5 (RGB5A3): every texel. (dev/looks.py does the same.)
+    public static void Recolour(byte[] work, long to, byte[] src, long from, long len, byte[] data, long table, int fmt)
+    {
+        Array.Copy(src, from, work, to, len);
+        if (fmt == 5)
+        {
+            for (long o = to; o + 1 < to + len; o += 2)
+            {
+                int v = (work[o] << 8) | work[o + 1];
+                int n = Lut(data, table, v);
+                work[o] = (byte)(n >> 8); work[o + 1] = (byte)n;
+            }
+            return;
+        }
+        for (long o = to; o + 7 < to + len; o += 8)
+        {
+            int c0 = (work[o] << 8) | work[o + 1], c1 = (work[o + 2] << 8) | work[o + 3];
+            int n0 = Lut(data, table, c0), n1 = Lut(data, table, c1);
+            int a = n0, b = n1;
+            bool flip = false;
+            if (c0 > c1)
+            {
+                if (n0 < n1) { a = n1; b = n0; flip = true; }
+                else if (n0 == n1) { if (n0 > 0) { a = n0; b = n0 - 1; } else { a = 1; b = 0; } }
+                if (flip) for (long k = o + 4; k < o + 8; k++) work[k] ^= 0x55;
+            }
+            else if (n0 > n1)
+            {
+                a = n1; b = n0;
+                for (long k = o + 4; k < o + 8; k++)
+                {
+                    int x = work[k], y = 0;
+                    for (int f = 0; f < 4; f++)
+                    {
+                        int q = (x >> (2 * f)) & 3;
+                        if (q < 2) q ^= 1;
+                        y |= q << (2 * f);
+                    }
+                    work[k] = (byte)y;
+                }
+            }
+            work[o] = (byte)(a >> 8); work[o + 1] = (byte)a; work[o + 2] = (byte)(b >> 8); work[o + 3] = (byte)b;
+        }
+    }
+
+    static int Lut(byte[] data, long table, int v)
+    {
+        long at = table + 2L * v;
+        return (v + ((data[at] << 8) | data[at + 1])) & 0xFFFF;
+    }
+
+    public static long SpaceLeft;   // bytes still free after the last Build (for the maintainer's report)
+
+    // Where Build puts moved and new files: the empty area first, then the holes shrunk files leave.
+    class Space
+    {
+        long next, end;
+        public List<long[]> Holes = new List<long[]>();   // [start, end), in disc order
+        public Space(long from, long to) { next = from; end = to; }
+        public long Take(long len)
+        {
+            long at;
+            if (next + len <= end) { at = next; next = Align(next + len, 0x20); return at; }
+            foreach (long[] h in Holes)
+                if (h[0] + len <= h[1]) { at = h[0]; h[0] = Align(h[0] + len, 0x20); return at; }
+            throw new InvalidOperationException("mod files don't fit on the disc");
+        }
+        public long Left()
+        {
+            long left = Math.Max(0, end - next);
+            foreach (long[] h in Holes) left += Math.Max(0, h[1] - h[0]);
+            return left;
+        }
+    }
 
     static void WriteAt(Stream s, long offset, byte[] data)
     {

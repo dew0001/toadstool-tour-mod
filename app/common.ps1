@@ -397,10 +397,11 @@ function Get-PatchChanges($src, $disc, $patch, $data) {
 		elseif ($f.op -eq 'rebuild') {
 			# A compressed file that changes size and/or relocation table: runs of the original are moved (copies),
 			# the mod's own bytes are written over them (edits), then it's packed again with its relocations.
+			# (App 10: also uncompressed files, e.g. the opening movie made from the logo movie.)
 			$basePath = $f.path
 			if ($f.base) { $basePath = $f.base }   # built from another file of the game
 			$orig = [TTMod]::ReadPart($src, $disc, $basePath)
-			$base = [TTMod]::Decompress($orig)
+			if ($f.compressed) { $base = [TTMod]::Decompress($orig) } else { $base = $orig }
 			$work = [TTMod]::Resize($base, [long]$f.size)
 			[long[]]$from = @($f.copies | ForEach-Object { [long]$_.from })
 			[long[]]$to = @($f.copies | ForEach-Object { [long]$_.to })
@@ -409,7 +410,8 @@ function Get-PatchChanges($src, $disc, $patch, $data) {
 			[long[]]$at = @($f.edits | ForEach-Object { [long]$_.at })
 			[string[]]$hex = @($f.edits | ForEach-Object { [string]$_.hex })
 			[TTMod]::ApplyEdits($work, $at, $hex)
-			if ($null -ne $f.relocs) {
+			if (-not $f.compressed) { $new = $work }
+			elseif ($null -ne $f.relocs) {
 				$table = [TTMod]::Resize([TTMod]::Relocations($orig), 8 * [long]$f.relocs.count)
 				[long[]]$at = @($f.relocs.edits | ForEach-Object { [long]$_.at })
 				[string[]]$hex = @($f.relocs.edits | ForEach-Object { [string]$_.hex })
@@ -424,8 +426,10 @@ function Get-PatchChanges($src, $disc, $patch, $data) {
 			# file table.
 			$work = New-Object byte[] ([long]$f.size)
 			$sources = @{}
+			$raws = @{}
 			for ($i = 0; $i -lt @($f.sources).Count; $i++) {
 				$raw = [TTMod]::ReadPart($src, $disc, @($f.sources)[$i])
+				$raws[$i] = $raw
 				if ($raw[0] -eq 1 -or $raw[0] -eq 2) { $sources[$i] = [TTMod]::Decompress($raw) } else { $sources[$i] = $raw }
 			}
 			foreach ($group in @($f.copies | Group-Object src)) {
@@ -433,6 +437,11 @@ function Get-PatchChanges($src, $disc, $patch, $data) {
 				[long[]]$to = @($group.Group | ForEach-Object { [long]$_.to })
 				[long[]]$len = @($group.Group | ForEach-Object { [long]$_.len })
 				[TTMod]::ApplyCopies($work, $sources[[int]$group.Name], $from, $to, $len)
+			}
+			foreach ($r in @($f.recolours)) {   # app 10: costume textures, the player's own bytes through a colour table
+				if ($null -eq $r) { continue }
+				if ($null -eq $data) { throw "$($f.path): the patch's data file is missing" }
+				[TTMod]::Recolour($work, [long]$r.to, $sources[[int]$r.src], [long]$r.from, [long]$r.len, $data, [long]$r.table, [int]$r.format)
 			}
 			if ($null -ne $f.data) {   # its own bytes are in the patch's data file
 				if ($null -eq $data) { throw "$($f.path): the patch's data file is missing" }
@@ -445,7 +454,9 @@ function Get-PatchChanges($src, $disc, $patch, $data) {
 			}
 			if (-not $f.compressed) { $new = $work }
 			elseif ($null -ne $f.relocs) {
-				$table = New-Object byte[] (8 * [long]$f.relocs.count)
+				# app 10: a table can start from a source file's own (a costume model made from a golfer's)
+				if ($null -ne $f.relocs.base) { $table = [TTMod]::Resize([TTMod]::Relocations($raws[[int]$f.relocs.base]), 8 * [long]$f.relocs.count) }
+				else { $table = New-Object byte[] (8 * [long]$f.relocs.count) }
 				[long[]]$at = @($f.relocs.edits | ForEach-Object { [long]$_.at })
 				[string[]]$hex = @($f.relocs.edits | ForEach-Object { [string]$_.hex })
 				[TTMod]::ApplyEdits($table, $at, $hex)

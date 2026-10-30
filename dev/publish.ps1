@@ -87,6 +87,7 @@ try {
 	if (-not $ReferenceIso) { $ReferenceIso = Join-Path $env:TEMP "ttmod-reference-v$Version.iso" }
 	Write-Host "Reference build -> $ReferenceIso"
 	[TTMod]::Build($src, $disc, $changed, $ReferenceIso)
+	Write-Host ("Disc space left for new and grown files: {0:N1} MB" -f ([TTMod]::SpaceLeft / 1MB))
 }
 finally { $src.Dispose() }
 $resultSha1 = [TTMod]::Sha1File($ReferenceIso)
