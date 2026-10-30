@@ -145,7 +145,11 @@ Changes (v24):
   - The opening movie (never played by the mod) becomes a copy of the logo movie, and its disc space holds new
     files (OPENING_MOVIE; launcher app 10).
 
-Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's and teams.py's; checked with find_dead_code.py). Low memory at
+Changes (v25, skill.py):
+  - The slope grid only while putting; impact windows about a quarter narrower (not Tony's); more bend from a press
+    inside the window but off the mark; the auto swing misses sometimes; bad lies spread the power more.
+
+Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's, teams.py's, costumes.py's and skill.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
@@ -159,6 +163,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import camelot_lz as lz  # noqa: E402
 import ppc  # noqa: E402
 import costumes  # noqa: E402
+import skill  # noqa: E402
 import teams  # noqa: E402
 
 CAVE = 0x8006EAB4          # dead SDK function (GXDrawTorus-style helper)
@@ -1813,7 +1818,7 @@ def check_matrix_site(buf, base, hook):
 
 
 def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9=None,
-              cave10=None, course=None, cave14=None, team=None, cave17=None, costume=None):
+              cave10=None, course=None, cave14=None, team=None, cave17=None, costume=None, harder=None):
     data = bytearray(open(src, "rb").read())
     t0_off = struct.unpack_from(">I", data, 0x00)[0]
     t0_addr = struct.unpack_from(">I", data, 0x48)[0]
@@ -1824,7 +1829,8 @@ def patch_dol(src, dst, cave, stubs, cave2, cave3, v3, cave4, cave5, cave6, cave
                               (CAVE7, CAVE7_FIRST, cave7), (CAVE8, CAVE8_FIRST, cave8), (CAVE9, CAVE9_FIRST, cave9),
                               (CAVE10, CAVE10_FIRST, cave10), (CAVE14, CAVE14_FIRST, cave14),
                               (CAVE17, CAVE17_FIRST, cave17)) + \
-            tuple(course[0] if course else ()) + tuple(team[0] if team else ()) + tuple(costume[0] if costume else ()):
+            tuple(course[0] if course else ()) + tuple(team[0] if team else ()) + tuple(costume[0] if costume else ()) + \
+            tuple(harder[0] if harder else ()):
         if code is None:
             continue
         if word(data, base, addr) != first:  # still the original (dead) function
@@ -1859,7 +1865,7 @@ def float_word(v):
 
 
 def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, course=None, team=None, v17=None,
-                  costume=None):
+                  costume=None, harder=None):
     raw = open(os.path.join(clean_files, *rel.split("/")), "rb").read()
     kind, _ = lz.header(raw)
     blob, _ = lz.decompress(raw)
@@ -1958,6 +1964,9 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
     if costume:  # v24: Halloween costumes (costumes.py)
         for addr, new, old in costumes.overlay_patches(rel, costume[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
+    if harder:   # v25: the grid, impact windows, auto swing and lies (skill.py)
+        for addr, new, old in skill.overlay_patches(rel, harder[1], lambda a: word(buf, OVERLAY_BASE, a)):
+            put(buf, OVERLAY_BASE, addr, new, old)
     out = lz.pack(kind, bytes(buf))
     if lz.decompress(out)[0] != bytes(buf):
         raise SystemExit(f"{rel}: repack check failed")
@@ -2027,6 +2036,9 @@ def main():
     costume = costumes.caves(golf_clean, menu_clean, have)
     print("costumes: " + ", ".join(f"cave {name} {size} of {costumes.CAVES[name][1]} bytes at 0x{costumes.CAVES[name][0]:08X}"
                                    for name, size in costume[1]["_sizes"].items()) + f", {len(have)} golfers")
+    harder = skill.caves()
+    print(f"skill: {harder[1]['_size']} of {skill.CAVE[1]} bytes at 0x{skill.CAVE[0]:08X} (slope grid only while"
+          f" putting, impact windows, auto swing misses, bad lies)")
     print("team games: " + ", ".join(f"{name} {size} of {teams.CAVES[name][1]} bytes at 0x{teams.CAVES[name][0]:08X}"
                                      for name, size in team[1]["_sizes"].items()))
     cave17, v17 = cave17_code(v6)
@@ -2073,10 +2085,11 @@ def main():
         print(f"cave 10: {len(cave10)} of {CAVE10_SIZE} bytes at 0x{CAVE10:08X} (Shy Guy's power shot"
               f" 0x{v10['power_burst']:08X})")
     patch_dol(os.path.join(clean, "sys", "main.dol"), os.path.join(build, "sys", "main.dol"), cave, stubs, cave2,
-              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14, team, cave17, costume)
+              cave3, v3, cave4, cave5, cave6, cave7, cave8, cave9, cave10, course, cave14, team, cave17, costume,
+              harder)
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course,
-                      team, v17, costume)
+                      team, v17, costume, harder)
     for rel, make in ((teams.ICONS, teams.icons_file), (teams.LABELS, teams.labels_file),
                       (teams.BANNERS, teams.banners_file)):
         open(os.path.join(build, "files", *rel.split("/")), "wb").write(make(os.path.join(clean, "files")))

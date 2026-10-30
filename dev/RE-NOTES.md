@@ -66,12 +66,15 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x800463C4 | 312 | FUN_800463c4 | v22 courses 2 and 3's hole files, the menu's ID lookup (cave 20) |
 | 0x8006F468 | 344 | FUN_8006f468 | v22 our courses' names, the round's name buffer, the round start stub (cave 21) |
 | 0x8007CCC0 | 308 | FUN_8007ccc0 | v22 the course select's commit, icon row spacing, preview and name stubs (cave 22) |
+| 0x8003176C | 316 | FUN_8003176c | v22 the hole file resolver (course8.py cave 23) |
+| 0x80023518, 0x80037EDC, 0x80023188 | 284, 284, 280 | | v24 costumes ("data", "menu", "round"; costumes.py) |
+| 0x8005D624 | 280 | FUN_8005d624 | v25 skill.py: impact windows, the bend inside them, the auto swing's misses, bad lies' spread |
 
-Still free (DEAD in `find_dead_code.py`, run on `mod\ghidra_out\golf\unreferenced.tsv`; the list above v16 only
-named the 400-byte ones): 0x8003176C (316), 0x80057A14 (712, used by the `draws` debug patch), 0x8005DAFC (444,
-`messages` debug patch). v22 took the rest; v21's caves 11-16 were reshuffled (cave 11 now holds the course list,
-cave 12 the first two courses' hole info). Smaller dead functions (under 288 bytes) were never listed: a new tool
-run without the size filter would find more. Do NOT use 0x80001800: it is wiped before the first frame.
+Still free: 0x80057A14 (712, used by the `draws` debug patch) and 0x8005DAFC (444, `messages` debug patch), plus
+263 smaller dead functions, 38 KB in all, the largest 0x8003D35C and 0x80037A90 (280), 0x8004893C and 0x80040AAC
+(276). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
+from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unreferenced64.tsv`, main.dol
+0x80003100-0x80400000) through `find_dead_code.py`. Do NOT use 0x80001800: it is wiped before the first frame.
 
 ## Gotchas
 
@@ -718,8 +721,51 @@ Halloween costumes: Y on the character select puts the picking player's golfer i
   (Stroke Play: 5 rows + See-Through) drops its Rules row (code 1) for it. The row text and help calls above go
   through stubs that give it messages 0x7FD0-0x7FD2, its icon load takes
   Controls' (code 2), and while it's off the player draw's `bl FUN_804168fc` at 0x80426040 (queues the arrow trail,
-  drawer `FUN_804160f4`, while a human aims a non-putt) is skipped; the landing star (`FUN_80448b2c` at
-  0x80425FDC) still draws.
+  drawer `FUN_804160f4`, while a human aims a non-putt) is skipped; the landing star still draws. (v24 called
+  `FUN_80448b2c` at 0x80425FDC the landing star: it is the slope grid, see "Skill (v25)".)
+
+## Skill (v25)
+
+Andrew: "make the game more skilled": no slope grid but on the green, more mishits, the auto swing missing sometimes,
+bad lies riskier (`skill.py`, one cave at 0x8005D624).
+- **The slope grid** (record 0x80502684: +0x30/+0x34 columns/rows, +0x3C points, +0x40 flags, +0x4C slopes, +0x50
+  the moving dashes, +0x54 fade) is built by the aim camera `FUN_80410838`: `FUN_80448120(grid, preview ball
+  0x8050272C)` round the preview's landing spot (the normal views, view 8, the putter), or `FUN_8044844c(pin height,
+  grid, matrix, 20, 20)` round the pin (view 9). The player draw calls `FUN_80448b2c(grid)` (it fades +0x54 in and
+  queues the drawer `FUN_80448c14`) at 0x80425FDC when the preview flies (0x80502800 > 0, the preview's frame count)
+  and the state isn't 0xB, unless r30 = 1: debug flag 0x26, or the putter out with Z held. v25 points the `bne` at
+  0x80425FB4 (club not 13) at the `li r30,1` (0x80425FC8): no grid but while putting. Checked: the zoom view on
+  Lakitu 1's tee showed the grid round the landing star in v24 and none in v25; the putt's grid is unchanged.
+- **The impact window**: `FUN_804169d0` returns the zone Z = 2 x entry - 1 (`addi r3,r9,-1` at 0x80416AB4); the shot
+  builder takes |impact error| <= Z as a hit, so the window is 2Z + 1 frames (Mario's driver Z 7 = 15 frames, wedges
+  9 = 19). Its other callers: the aim's `FUN_8041073c` (each club change), the auto-aim (0x804ACFF0) and two CPU
+  paths. v25: `zone_note` replaces `lwz r3,0x25C(r29)` at 0x80416A7C (r29 = setup, before r29 is reused) and keeps
+  the golfer code (player +0x51EF); `zone_cut` makes Z (3Z + 2) >> 2 unless golfer 17: 7 -> 5, 9 -> 7, 5 -> 4, 3 -> 2,
+  1 -> 1. Checked: Mario's driver on Lakitu 1's tee 5 (v24 7), a 3-wood from the rough 2; Tony's driver still 3.
+- **The bend inside the window** (shot builder `FUN_804c6668`, 0x804C6DD0..0x804C6E50): f = |error| / Z x (0.22 -
+  0.02 x control) (0x804E3264, 0x804E322C; the debug flag 0x41 path uses 0x804E3260 / 0x804E3244), ending `fmuls
+  f31,f31,f13` at 0x804C6E4C. Early (error < 0): launch angle + f x 10 degrees (0x804E3268), side spin + speed x 1350 f,
+  start line - f x 5 degrees (0x804E327C), speed x (1 - f / 2); late: angle - f x (0.2 angle + 5 degrees), speed x
+  (1 - 0.3 f), spin x (1 - f / 4), start line + f x 5 degrees (mirrored for lefties, player +0x51EE). Outside the
+  window the same with f = 1 (fixed: early is half the speed). f13 and r11 are loaded again on both paths after it.
+  v25 `bend` multiplies f by 1.5.
+- **The auto swing** (A at the power press: setup +0x234 = 1, meter stage 3): every frame of view 0xC the meter tick
+  `FUN_8046e440` sets the impact error 0x80523CAC to `(int)(random x 5.0 - 2.5)` (0x804DF9DC, 0x804DF9E0; -2..2, 0
+  twice as likely; `FUN_8001aa54` = a random number in [0, 1) in f1; debug flag 0x29 forces 0), stored by `stw
+  r29,8(r31)` at 0x8046E534; the last frame's counts when the phase ends (`FUN_80412f6c`), where player +0x51F3 (an
+  item's perfect impact) zeroes it and a replay restores the recorded +0x1AC. v25 `auto_miss` keeps the error within
+  +-Z and, with chance 0.10 (`auto_chance` 0x8005D724, half of it `auto_early` right after: early), makes it +-(Z + 1).
+  Checked with the chance forced to 1 (data write): error 6 with Z 5; forced to 0: error -1.
+- **The lie's spread** ("Be Factor", the +-% by the ball picture): setup +0x238 from the lie object's method +0x28,
+  `FUN_80416cd4` (shared by all 40 lie classes' vtables, 0x804CB160..): a byte from 7-byte rows (clubs: driver, 1-2,
+  3-5, 6-8, 9-11, 12, putter) of 0x804CDF28 (0x804CE05C for shot type 2), row = the lie's method +0xC. Rows 0-5 (tee,
+  fairway, green, fringe ...) are 1-2, the rough 4-15, bunkers and worse 5-20. At the power press the spread is
+  (2 r - 1) x (+0x238 + 0.49), kept only when |int| >= 1 (+0x23C), and a real shot's effective step is step x (100 +
+  spread) / 100. v25 `spread` (at the method's exit, `lwz r0,28(r1)` at 0x80416D90; r3 = the byte, r31 = the setup)
+  makes 3 or more x 1.5 (rounded down), the putter aside. Checked: the 3-wood from Lakitu 1's rough +-7% (was 5).
+- Test: `scripts\skill_test.ps1 [-Image] [-Tony] [-TeeOnly] [-Keep]` (profile 2: the tee's zone and spread, the aim
+  and zoom views, an auto swing forced to miss and one forced not to, the ball dropped beside the fairway and on the
+  green, the putt's grid).
 
 ## Team games (v16 Best Ball and Scramble)
 
