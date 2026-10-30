@@ -22,8 +22,8 @@ hole IDs, FIRST_ID + 18 x k + hole (1101-1172; nothing special-cases them). Whic
   - Course select (menu FUN_80413910): its list holds 7 entries of 0x2C at 0x8044BC40 with live screen state right
     after it, so the list moves to cave 11 (7 + ours; every lis 0x8045 / addi -0x43C0 pair that addresses it is
     repointed) and a hook where every mode's list ends (0x804140B0) appends ours in Stroke Play, Match Play (not
-    Character Match), Skins and Practice. Those modes write no per-course records except the hole-in-one mask. With
-    more than 9 icons the row's spacing (56, loaded at ROW_SPACING) narrows to ROW_SPACING_11 so 11 fit the board.
+    Character Match), Skins and Practice. Those modes write no per-course records except the hole-in-one mask. (v22
+    narrowed the icon row's spacing so 11 fit; v26's dropdown, coursemenu.py, shows one icon and a list instead.)
   - Preview movie: past index 6 the game plays the word at 0x8041445C's file (A/T/C, Lakitu Valley's); a stub plays
     Blooper Bay's (A/T/F) for Pebble Beach and Lakitu Valley's for the Texas courses.
   - Music (main.dol FUN_80011a94, table per situation x course 1-7): Pebble Beach plays Blooper Bay's songs, the
@@ -114,7 +114,7 @@ CAVE20_FIRST = 0x7C0802A6
 CAVE21 = 0x8006F468         # dead (v22): the course names, the round start
 CAVE21_SIZE = 344
 CAVE21_FIRST = 0x9421FF98
-CAVE22 = 0x8007CCC0         # dead (v22): the menu's stubs: commit, row spacing, preview, names
+CAVE22 = 0x8007CCC0         # dead (v22): the menu's stubs: commit, preview, names (v22-v25 row spacing too)
 CAVE22_SIZE = 308
 CAVE22_FIRST = 0x9421FFF0
 CAVE23 = 0x8003176C         # dead (v22): the hole file resolver
@@ -169,8 +169,7 @@ ROUND_START_WORD = 0x9421FFE8
 COMMIT = 0x80415388         # menu FUN_80415040: stb r3,0xA79(r29), the course code (r3 = index + 1; CTR is live)
 COMMIT_WORD = 0x987D0A79
 ROW_SPACING = 0x80412DB4    # menu icon row: lfs f11,0x7504(r9) (r9 = 0x80440000; 56.0), r9 is free past it
-ROW_SPACING_WORD = 0xC1697504
-ROW_SPACING_11 = 45.0       # icons 48 wide: 11 fit where 9 did at 56
+ROW_SPACING_WORD = 0xC1697504   # (v22-v25 a stub narrowed it to 45 past 9 icons; v26 coursemenu.py makes it 0)
 
 LIST_OLD = 0x8044BC40       # menu: the course list, 7 x 0x2C
 LIST_ENTRY = 0x2C
@@ -569,16 +568,6 @@ def cave22_code(count):
     hi, lo = ppc.hi_lo(VARIANT)
     a(COMMIT_WORD, ppc.lis(11, hi), ppc.stb(12, lo, 11), ppc.BLR)
 
-    a.label("row_spacing")     # the icon row: narrower with more than 9 icons (r9 free, f11 = the spacing)
-    hi, lo = ppc.hi_lo(LIST_COUNT)
-    a(ppc.lis(9, hi), ppc.lwz(9, lo, 9), ppc.cmpwi(9, 9))
-    a.br("bgt", "row_spacing_11")
-    a(ppc.lis(9, 0x8044), ROW_SPACING_WORD, ppc.BLR)
-    a.label("row_spacing_11")
-    a.la(9, "row_spacing_value")
-    a(ppc.lfs(11, 0, 9), ppc.BLR)
-    a.float("row_spacing_value", ROW_SPACING_11)
-
     a.label("preview")         # (bl from PREVIEW_DEFAULT) r0 = course index past 6: r28 = the preview movie
     a(ppc.li(28, PREVIEW_WORD & 0xFFFF))
     for k in range(count):
@@ -683,7 +672,6 @@ def overlay_patches(rel, labels, word):
         out.append((PREVIEW_DEFAULT, ppc.bl(PREVIEW_DEFAULT, labels["preview"]), PREVIEW_WORD))
         out.append((NAME_SITES["menu"], ppc.bl(NAME_SITES["menu"], labels["name_menu"]), NAME_ADD))
         out.append((COMMIT, ppc.bl(COMMIT, labels["commit"]), COMMIT_WORD))
-        out.append((ROW_SPACING, ppc.bl(ROW_SPACING, labels["row_spacing"]), ROW_SPACING_WORD))
     return out
 
 

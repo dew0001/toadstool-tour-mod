@@ -149,7 +149,14 @@ Changes (v25, skill.py):
   - The slope grid only while putting; impact windows about a quarter narrower (not Tony's); more bend from a press
     inside the window but off the mark; the auto swing misses sometimes; bad lies spread the power more.
 
-Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's, teams.py's, costumes.py's and skill.py's; checked with find_dead_code.py). Low memory at
+Changes (v26, skill.py and coursemenu.py):
+  - The slope grid covers the green on every shot (the game's green-view grid round the pin), never the landing
+    spot; putts keep the game's putt grid. The auto swing is the game's own again (no misses at random).
+  - The course select's course row is a dropdown (coursemenu.py, with --course8): the picked course's icon alone,
+    and A opens a list window of the mode's courses by name (scrolling), Up/Down to move, A to pick, B to go back;
+    the holes and tees rows unchanged.
+
+Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's, teams.py's, costumes.py's, skill.py's and coursemenu.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
@@ -1958,13 +1965,16 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
         import course8
         for addr, new, old in course8.overlay_patches(rel, course[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
+        import coursemenu   # v26: the course select's dropdown
+        for addr, new, old in coursemenu.overlay_patches(rel, course[1]):
+            put(buf, OVERLAY_BASE, addr, new, old)
     if team:     # v16: Best Ball and Scramble (teams.py)
         for addr, new, old in teams.overlay_patches(rel, team[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
     if costume:  # v24: Halloween costumes (costumes.py)
         for addr, new, old in costumes.overlay_patches(rel, costume[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
-    if harder:   # v25: the grid, impact windows, auto swing and lies (skill.py)
+    if harder:   # v25/v26: the grid, impact windows and lies (skill.py)
         for addr, new, old in skill.overlay_patches(rel, harder[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
     out = lz.pack(kind, bytes(buf))
@@ -2026,6 +2036,12 @@ def main():
         course_files = {path: src for _, _, made in loaded for path, src in made.items()}
         print(f"caves 11-13, 15, 16, 18-22: {len(loaded)} courses of our own ({', '.join(folders)}), {len(course_files)} files: "
               + ", ".join(f"cave {k} {v}" for k, v in course[1]["_sizes"].items()))
+        import coursemenu   # v26: the course select's dropdown (uses course8's list and name stub)
+        menu = coursemenu.caves(course[1])
+        course = (course[0] + menu[0], {**course[1], **menu[1]})
+        print("course select dropdown: " + ", ".join(f"{name} {size} of {coursemenu.CAVES[name][1]} bytes at"
+                                                     f" 0x{coursemenu.CAVES[name][0]:08X}"
+                                                     for name, size in menu[1]["_menu_sizes"].items()))
     elif COURSE9:
         raise SystemExit("--course9 needs --course8")
     team = teams.caves()
@@ -2037,14 +2053,15 @@ def main():
     print("costumes: " + ", ".join(f"cave {name} {size} of {costumes.CAVES[name][1]} bytes at 0x{costumes.CAVES[name][0]:08X}"
                                    for name, size in costume[1]["_sizes"].items()) + f", {len(have)} golfers")
     harder = skill.caves()
-    print(f"skill: {harder[1]['_size']} of {skill.CAVE[1]} bytes at 0x{skill.CAVE[0]:08X} (slope grid only while"
-          f" putting, impact windows, auto swing misses, bad lies)")
+    print(f"skill: {harder[1]['_size']} of {skill.CAVE[1]} bytes at 0x{skill.CAVE[0]:08X} (slope grid on the"
+          f" green, impact windows, bad lies)")
     print("team games: " + ", ".join(f"{name} {size} of {teams.CAVES[name][1]} bytes at 0x{teams.CAVES[name][0]:08X}"
                                      for name, size in team[1]["_sizes"].items()))
     cave17, v17 = cave17_code(v6)
     arrows_texts = [(MSG_ARROWS_ON, v17["arrows_text_on"]), (MSG_ARROWS_OFF, v17["arrows_text_off"]),
                     (MSG_ARROWS_HELP, v17["arrows_text_help"])]
-    cave3, v3 = cave3_code(v7["zoom"], v6, (course8.texts(course[1]) if course else []) + teams.texts(team[1])
+    cave3, v3 = cave3_code(v7["zoom"], v6, (course8.texts(course[1]) + coursemenu.texts(course[1]) if course else [])
+                           + teams.texts(team[1])
                            + arrows_texts, teams.message_hook(team[1]))
     cave, stubs = build_cave()
     cave2, v2 = cave2_code(v3["aim_place"])

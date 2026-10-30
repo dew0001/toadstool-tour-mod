@@ -68,11 +68,12 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8007CCC0 | 308 | FUN_8007ccc0 | v22 the course select's commit, icon row spacing, preview and name stubs (cave 22) |
 | 0x8003176C | 316 | FUN_8003176c | v22 the hole file resolver (course8.py cave 23) |
 | 0x80023518, 0x80037EDC, 0x80023188 | 284, 284, 280 | | v24 costumes ("data", "menu", "round"; costumes.py) |
-| 0x8005D624 | 280 | FUN_8005d624 | v25 skill.py: impact windows, the bend inside them, the auto swing's misses, bad lies' spread |
+| 0x8005D624 | 280 | FUN_8005d624 | v25 skill.py: impact windows, the bend inside them, bad lies' spread (v25's auto swing misses, gone in v26); v26 the green's grid on every shot |
+| 0x8003D35C, 0x80037A90, 0x8004893C, 0x8006C168, 0x80040AAC, 0x8006BA90, 0x80094660, 0x800459B8 | 280, 280, 276, 272, 276, 272, 272, 272 | | v26 the course select's dropdown (coursemenu.py: "list", "hint", "input", "keys", "move", "show", "fill", "toad") |
 
 Still free: 0x80057A14 (712, used by the `draws` debug patch) and 0x8005DAFC (444, `messages` debug patch), plus
-263 smaller dead functions, 38 KB in all, the largest 0x8003D35C and 0x80037A90 (280), 0x8004893C and 0x80040AAC
-(276). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
+255 smaller dead functions, 36 KB in all, the largest 0x800389B4 (272), 0x80046A6C and 0x800409A0 (268), 0x800838B0
+(264). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
 from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unreferenced64.tsv`, main.dol
 0x80003100-0x80400000) through `find_dead_code.py`. Do NOT use 0x80001800: it is wiped before the first frame.
 
@@ -574,7 +575,7 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
     with its counter in memory (`FUN_8041358c` clobbers the volatile registers; it was unrolled for two).
   - The icon row (`FUN_80412640`): x = 0x140 + 56 x (i - (n - 1) / 2), the 56 from `lfs f11,0x7504(r9)` at
     0x80412DB4 (r9 = 0x80440000, free after it; icons 48 wide, the picked one bigger). With more than 9 entries the
-    stub loads 45.0 instead, so 11 fit the board.
+    stub loads 45.0 instead, so 11 fit the board. (v26: one icon and a dropdown list, see "Course select (v26 dropdown)".)
   - Names: on the course select `0xA8 + index` (0xB1, 0xB2 for ours: other texts) is swapped by index for each
     course's message (0x7FF0, 0x7FDF Pasadena, 0x7FDE, 0x7FDD); in a round `0xA7 + code` sites have no free
     register to read the variant with (r0 sites), so code 9 always shows message 0x7FEF, a buffer the round start
@@ -652,6 +653,64 @@ Full write-ups in `dev/course/notes/`: `courses.md` (course codes, tables, menus
   so the course's files live under a new top-level folder `E` (IDs from 5408). `TTMod.Build` appends them to the
   file table (0x20440, free space up to 0x28000) and updates boot.bin's FST size.
 
+## Course select (v26 dropdown)
+
+Andrew (2026-10-30): "lets remake the map selection menu into a dropdown menu to pick the map so when we add more maps
+later its just a dropdown menu. the hole number and front and back tees selection can stay the same" (`coursemenu.py`).
+- **The screen** (menu overlay): `FUN_80413910` sets it up and builds the list (7 + ours entries of 0x2C in course8.py's
+  cave 11: +0 the menu index, +4.. hole sets, +0x1C their count, +0x20.. tees, +0x28 their count; count 0x80445D28),
+  `FUN_8041418c` runs it every frame, `FUN_80412640` draws the three rows, `FUN_804121b0` the "X Handicap" label (while
+  0x8044BD74, "X opens the handicaps", is set) and the Star course overlay, `FUN_80415040` commits (`FUN_80414e94`
+  registers the draws). State at 0x8044AFCC (r27 in the update): +0x10 the cursor (list row), +0x14 the tees choice,
+  +0x18 the holes choice, +0x1C the row (0 courses, 1 holes, 2 tees), +0x50 the preview movie, +0x54 Toad's text box
+  (0x8044B020, made per screen by `FUN_804035e0`: for the course select `FUN_80024e04(0x160, 0x188, 0x1B8, 0x24, 0,
+  0xD)`), +0x58 the "ready to play?" box.
+- **Input** (`FUN_8041418c`): the players' pads ORed into r23 (pad +0xC), r24 (+2, repeating directions: 1 left, 2
+  right, 4 down, 8 up) and r30 (+4, new presses). With no prompt up (0x8044BD84 = 0) and the screen free (0x8022299C =
+  -1) the buttons go from 0x80414764: Z slides the Star overlay (0x8044BD98), X (with 0x8044BD74) pushes screen 7 (the
+  handicaps), B goes back, A opens "ready to play?" (`FUN_80024f1c(0x3C or 0x3D, 0x140, 0xC0, -1, 0xD)`; A on Yes
+  counts 0x8044BD88 up to 0x12, then the commit). Directions (0x8041497C) wait out the delay 0x8044C280 (14 frames,
+  then 9 while held): Up/Down change the row ((row + 2) % 3 / (row + 4) % 3), Left/Right the row's choice. A course
+  change sets 0x8044C250 = 2 (the preview fades and its movie changes: by menu index, 0x8041445C past 6), keeps the
+  tees and holes choices only where the new course has the same (0x80414AE8..0x80414B2C), and bounces the arrows
+  (0x8044BD7C / 0x8044BD80). r25 is "changed": at 0x80414C54 it (or 0x80445D2C) has Toad's box show the row's text,
+  `FUN_80024cfc(box, id, 0, 0x20 or 0x10, 0)`: the course's name 0xA8 + index (Tournament 0xB2 / Star 0xB8 + index),
+  the holes' 0xBE + set, the tees' 0xC9 + choice. 0x80414C08 plays the cursor sound and sets the delay; 0x80414C38 is
+  past the input.
+- **Draw** (`FUN_80412640`): the row loop (r22 0..2, r29 = the row drawn, the cursor's last; `cmpwi r29,0` at
+  0x80412CE8, the loop's next row 0x80413484). The course row at y 256: texture <index> of B/W/R, 48 wide, at x = 320
+  + spacing x (i - (n - 1) / 2) (`lfs f11,0x7504(r9)` at 0x80412DB4, 56.0); pass 0 draws the others small (the `bne`
+  at 0x80412D2C), pass 1 the picked one big (radius 40, pulsing while its row is the cursor's). Holes row y 304, tees
+  y 340; the arrows by the preview (y 160) while there's more than one course. The menus' 2D space is 640 x 448
+  (a 960 x 540 screenshot: x = 120 + 1.125 x, y = 1.205 y).
+- **Text boxes** (main.dol): 60 of 0x2FC at 0x802CC050, updated by `FUN_80024698`. `FUN_80024e04(x, y, w, h, 0,
+  style)` makes a fixed one (x its middle; its frame spans about y - h/2 - 10 .. y + h/2 + 20; style 0xD is Toad's
+  see-through blue), `FUN_80024f1c(id, x, y, -1, style)` one sized to its text with an opening animation,
+  `FUN_80024cfc(box, id, x, y, mode)` (re)writes its text (formatted into box +0, at most 0x200 bytes; x, y from the
+  box's top left, a line's middle about y + 3; mode bit 0 all at once, else typed a character a frame),
+  `FUN_80024c98(box)` frees it at once (`FUN_80024ce8` fades it out first). Each character is a sprite of its own (a
+  free list at 0x802D7F14, a 24 x 24 glyph texture each), drawn over the menus' 2D. Message codes: 0x01 a line break,
+  0x02 half a line, 0x06 the end, 0x07 + digit the size (floats at 0x8015F078: '1' 0.95, '3' 1.0, '4' 1.1, '5' 1.333,
+  '6' 1.5, '7' 2.0; a line is 24 x size high), 0x08 + digit the colour (RGB at 0x8015EFA8 + 3 x code: '0' white,
+  '1' red, '2' orange, '3' yellow, '4' green, '6' cyan, '7' blue, ...), 0x09 + digit flags (the game's names use '3'
+  and '2'; '5' half alpha, '8' wavy, '9' shaky, ':' spinning), 0x0A-0x1F glyphs 32 wide (0x0A A, 0x0B B, 0x0C
+  C-stick, 0x0D Y, 0x0E X, 0x0F Z, 0x10 L, 0x11 R, 0x12 +Control Pad, 0x13 control stick, 0x14 Start, 80 wide, 0x17-0x19
+  Club Slots items).
+- **v26**: the icon row draws one icon (the `bne` at 0x80412D2C a `nop`, the spacing `lfs` reads 0.0 at 0x804474F0:
+  the picked one at x 320). A `b` at 0x80414764 runs the buttons first: closed, A on the course row (more than one
+  course, the screen free) saves the course, tees and holes, makes a box `FUN_80024e04(320, 278, 360, 135, 0, 0xD)`
+  (frame y 201..366, between the preview and Toad's box) and sets 0x8044BD74 to 0 (no "X Handicap" label); open,
+  Up/Down move the cursor (wrapping) as Left/Right did (preview, choices; then 0x80414C08), A closes it and moves the
+  cursor to the holes row (r25 = 1), B puts the course, tees and holes back. The box shows 6 names from message
+  0x7FC8 (our buffer: the names copied without their codes, the cursor's between 0x08 '3' and 0x08 '0', 0x01
+  between), scrolled to keep the cursor in view; Toad's box message 0x7FC9 (the name, then "+ Choose  A Pick  B
+  Back" in glyphs). Names come from `MSG_LOOKUP` of course8.py's `name_menu` (0xA8 + index, ours swapped) or the
+  tournament bases. While it's up the row loop draws no row (a `b` at 0x80412CE8). `FUN_80413910`'s `bl
+  FUN_80414170` (0x804140D0) closes our state on every set-up. Checked in the hidden Dolphin: the 11 courses in
+  Stroke Play, scrolling, B, A then the holes row, and a round started from the list on each course (codes 1-7, 8,
+  9 with variants 0-2); the holes and tees rows and Left/Right on the closed row as before; Tournament's 6 by their
+  tournament names; Character Match's 6 (the game's own list, none of ours).
+
 ## Costumes (v24)
 
 Halloween costumes: Y on the character select puts the picking player's golfer in costume (`costumes.py` caves
@@ -724,10 +783,12 @@ Halloween costumes: Y on the character select puts the picking player's golfer i
   drawer `FUN_804160f4`, while a human aims a non-putt) is skipped; the landing star still draws. (v24 called
   `FUN_80448b2c` at 0x80425FDC the landing star: it is the slope grid, see "Skill (v25)".)
 
-## Skill (v25)
+## Skill (v25, v26)
 
 Andrew: "make the game more skilled": no slope grid but on the green, more mishits, the auto swing missing sometimes,
-bad lies riskier (`skill.py`, one cave at 0x8005D624).
+bad lies riskier (`skill.py`, one cave at 0x8005D624). v26 (Andrew: "the green grid should show up on approaches chips
+etc. like it should always be there when zooming if its in view, revert that auto swing misses sometimes change"): the
+green's grid on every shot, the auto swing the game's own again.
 - **The slope grid** (record 0x80502684: +0x30/+0x34 columns/rows, +0x3C points, +0x40 flags, +0x4C slopes, +0x50
   the moving dashes, +0x54 fade) is built by the aim camera `FUN_80410838`: `FUN_80448120(grid, preview ball
   0x8050272C)` round the preview's landing spot (the normal views, view 8, the putter), or `FUN_8044844c(pin height,
@@ -736,6 +797,19 @@ bad lies riskier (`skill.py`, one cave at 0x8005D624).
   and the state isn't 0xB, unless r30 = 1: debug flag 0x26, or the putter out with Z held. v25 points the `bne` at
   0x80425FB4 (club not 13) at the `li r30,1` (0x80425FC8): no grid but while putting. Checked: the zoom view on
   Lakitu 1's tee showed the grid round the landing star in v24 and none in v25; the putt's grid is unchanged.
+  - `FUN_80448120` is called only by the aim camera (0x80411210, 0x804112A0, 0x80411340), whose r31 is its setup
+    throughout (`mr r31,r3` at 0x80410850). Off the putt (preview ball +0xC4 = 0) it builds 12 x 10 points over a
+    193 x 158 ft box (0x804DE418, 0x804DE41C) round the preview's landing point, along the shot; putting, 61, 31 or
+    11 x 8 along the putt (by the preview +0xC8). `FUN_8044844c(height, grid, matrix, columns, rows)` spreads the
+    points over -1..1 through the 3x4 matrix, finds each one's ground by a ray (`FUN_804379b4`, any surface), keeps
+    lines between neighbours whose heights differ by 32 or less (0x804DE43C) and returns at once when the columns,
+    rows, matrix and height are what it built last (so building it every frame is cheap). View 9 (the green view,
+    0x804112A8..0x80411318; with a lie `FUN_80414818` answers it takes the landing grid instead): the identity
+    (main.dol `FUN_8003c354`, uses f0-f2 only) moved to the pin (0x804E6864/68/6C at +0xC/+0x1C/+0x2C) and scaled 96
+    across (0x804DAD5C; 1.0 up, 0x804DACFC), 20 x 20 points: a 192 ft square round the pin.
+  - v26 (`pin_grid`): the `bne` is the game's again (a grid for every club), and a `b` on `FUN_80448120`'s first
+    instruction (0x9421FF28) builds view 9's grid unless the setup's club (r31 +0x1D4) is the putter (then the
+    game's, from 0x80448124). So no shot shows where it lands, and the green's slopes show whenever it is in view.
 - **The impact window**: `FUN_804169d0` returns the zone Z = 2 x entry - 1 (`addi r3,r9,-1` at 0x80416AB4); the shot
   builder takes |impact error| <= Z as a hit, so the window is 2Z + 1 frames (Mario's driver Z 7 = 15 frames, wedges
   9 = 19). Its other callers: the aim's `FUN_8041073c` (each club change), the auto-aim (0x804ACFF0) and two CPU
@@ -753,9 +827,10 @@ bad lies riskier (`skill.py`, one cave at 0x8005D624).
   `FUN_8046e440` sets the impact error 0x80523CAC to `(int)(random x 5.0 - 2.5)` (0x804DF9DC, 0x804DF9E0; -2..2, 0
   twice as likely; `FUN_8001aa54` = a random number in [0, 1) in f1; debug flag 0x29 forces 0), stored by `stw
   r29,8(r31)` at 0x8046E534; the last frame's counts when the phase ends (`FUN_80412f6c`), where player +0x51F3 (an
-  item's perfect impact) zeroes it and a replay restores the recorded +0x1AC. v25 `auto_miss` keeps the error within
-  +-Z and, with chance 0.10 (`auto_chance` 0x8005D724, half of it `auto_early` right after: early), makes it +-(Z + 1).
-  Checked with the chance forced to 1 (data write): error 6 with Z 5; forced to 0: error -1.
+  item's perfect impact) zeroes it and a replay restores the recorded +0x1AC. v25 `auto_miss` kept the error within
+  +-Z and, with chance 0.10, made it +-(Z + 1) (checked: error 6 with Z 5). v26 removes it: the game's own -2..2.
+  With the narrower zones Z is 2 or more wherever the game's was 3 or more, so it leaves the window no more often
+  than before (only where Z is 1, as in the game).
 - **The lie's spread** ("Be Factor", the +-% by the ball picture): setup +0x238 from the lie object's method +0x28,
   `FUN_80416cd4` (shared by all 40 lie classes' vtables, 0x804CB160..): a byte from 7-byte rows (clubs: driver, 1-2,
   3-5, 6-8, 9-11, 12, putter) of 0x804CDF28 (0x804CE05C for shot type 2), row = the lie's method +0xC. Rows 0-5 (tee,
@@ -763,9 +838,10 @@ bad lies riskier (`skill.py`, one cave at 0x8005D624).
   (2 r - 1) x (+0x238 + 0.49), kept only when |int| >= 1 (+0x23C), and a real shot's effective step is step x (100 +
   spread) / 100. v25 `spread` (at the method's exit, `lwz r0,28(r1)` at 0x80416D90; r3 = the byte, r31 = the setup)
   makes 3 or more x 1.5 (rounded down), the putter aside. Checked: the 3-wood from Lakitu 1's rough +-7% (was 5).
-- Test: `scripts\skill_test.ps1 [-Image] [-Tony] [-TeeOnly] [-Keep]` (profile 2: the tee's zone and spread, the aim
-  and zoom views, an auto swing forced to miss and one forced not to, the ball dropped beside the fairway and on the
-  green, the putt's grid).
+- Test: `scripts\skill_test.ps1 [-Image] [-Tony] [-TeeOnly] [-Keep] [-ApproachFt n] [-ChipFt n]` (v26, profile 2,
+  Lakitu 1: the tee, an approach and a chip (the ball dropped short of the pin on the tee-pin line) and the green;
+  at each the club, zone, spread, the grid record (size, built, where) and the aim and zoom views; the auto swings'
+  errors).
 
 ## Team games (v16 Best Ball and Scramble)
 
@@ -939,7 +1015,8 @@ with keyboard controls. Set `TTMOD_ROOT`, `TTMOD_DOL` or `TTMOD_PID` to point el
    arrows = main stick, Enter = Start).
 4. Menus to a round: Start, A, A (1 Player), A (Mario; Pad E five times = Koopa Troopa; Pad S twice = Shy Guy on
    the extra page), Pad E, A (Character Match; Pad E three times = Stroke Play), A, A (Novice), A (course), A
-   (Yes), then A. About 3 s between menu steps, 8 s for the course to load.
+   (Yes), then A. About 3 s between menu steps, 8 s for the course to load. Since v26 A on the course row opens the
+   course list: Pad E steps through the courses, then Pad S (the holes row) before that A (scripts\ do).
    Shortcuts: keep writing the setup block while the round loads (about 6 s from the last A): the hole order
    (0x80176060, 18 bytes) picks the first hole, 0x8017607C the number of holes (1 = a one-hole round). Writing
    the ball record's position (+0x9C, feet; collision vertices are x32) and zeroing its velocity (+0x50) every few
