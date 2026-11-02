@@ -65,6 +65,17 @@ HOLDER_FLIP = 0x8000F248   # (holder) the instance's skinned vertices are double
 HOLDER_VTABLE, BANK_VTABLE = 0x80160F10, 0x80160F20       # a model holder's and a texture bank holder's class
 LOAD_BANK, LOAD_MODEL = 0x8000ECAC, 0x8000F00C       # (bank holder, id, heap); (holder, id, bank holder, heap)
 GOLFER_HEAP = 0            # the main heap (heap 8, where the game loads golfers, has room for one: a second stalls loading)
+HOLE = 0x804E68F8          # golf: the round's hole number (byte)
+REC_DONE = 0x1BE            # golf: a team record's hole status (byte: 0 playing, 1 holed, 2 out)
+HEAPS = 0x8023FA18         # main.dol: the 12 heaps, 0x14 each (+0 the free list, +4 free bytes)
+RCV_HEAPS = (0, 2)         # v28 receivers' heaps: 0 the main one (3.8 MB free in a 1-player round, ~2.9 in Pigskin with 4
+                           # before any receiver), 2 the hole arena (9 MB: 1.2 MB free on Pebble Beach 1, 3 on
+                           # Battleground 1, 4 on Timber Creek 1); each receiver goes in the one with the most free
+RCV_SIZES = (936928, 962336, 1626912, 1029280, 1052576, 1042528, 674560, 853824, 1530336, 1358464, 1099168, 293184,
+             867936, 1001664, 1063424, 882368, 970496, 1209568)   # by golfer code: its model and bank unpacked, the
+                           # larger of the normal and costume ones (v28 build: I/<golfer letter>/A + C; Peach and Yoshi
+                           # carry their textures in the model)
+RCV_SPARE = 0x20000        # and the instance's buffers, rounding
 INSTANCE = 0x8000F130
 QUEUE = 0x8001E924                                     # (f1 depth, r3 draw, r4 argument, r5 layer)
 GOLFER_DRAW = 0x8042AB38
@@ -95,12 +106,45 @@ ANGLE_FINAL = (0x804C6744, 0xD1BF0044)                 # its stfs f13,0x44(r31):
 BEND_END = (0x804C70F0, 0x801F000C)                    # its lwz r0,0xc(r31) where the timing miss's block (from
                                                        # 0x804C6D4C: angle + f x 10 degrees, backspin + speed x 1350 f,
                                                        # ...) and its skip meet; r30 = the player
+ROTATE = 0x8040347C        # the shooter pick's Doubles part: bl TOGGLE(the team's first player), then d17 = the team,
+TOGGLE = 0x80426B58        # + the side count when the record's toggle +0x1C2 is set (FUN_80426b58: toggle ^= 1)
+PICK_DONE = 0x804034AC     # where it loads d17 and starts that player's turn
+SOUND = 0x80011B88                                     # main.dol: (r3 sound, r4 volume) a common-set or voice sound
+GOLF_SOUNDS = (0x80422144,   # FUN_80421154's bl SOUND: the ball's contact (0x1B2, or by the lie's method +0x30, or
+                             # 0x1B5 / 0x1B6 by the club), the shot's only call there
+               0x80459DA4)   # FUN_804598c8's bl SOUND: a power shot's hit (by golfer code; Shy Guy's cave 10 too)
 S_SPIN = 0x1C8                                         # setup: the manual swing's spin combo, 1 A A topspin, 2 A B
                                                        # super topspin, 3 B B backspin, 4 B A super backspin, 0 none
 GRAVITY = 0.011                                        # the ball's fall, feet a frame per frame (measured in flight)
 SPIN_DV = (-0.25, -0.65, 0.2, 0.35)                    # by combo 1-4: x GRAVITY on the falling ball's y velocity a frame
                                                        # (a 212-yd Bomb: -14, -24, +13, +24 yd from the star)
 TYPE_CLUBS = tuple(t[1] for t in fb.SHOT_TYPES)
+
+# ---- v28 Pigskin: up to three receivers on the field (one team of 2-4: everyone but the QB; 2v2: the partner), each in
+# its player's slot: its rank (0 starts on the star), place and motion (fp_recv_update), its model's holders, pose and
+# draw record (fp_rcv)
+N_RCV = 4                  # a slot per player (the QB's empty), so a new turn reloads only the old QB's model
+R = {}
+_roff = 0
+for _name, _size in (("player", 4), ("rank", 4), ("x", 4), ("y", 4), ("z", 4), ("vx", 4), ("vz", 4), ("jump_t", 4), ("dive_t", 4),
+                     ("dive_x", 4), ("dive_z", 4), ("jump_h", 4), ("px", 4), ("py", 4), ("pz", 4), ("dx", 4),
+                     ("dz", 4), ("phase", 4), ("t", 4), ("model_id", 4), ("scale", 4), ("hips", 4), ("mh", 0x24),
+                     ("bh", 0x24), ("rec", 0x40)):
+    R[_name] = _roff
+    _roff += _size
+RSIZE = (_roff + 15) & ~15
+RCV_SPREAD = 18.0          # while the QB aims: receivers 1 and 2 stand this many feet to the left / right of the star
+RCV_BUMP = 2.5             # receivers closer than this (feet) are pushed apart (Andrew: "collide with each other")
+RCV_PULL = 1.0             # the receiver camera backs off by the receivers' spread times this
+PAD_TRIG_L, PAD_TRIG_R = 0x30, 0x34   # the pad's analog L / R (floats 0..1); the mod's controls send the left stick's
+                                      # up there and its down to R (app/common.ps1), so the receiver reads them as up/down
+GROUND_Q = fb.GROUND                   # (f1 x, f2 y, f3 z, r3 out[6]): the ground under a point
+BALL_STEP = 0x80417B00                 # (ball) one update of a ball's flight (the aim preview runs it in a loop)
+BALL_SIZE = 0xE0                       # a ball record (a team record +0xE8, of 0x1C8)
+B_FLAGS = 0xC0                         # the ball: bit 0 = it has touched down
+PRED_EVERY, PRED_MAX = 4, 720          # the landing run every 4 updates, at most 720 updates ahead
+BALL_SEE = 1 / 25.0                    # the football in the air drawn bigger past 25 ft from the camera (its size x
+                                       # distance / 25), so it stays in sight
 BAG = sum(1 << c for c in TYPE_CLUBS[:fb.TYPE_FG])     # the passes (the auto-aim never picks a kick)
 
 FB = fb.CAVES["state"][0]                              # football.py's state (fb.S offsets)
@@ -111,6 +155,7 @@ RUN_SPEED2 = 0.05 ** 2     # running from this speed (feet a frame) up
 CATCH_D = 25.0             # the hands go up for a ball this near (feet, across)
 BALL_SPIN = 0.45           # the football's spiral: radians a frame about its long axis
 THROW_UP = 1.3             # a pass leaves the hand this many hips heights up (the arrows start there)
+HAND_IN = 0.45            # the football in the hand: past the wrist this share of the forearm's length
 THROW_SIDE = 0.35          # ... over a spot this many hips heights in from the QB's hips toward the ball (its hand)
 BALL_A, BALL_B = 0.62, 0.36  # the football's half length and radius (feet; see ball_mesh)
 QB_WIND = 30               # frames of the power bar to cock the arm (or leg) back
@@ -140,6 +185,7 @@ def stfd(frs, d, ra): return ppc._d(54, frs, d, ra)
 def lha(rd, d, ra): return ppc._d(42, rd, d, ra)
 def fsub(d, a, b): return 0xFC000028 | d << 21 | a << 16 | b << 11
 def divw(rd, ra, rb): return ppc.divw(rd, ra, rb)
+def cmplw(ra, rb): return 0x7C000040 | ra << 16 | rb << 11
 BCTRL = 0x4E800421
 BLR, BEQLR, BNELR = ppc.BLR, fb.BEQLR, fb.BNELR
 lfsx = fb.lfsx
@@ -156,11 +202,13 @@ for _name, _size in (("rec", 0x40), ("tmp", 0x30), ("mh", 0x24), ("bh", 0x24), (
                      ("qb_follow", 4), ("qb_cock", 4), ("qb_rel", 4), ("qb_sx", 4), ("qb_sy", 4), ("qb_sz", 4), ("shift_x", 4),
                      ("shift_y", 4), ("shift_z", 4), ("bax", 4), ("bay", 4), ("baz", 4), ("bcs", 4),
                      ("bsn", 4), ("spin_c", 4), ("spin_s", 4), ("ball_m", 0x30), ("ball_at", 4), ("ball_mode", 4), ("bp", 12), ("bv", 12), ("throw_h", 4), ("lie_copy", 0x34),
-                     ("throw_up", 4), ("throw_side", 4), ("throw_dx", 4), ("throw_dz", 4), ("w_set", 4), ("w_mx", 4),
+                     ("throw_up", 4), ("hand_in", 4), ("throw_side", 4), ("throw_dx", 4), ("throw_dz", 4), ("w_set", 4), ("w_mx", 4),
                      ("w_mz", 4), ("tee_up", 4), ("tee_tilt", 4), ("dbg_ball", 4), ("dbg_ball_f", 4),
                      ("dbg_ball_up", 4),
                      ("dbg_noqb", 4), ("dbg_near", 4), ("dbg_clip", 4), ("dbg_t", 4), ("dbg_speed", 4),
                      ("types", 4), ("angle_k", 4 * 14), ("spin_k", 4 * 14), ("badge_reset", 4), ("a0", 4), ("s0", 4), ("spin_dv", 16),
+                     ("rcv", RSIZE * N_RCV), ("need", 4 * 18), ("lead", 4), ("hole_seen", 4), ("rot", 4), ("rcv_live", 4), ("catcher", 4), ("pred_n", 4), ("gq", 24), ("spread", 4),
+                     ("bump", 4), ("bump2", 4), ("pull", 4), ("gq_max", 4), ("ball_see2", 4), ("pball", BALL_SIZE),
                      ("magic", 8), ("cvt", 8), ("e", 16), ("t1", 16),
                      ("dbuf", 16 * N_JOINTS), ("q", 16 * N_JOINTS), ("map", 256)):
     if _size == 8 or _size == 16:
@@ -168,7 +216,8 @@ for _name, _size in (("rec", 0x40), ("tmp", 0x30), ("mh", 0x24), ("bh", 0x24), (
     D[_name] = _off
     _off += _size
 DATA_SIZE = (_off + 31) & ~31
-CONSTS = {"throw_up": THROW_UP, "throw_side": THROW_SIDE,"tee_up": BALL_A * 0.95, "tee_tilt": 0.25, "dbg_ball_f": 3.0, "dbg_ball_up": 4.0, "bax": 1.0, "bcs": 1.0, "spin_c": math.cos(BALL_SPIN), "spin_s": math.sin(BALL_SPIN), "big": 1e9, "zero": 0.0, "one": 1.0, "half": 0.5, "threehalf": 1.5, "tiny": 1e-6, "run_cycle": RUN_CYCLE,
+CONSTS = {"spread": RCV_SPREAD, "bump": RCV_BUMP, "bump2": RCV_BUMP ** 2, "pull": RCV_PULL, "gq_max": 9.0,
+          "ball_see2": BALL_SEE ** 2, "throw_up": THROW_UP, "hand_in": HAND_IN, "throw_side": THROW_SIDE, "tee_up": BALL_A * 0.95, "tee_tilt": 0.25, "dbg_ball_f": 3.0, "dbg_ball_up": 4.0, "bax": 1.0, "bcs": 1.0, "spin_c": math.cos(BALL_SPIN), "spin_s": math.sin(BALL_SPIN), "big": 1e9, "zero": 0.0, "one": 1.0, "half": 0.5, "threehalf": 1.5, "tiny": 1e-6, "run_cycle": RUN_CYCLE,
           "run_speed2": RUN_SPEED2, "catch_d2": CATCH_D ** 2, "inv_catch_d2": 1 / CATCH_D ** 2,
           "down_frames": float(T["down_frames"]), "inv_dive": 1.0 / T["dive_frames"], "inv_jump": 1.0 / T["jump_frames"],
           "qb_wind": 1.0 / QB_WIND, "qb_relf": 1.0 / QB_REL_FRAMES, "qb_follow": 1.0 / QB_FOLLOW,
@@ -236,36 +285,48 @@ def make_code(L):
     hi, lo = ppc.hi_lo(fbhud.BADGE_CACHE)
     a(ppc.lis(12, hi), ppc.stw(0, lo, 12), ppc.stw(0, lo + 4, 12))
     a.label("f_badge")
+    a(ppc.lis(12, 0x804E), ppc.lbz(0, HOLE & 0xFFFF, 12), ppc.lwz(9, D["hole_seen"], 31), ppc.cmpw(0, 9))
+    a.br("beq", "f_hole")                               # a new hole: the receivers' models let go (two sit in the
+    a(ppc.stw(0, D["hole_seen"], 31))                   # hole arena, heap 2), else they stay loaded between turns
+    for k in range(N_RCV):
+        a(ppc.addi(3, 31, D["rcv"] + RSIZE * k))
+        a.br("bl", "fp_release")
+    a.label("f_hole")
     a(ppc.lis(12, 0x804E), ppc.lbz(3, D17 & 0xFFFF, 12), ppc.andi_(0, 3, 0x80))
     a.br("bne", "f_none")
-    a(ppc.lbz(4, D15 & 0xFFFF, 12), ppc.lbz(5, D16 & 0xFFFF, 12), ppc.add(4, 3, 4), ppc.cmpw(4, 5))
-    a.br("blt", "f_rcv")
-    a(ppc.subf(4, 5, 4))
-    a.label("f_rcv")
-    a(ppc.cmpw(4, 3))
-    a.br("beq", "f_none")
     _li32(a, 12, PLAYERS)
-    a(ppc.mulli(3, 3, PLAYER_SIZE), ppc.add(30, 12, 3), ppc.mulli(4, 4, PLAYER_SIZE), ppc.add(29, 12, 4))
-    a(ppc.lwz(0, P_STATE, 30), ppc.cmpwi(0, 4))         # r30 = the QB, r29 = the receiver
-    a.br("blt", "f_none")
+    a(ppc.mulli(3, 3, PLAYER_SIZE), ppc.add(30, 12, 3))  # r30 = the QB
+    a(ppc.lwz(9, fb.P_REC, 30), ppc.lbz(0, REC_DONE, 9), ppc.cmpwi(0, 0))
+    a.br("bne", "f_none")                               # its team's hole over: the receivers let go (before the next
+    a(ppc.lwz(0, P_STATE, 30), ppc.cmpwi(0, 4))         # hole's files load into the hole arena)
+    a.br("blt", "f_hide")                               # (a turn changing hands: receivers kept, not drawn)
+    a.br("bgt", "f_state")
+    a(ppc.li(0, 0), ppc.stw(0, D["rcv_live"], 31))      # aiming: no play yet (fp_recv_update starts the next)
+    a.label("f_state")
     a(ppc.cmpwi(0, 8))
-    a.br("bgt", "f_none")
+    a.br("bgt", "f_hide")
+    a.br("bl", "fp_slots")                              # who receives
     a(ppc.lwz(0, D["dbg_noqb"], 31), ppc.cmpwi(0, 0))   # (tests: the game's own swing pose)
     a.br("bne", "f_noqb")
     _li32(a, 9, fb.BALL_MATRIX)                         # no golf ball (nor its tee) in Football's turns: its
     a(ppc.lfs(0, D["zero"], 31), ppc.stfs(0, 0x00, 9), ppc.stfs(0, 0x14, 9), ppc.stfs(0, 0x28, 9))  # scale 0 for the
     a.br("bl", "fp_qb")                                 # QB's throw or kick (the ball's draw, later this frame)
     a.label("f_noqb")
+    a(ppc.lwz(0, D["dbg_ball"], 31), ppc.cmpwi(0, 2))   # (tests: the football in receiver 0's right hand, after
+    a.br("beq", "f_noball")                             # its pose, over the QB's: fp_rcv)
     a(ppc.lwz(0, D["ball_mode"], 31), ppc.cmpwi(0, 0))  # the football: in the QB's hand or on the spot (fp_qb),
     a.br("bne", "f_ball")                               # in the air (or held after a catch)
-    a(ppc.lwz(0, D["dbg_ball"], 31), ppc.cmpwi(0, 0))   # (tests: the football by the receiver while aiming)
+    a(ppc.lwz(0, D["dbg_ball"], 31), ppc.cmpwi(0, 0))   # (tests: the football by receiver 0 while aiming)
     a.br("beq", "f_ball_air")
-    a(ppc.lfs(1, D["dbg_ball_f"], 31), ppc.lfs(2, D["dx"], 31), ppc.lfs(0, D["x"], 31), ppc.fmadds(0, 2, 1, 0),
-      ppc.stfs(0, D["bp"], 31), ppc.lfs(2, D["dz"], 31), ppc.lfs(0, D["z"], 31), ppc.fmadds(0, 2, 1, 0),
-      ppc.stfs(0, D["bp"] + 8, 31), ppc.lfs(0, D["y"], 31), ppc.lfs(1, D["dbg_ball_up"], 31), ppc.fadds(0, 0, 1),
-      ppc.stfs(0, D["bp"] + 4, 31))                     # 4 ft up, 3 ft toward the QB, across the view
-    a(ppc.lfs(4, D["dz"], 31), ppc.stfs(4, D["bv"], 31), ppc.lfs(4, D["half"], 31), ppc.stfs(4, D["bv"] + 4, 31),
-      ppc.lfs(4, D["dx"], 31), ppc.fneg(4, 4), ppc.stfs(4, D["bv"] + 8, 31), ppc.li(0, 1), ppc.stw(0, D["ball_mode"], 31))
+    a(ppc.lwz(9, D["lead"], 31), ppc.cmpwi(9, 0))      # (the receiver on the star)
+    a.br("beq", "f_ball_air")
+    a(ppc.lfs(1, D["dbg_ball_f"], 31), ppc.lfs(2, R["dx"], 9), ppc.lfs(0, R["px"], 9),
+      ppc.fmadds(0, 2, 1, 0), ppc.stfs(0, D["bp"], 31), ppc.lfs(2, R["dz"], 9), ppc.lfs(0, R["pz"], 9),
+      ppc.fmadds(0, 2, 1, 0), ppc.stfs(0, D["bp"] + 8, 31), ppc.lfs(0, R["py"], 9),
+      ppc.lfs(1, D["dbg_ball_up"], 31), ppc.fadds(0, 0, 1), ppc.stfs(0, D["bp"] + 4, 31))   # 4 ft up, 3 toward the QB
+    a(ppc.lfs(4, R["dz"], 9), ppc.stfs(4, D["bv"], 31), ppc.lfs(4, D["half"], 31), ppc.stfs(4, D["bv"] + 4, 31),
+      ppc.lfs(4, R["dx"], 9), ppc.fneg(4, 4), ppc.stfs(4, D["bv"] + 8, 31), ppc.li(0, 1),
+      ppc.stw(0, D["ball_mode"], 31))
     a.br("b", "f_ball")
     a.label("f_ball_air")
     a(ppc.lwz(0, P_STATE, 30), ppc.cmpwi(0, 7))
@@ -278,150 +339,23 @@ def make_code(L):
     a(ppc.lwz(0, fb.S["kind"], 24), ppc.cmpwi(0, fb.KIND_PASS))
     a.br("beq", "f_want")
     a(ppc.cmpwi(0, 0))
-    a.br("bne", "f_none")
+    a.br("bne", "f_hide")                               # a kick: no receivers on the field
     a(ppc.lwz(0, fb.S["kick_pick"], 24), ppc.cmpwi(0, 0))
-    a.br("bne", "f_none")
+    a.br("bne", "f_hide")
     a.label("f_want")
-    a(ppc.lwz(3, P_OBJ, 29), ppc.lwz(9, 0, 3), ppc.lwz(12, M_MODEL_ID, 9), ppc.mtctr(12), BCTRL)
-    a(ppc.mr(26, 3), ppc.lwz(0, D["model_id"], 31), ppc.cmpw(0, 26))
-    a.br("beq", "f_same")
-    a.br("bl", "fp_release")                            # another golfer's (or none): free them, then load
-    a(ppc.cmpwi(3, 0))
-    a.br("beq", "f_out")
-    a.br("bl", "fp_load")
-    a.br("b", "f_out")
-    a.label("f_same")
-    a(ppc.addi(28, 31, D["mh"]), ppc.mr(3, 28))
-    _call(a, INSTANCE)
-    a(ppc.mr(27, 3), ppc.cmpwi(3, 0))                   # r27 = its instance (0 while loading)
-    a.br("beq", "f_out")
-    # the motion (r25 = the clip, "t" its time) and where it faces
-    a(ppc.li(25, CLIP["ready"]), ppc.lfs(0, D["zero"], 31), ppc.stfs(0, D["t"], 31))
-    a(ppc.lwz(0, fb.S["kind"], 24), ppc.cmpwi(0, fb.KIND_PASS))
-    a.br("bne", "f_aim")
-    a(ppc.lfs(1, fb.S["rx"], 24), ppc.lfs(2, fb.S["ry"], 24), ppc.lfs(0, fb.S["jump_h"], 24), ppc.fadds(2, 2, 0),
-      ppc.lfs(3, fb.S["rz"], 24))
-    a(ppc.lwz(0, fb.S["phase"], 24), ppc.cmpwi(0, fb.PH_HOLD))
-    a.br("bne", "f_not_held")
-    a(ppc.li(25, CLIP["hold"]))
-    a.br("b", "f_face_ball")
-    a.label("f_not_held")
-    a(ppc.cmpwi(0, fb.PH_FLY))
-    a.br("bne", "f_face_ball")
-    a(ppc.lfs(8, fb.S["dive_t"], 24), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(8, 0))
-    a.br("ble", "f_no_dive")
-    a(ppc.lfs(4, fb.S["dive_x"], 24), ppc.lfs(5, fb.S["dive_z"], 24), ppc.lfs(6, D["one"], 31),
-      ppc.li(25, CLIP["down"]), ppc.lfs(0, D["down_frames"], 31), ppc.fcmpu(8, 0))
-    a.br("ble", "f_dir")
-    a(ppc.li(25, CLIP["dive"]), ppc.fsubs(8, 8, 0), ppc.lfs(0, D["inv_dive"], 31), ppc.fmuls(8, 8, 0),
-      ppc.lfs(0, D["one"], 31), ppc.fsubs(8, 0, 8), ppc.stfs(8, D["t"], 31))
-    a.br("b", "f_dir")
-    a.label("f_no_dive")
-    a(ppc.lfs(8, fb.S["jump_t"], 24), ppc.fcmpu(8, 0))
-    a.br("ble", "f_no_jump")
-    a(ppc.li(25, CLIP["jump"]), ppc.lfs(0, D["inv_jump"], 31), ppc.fmuls(8, 8, 0), ppc.lfs(0, D["one"], 31),
-      ppc.fsubs(8, 0, 8), ppc.stfs(8, D["t"], 31))
-    a.label("f_no_jump")
-    a(ppc.lfs(4, fb.S["rvx"], 24), ppc.lfs(5, fb.S["rvz"], 24), ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6),
-      ppc.lfs(0, D["run_speed2"], 31), ppc.fcmpu(6, 0))
-    a.br("ble", "f_still")
-    a(ppc.cmpwi(25, CLIP["ready"]))                      # running (unless in the air)
-    a.br("bne", "f_dir")
-    a(ppc.li(25, CLIP["run"]))
-    a.br("b", "f_dir")
-    a.label("f_still")                                  # standing: hands up for a ball coming near
-    a(ppc.cmpwi(25, CLIP["ready"]))
-    a.br("bne", "f_face_ball")
-    a(ppc.lwz(9, P_BALL, 30), ppc.lfs(4, B_POS, 9), ppc.fsubs(4, 4, 1), ppc.lfs(5, B_POS + 8, 9), ppc.fsubs(5, 5, 3),
-      ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6), ppc.lfs(0, D["catch_d2"], 31), ppc.fcmpu(6, 0))
-    a.br("bge", "f_face_ball")
-    a(ppc.li(25, CLIP["catch"]), ppc.lfs(0, D["inv_catch_d2"], 31), ppc.fmuls(7, 6, 0), ppc.lfs(0, D["one"], 31),
-      ppc.fsubs(7, 0, 7), ppc.stfs(7, D["t"], 31))
-    a.label("f_face_ball")
-    a(ppc.lwz(9, P_BALL, 30), ppc.lfs(4, B_POS, 9), ppc.fsubs(4, 4, 1), ppc.lfs(5, B_POS + 8, 9), ppc.fsubs(5, 5, 3),
-      ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6), ppc.lfs(0, D["tiny"], 31), ppc.fcmpu(6, 0))
-    a.br("bgt", "f_dir")
-    a(ppc.lfs(4, D["zero"], 31), ppc.lfs(5, D["one"], 31), ppc.fmr(6, 5))
-    a.br("b", "f_dir")
-    a.label("f_aim")
-    a(ppc.lwz(9, P_SETUP, 30), ppc.lfs(1, S_TARGET, 9), ppc.lfs(2, S_TARGET + 4, 9), ppc.lfs(3, S_TARGET + 8, 9))
-    a(ppc.lfs(7, D["dbg_near"], 31), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(7, 0))
-    a.br("ble", "f_face_ball")                          # (tests: "dbg_near" feet from the QB's ball toward the aim)
-    a(ppc.lwz(9, P_BALL, 30), ppc.lfs(4, B_POS, 9), ppc.lfs(2, B_POS + 4, 9), ppc.lfs(5, B_POS + 8, 9),
-      ppc.fsubs(1, 1, 4), ppc.fsubs(3, 3, 5), ppc.fmuls(6, 1, 1), ppc.fmadds(6, 3, 3, 6))
-    _rsqrt(a, 8, 6, 9, 10, 11)
-    a(ppc.fmuls(8, 8, 7), ppc.fmadds(1, 1, 8, 4), ppc.fmadds(3, 3, 8, 5))
-    a.br("b", "f_face_ball")
-    a.label("f_dir")                                    # (f4, f5) /= sqrt(f6)
-    _rsqrt(a, 7, 6, 8, 9, 10)
-    a(ppc.fmuls(4, 4, 7), ppc.fmuls(5, 5, 7))
-    a(ppc.stfs(1, D["x"], 31), ppc.stfs(2, D["y"], 31), ppc.stfs(3, D["z"], 31), ppc.stfs(4, D["dx"], 31),
-      ppc.stfs(5, D["dz"], 31))
-    a(ppc.lwz(9, P_OBJ, 29), ppc.lfs(0, OBJ_SCALE, 9), ppc.stfs(0, D["scale"], 31))
-    a(ppc.lbz(26, P_CODE, 29), ppc.cmplwi(26, N_RIGS - 1))   # r26 = the golfer code (no rig: Mario's)
-    a.br("ble", "f_code")
-    a(ppc.li(26, 0))
-    a.label("f_code")
-    a(ppc.mulli(9, 26, RIG_SIZE))
-    _li32(a, 10, L["rigs"])
-    a(ppc.add(9, 9, 10), ppc.lfs(1, RIG_HIPS, 9), ppc.stfs(1, D["hips"], 31))
-    a(ppc.cmpwi(25, CLIP["run"]))                        # the run's phase: on by distance, a cycle each
-    a.br("bne", "f_pose")                                # RUN_CYCLE hips heights
-    a(ppc.lfs(4, fb.S["rvx"], 24), ppc.lfs(5, fb.S["rvz"], 24), ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6))
-    _rsqrt(a, 7, 6, 8, 9, 10)
-    a(ppc.fmuls(6, 6, 7), ppc.lfs(0, D["scale"], 31), ppc.fmuls(1, 1, 0), ppc.lfs(0, D["run_cycle"], 31),
-      ppc.fmuls(1, 1, 0), ppc.fdivs(6, 6, 1), ppc.lfs(0, D["phase"], 31), ppc.fadds(0, 0, 6),
-      ppc.lfs(1, D["one"], 31), ppc.fcmpu(0, 1))
-    a.br("blt", "f_phase")
-    a(ppc.fsubs(0, 0, 1))
-    a.label("f_phase")
-    a(ppc.stfs(0, D["phase"], 31), ppc.stfs(0, D["t"], 31))
-    a.label("f_pose")
-    a(ppc.lwz(0, D["dbg_clip"], 31), ppc.cmpwi(0, 0))   # (tests: a clip forced, its time running at "dbg_speed")
-    a.br("blt", "f_pose2")
-    a(ppc.mr(25, 0), ppc.lfs(1, D["dbg_t"], 31), ppc.stfs(1, D["t"], 31), ppc.lfs(0, D["dbg_speed"], 31),
-      ppc.fadds(1, 1, 0), ppc.lfs(0, D["one"], 31), ppc.fcmpu(1, 0))
-    a.br("ble", "f_dbg_t")
-    a(ppc.fsubs(1, 1, 0))
-    a.label("f_dbg_t")
-    a(ppc.stfs(1, D["dbg_t"], 31))
-    a.label("f_pose2")
-    a(ppc.mr(3, 28))                                    # its skinned vertices' other buffer this frame
-    _call(a, HOLDER_FLIP)
-    a(ppc.mr(3, 27), ppc.mr(4, 26), ppc.mr(5, 25), ppc.lfs(1, D["t"], 31))
-    a.br("bl", "fp_pose")
-    # the world matrix: T(place) RotY(+Z to (dx, dz)) RotX(pitch) S(scale), pitched about the hips and dropped
-    r = D["rec"]
-    a(ppc.lfs(0, D["scale"], 31), ppc.lfs(4, D["dx"], 31), ppc.lfs(5, D["dz"], 31), ppc.lfs(6, D["pc"], 31),
-      ppc.lfs(7, D["ps"], 31))
-    a(ppc.fmuls(10, 4, 0), ppc.fmuls(11, 5, 0), ppc.fmuls(12, 6, 0), ppc.fmuls(13, 7, 0))   # dx s, dz s, c s, sn s
-    a(ppc.stfs(11, r + 0x00, 31), ppc.fmuls(1, 10, 7), ppc.stfs(1, r + 0x04, 31), ppc.fmuls(1, 10, 6),
-      ppc.stfs(1, r + 0x08, 31))
-    a(ppc.lfs(1, D["zero"], 31), ppc.stfs(1, r + 0x10, 31), ppc.stfs(12, r + 0x14, 31), ppc.fneg(1, 13),
-      ppc.stfs(1, r + 0x18, 31))
-    a(ppc.fneg(1, 10), ppc.stfs(1, r + 0x20, 31), ppc.fmuls(1, 11, 7), ppc.stfs(1, r + 0x24, 31),
-      ppc.fmuls(1, 11, 6), ppc.stfs(1, r + 0x28, 31))
-    a(ppc.lfs(8, D["hips"], 31), ppc.fmuls(9, 8, 7))                                       # h sn
-    a(ppc.lfs(1, D["x"], 31), fnmsubs(1, 10, 9, 1), ppc.stfs(1, r + 0x0C, 31))             # x - dx s h sn
-    a(ppc.lfs(1, D["z"], 31), fnmsubs(1, 11, 9, 1), ppc.stfs(1, r + 0x2C, 31))             # z - dz s h sn
-    a(ppc.lfs(1, D["one"], 31), ppc.lfs(2, D["drop"], 31), ppc.fsubs(1, 1, 2), ppc.fsubs(1, 1, 6),
-      ppc.fmuls(1, 1, 8), ppc.fmuls(1, 1, 0), ppc.lfs(2, D["y"], 31), ppc.fadds(1, 2, 1),
-      ppc.stfs(1, r + 0x1C, 31))                                                           # y + s h (1 - drop - c)
-    a(ppc.lbz(5, P_CODE, 29), ppc.stw(5, r + 0x30, 31), ppc.stw(28, r + 0x34, 31), ppc.li(0, 0),
-      ppc.stb(0, r + 0x38, 31))
-    a(ppc.cmpwi(5, 6), ppc.li(5, 1))
-    a.br("bne", "f_layer")
-    a(ppc.li(5, 3))
-    a.label("f_layer")
-    hi, lo = ppc.hi_lo(GOLFER_DEPTH)
-    a(ppc.lis(12, hi), ppc.lfs(1, lo, 12), ppc.addi(4, 31, r))
-    _li32(a, 3, GOLFER_DRAW)
-    _call(a, QUEUE)
+    for k in range(N_RCV):
+        a(ppc.addi(3, 31, D["rcv"] + RSIZE * k), ppc.li(4, k))
+        a.br("bl", "fp_rcv")
     a.label("f_out")
     _leave(a, 0x60, 22)
-    a.label("f_none")                                   # no receiver this frame: let our holders go
+    a.label("f_hide")                                   # no receivers drawn this frame (their models kept)
     a(ppc.li(0, 0), ppc.stw(0, D["throw_h"], 31))
-    a.br("bl", "fp_release")
+    a.br("b", "f_out")
+    a.label("f_none")                                   # Pigskin off, or nobody up: let their holders go
+    a(ppc.li(0, 0), ppc.stw(0, D["throw_h"], 31))
+    for k in range(N_RCV):
+        a(ppc.addi(3, 31, D["rcv"] + RSIZE * k))
+        a.br("bl", "fp_release")
     a.br("b", "f_out")
 
     # ---- fp_qb: (r30 = the QB, state 4..8, r24 = football's state, r31 = our data) the QB's pose over the game's
@@ -587,18 +521,10 @@ def make_code(L):
     a(ppc.stfs(4, D["bv"], 31), ppc.stfs(6, D["bv"] + 8, 31), ppc.lfs(1, D["half"], 31), ppc.stfs(1, D["bv"] + 4, 31))
     a(ppc.mulli(9, 29, RIG_SIZE))
     _li32(a, 10, L["rigs"])
-    a(ppc.add(9, 9, 10), ppc.lbz(11, J_INDEX["hand_r"], 9), ppc.cmpwi(11, 0xFF))
+    a(ppc.add(4, 9, 10), ppc.mr(3, 28), ppc.lwz(5, P_DRAWREC, 30))   # (the QB's draw record: its world matrix)
+    a.br("bl", "fp_palm")
+    a(ppc.cmpwi(3, 0))
     a.br("beq", "q_out")
-    a(ppc.lwz(10, 0x14, 28), ppc.mulli(11, 11, 0x60), ppc.add(11, 11, 10), ppc.lfs(1, 0x0C, 11), ppc.lfs(2, 0x1C, 11),
-      ppc.lfs(3, 0x2C, 11), lha(0, 0x34, 28), ppc.cmpwi(0, 1))
-    a.br("bne", "q_unmirrored")
-    a(ppc.fneg(1, 1))
-    a.label("q_unmirrored")
-    a(ppc.lwz(10, P_DRAWREC, 30))
-    for k in range(3):                                  # world = record (3x4) x (x, y, z, 1)
-        a(ppc.lfs(4, 0x10 * k, 10), ppc.lfs(5, 0x10 * k + 4, 10), ppc.lfs(6, 0x10 * k + 8, 10),
-          ppc.lfs(7, 0x10 * k + 0xC, 10), ppc.fmadds(7, 4, 1, 7), ppc.fmadds(7, 5, 2, 7), ppc.fmadds(7, 6, 3, 7),
-          ppc.stfs(7, D["bp"] + 4 * k, 31))
     a.label("q_ball_on")
     a(ppc.li(0, 1), ppc.stw(0, D["ball_mode"], 31))
     a.label("q_out")
@@ -645,6 +571,19 @@ def make_code(L):
     # Z0 = (f11, f12, f13); Y = cs Y0 + sn Z0 -> (f7, f8, f3); Z = cs Z0 - sn Y0 -> (f11, f12, f13)
     a(ppc.fmuls(7, 1, 9), ppc.fmadds(7, 2, 11, 7), ppc.fmuls(8, 2, 12), ppc.fmuls(3, 1, 10), ppc.fmadds(3, 2, 13, 3))
     a(ppc.fmuls(11, 1, 11), fnmsubs(11, 2, 9, 11), ppc.fmuls(12, 1, 12), ppc.fmuls(13, 1, 13), fnmsubs(13, 2, 10, 13))
+    a(ppc.lwz(0, D["ball_mode"], 31), ppc.cmpwi(0, 0))   # in the air: bigger when far from the camera (BALL_SEE)
+    a.br("bne", "b_store")
+    a(ppc.lwz(9, D["ball_at"], 31), ppc.lis(10, fb.CAMERA >> 16), ppc.lwz(10, fb.CAMERA & 0xFFFF, 10))
+    for k in range(3):
+        a(ppc.lfs(0, 4 * k, 9), ppc.lfs(1, 4 * k, 10), ppc.fsubs(0, 0, 1))
+        a(ppc.fmuls(9, 0, 0) if k == 0 else ppc.fmadds(9, 0, 0, 9))
+    a(ppc.lfs(0, D["ball_see2"], 31), ppc.fmuls(9, 9, 0), ppc.lfs(0, D["one"], 31), ppc.fcmpu(9, 0))
+    a.br("ble", "b_store")
+    _rsqrt(a, 10, 9, 0, 1, 2)
+    a(ppc.fmuls(10, 9, 10))                             # k = distance x BALL_SEE
+    for f in (4, 5, 6, 7, 8, 3, 11, 12, 13):
+        a(ppc.fmuls(f, f, 10))
+    a.label("b_store")
     m = D["ball_m"]
     a(ppc.lwz(9, D["ball_at"], 31))
     for k, f in enumerate((4, 7, 11)):
@@ -825,6 +764,568 @@ def make_code(L):
     a(ppc.lfs(0, D["zero"], 12), ppc.fcmpu(1, 0), fb.BGELR, ppc.slwi(3, 3, 2), ppc.addi(3, 3, D["spin_dv"]),
       lfsx(0, 12, 3), ppc.fadds(1, 1, 0), ppc.stfs(1, B_VEL + 4, 29), BLR)
 
+    # ---- fp_palm: (r3 = a golfer's model instance, r4 = its rig, r5 = its world matrix (3x4); r31 = our data) the
+    # football's place in its right hand, "bp": the hand bone (at the wrist) on along the forearm by "hand_in" of the
+    # forearm's length, into the palm (Andrew: "the ball isnt really in their hands when throwing": it sat on the
+    # wrist); mirrored for a lefty (instance +0x34 = 1). r3 = 0 when the rig has no hand. Uses r10-r12, f0-f7.
+    a.label("fp_palm")
+    a(ppc.lbz(11, J_INDEX["hand_r"], 4), ppc.cmpwi(11, 0xFF))
+    a.br("beq", "pm_none")
+    a(ppc.lwz(10, 0x14, 3), ppc.mulli(11, 11, 0x60), ppc.add(11, 11, 10), ppc.lfs(1, 0x0C, 11), ppc.lfs(2, 0x1C, 11),
+      ppc.lfs(3, 0x2C, 11), ppc.lbz(12, J_INDEX["farm_r"], 4), ppc.cmpwi(12, 0xFF))
+    a.br("beq", "pm_mirror")
+    a(ppc.mulli(12, 12, 0x60), ppc.add(12, 12, 10), ppc.lfs(0, D["hand_in"], 31))
+    for f, off in ((1, 0x0C), (2, 0x1C), (3, 0x2C)):
+        a(ppc.lfs(4, off, 12), ppc.fsubs(4, f, 4), ppc.fmadds(f, 4, 0, f))   # hand + (hand - forearm) x hand_in
+    a.label("pm_mirror")
+    a(lha(0, 0x34, 3), ppc.cmpwi(0, 1))
+    a.br("bne", "pm_world")
+    a(ppc.fneg(1, 1))
+    a.label("pm_world")
+    for k in range(3):                                  # world = matrix (3x4) x (x, y, z, 1)
+        a(ppc.lfs(4, 0x10 * k, 5), ppc.lfs(5, 0x10 * k + 4, 5), ppc.lfs(6, 0x10 * k + 8, 5),
+          ppc.lfs(7, 0x10 * k + 0xC, 5), ppc.fmadds(7, 4, 1, 7), ppc.fmadds(7, 5, 2, 7), ppc.fmadds(7, 6, 3, 7),
+          ppc.stfs(7, D["bp"] + 4 * k, 31))
+    a(ppc.li(3, 1), BLR)
+    a.label("pm_none")
+    a(ppc.li(3, 0), BLR)
+
+    # ---- fp_slots: (r31 = our data) who receives: the QB's team-mates (the players whose number less the QB's is a
+    # multiple of the side count: one team of 2-4, everyone else; 2v2, the partner), from the one after the QB on, into
+    # the slots; the slots left over empty
+    a.label("fp_slots")
+    a(ppc.lis(12, 0x804E), ppc.lbz(3, D17 & 0xFFFF, 12), ppc.lbz(4, D15 & 0xFFFF, 12), ppc.lbz(5, D16 & 0xFFFF, 12),
+      ppc.li(6, 0), ppc.li(0, 0), ppc.stw(0, D["lead"], 31), ppc.cmpwi(4, 1))
+    a.br("bge", "sl_next")
+    a(ppc.li(4, 1))
+    a.label("sl_next")                                  # r6 = p, each player's slot
+    a(ppc.mulli(9, 6, RSIZE), ppc.addi(9, 9, D["rcv"]), ppc.add(9, 9, 31), ppc.li(0, 0), ppc.cmpw(6, 5))
+    a.br("bge", "sl_set")                               # (no such player)
+    a(ppc.subf(8, 3, 6), ppc.cmpwi(8, 0))               # d = (p - QB) mod count; 0 is the QB
+    a.br("beq", "sl_set")
+    a.br("bgt", "sl_d")
+    a(ppc.add(8, 8, 5))
+    a.label("sl_d")
+    a(ppc.divw(10, 8, 4), ppc.mullw(11, 10, 4), ppc.cmpw(11, 8))
+    a.br("bne", "sl_set")                               # another side's
+    a(ppc.addi(10, 10, -1), ppc.stw(10, R["rank"], 9), ppc.cmpwi(10, 0))   # rank = d / sides - 1: 0 on the star
+    a.br("bne", "sl_who")
+    a(ppc.stw(9, D["lead"], 31))
+    a.label("sl_who")
+    _li32(a, 10, PLAYERS)
+    a(ppc.mulli(0, 6, PLAYER_SIZE), ppc.add(0, 10, 0))
+    a.label("sl_set")
+    a(ppc.stw(0, R["player"], 9), ppc.addi(6, 6, 1), ppc.cmpwi(6, N_RCV))
+    a.br("blt", "sl_next")
+    a(BLR)
+
+    # ---- fp_ground: (f1 x, f2 y, f3 z; r31 = our data) f2 = the ground's height under (x, z) (y when the query finds
+    # nothing near); f1, f3 kept
+    a.label("fp_ground")
+    a(ppc.stwu(1, -0x20, 1), ppc.mflr(0), ppc.stw(0, 0x24, 1), ppc.stfs(1, 0x08, 1), ppc.stfs(2, 0x0C, 1),
+      ppc.stfs(3, 0x10, 1), ppc.addi(3, 31, D["gq"]))
+    _call(a, GROUND_Q)
+    a(ppc.lfs(1, 0x08, 1), ppc.lfs(3, 0x10, 1), ppc.lfs(2, D["gq"] + 4, 31), ppc.lfs(0, 0x0C, 1),
+      ppc.lfs(4, D["gq_max"], 31), ppc.fadds(4, 0, 4), ppc.fcmpu(2, 4))
+    a.br("blt", "gq_ok")
+    a(ppc.fmr(2, 0))
+    a.label("gq_ok")
+    a(ppc.lwz(0, 0x24, 1), ppc.mtlr(0), ppc.addi(1, 1, 0x20), BLR)
+
+    # ---- fp_rcv: (r3 = a receiver slot, r4 = its number; r30 = the QB, r24 = football's state, r31 = our data) a
+    # receiver: its model in the slot's holders (or let go), then where it is and how it moves, its pose and its draw
+    a.label("fp_rcv")
+    _enter(a, 0x40, 21)
+    a(ppc.mr(23, 3), ppc.mr(22, 4), ppc.lwz(21, R["rank"], 3), ppc.lwz(29, R["player"], 23), ppc.cmpwi(29, 0))
+    a.br("bne", "rv_on")
+    a(ppc.mr(3, 23))
+    a.br("bl", "fp_release")
+    a.br("b", "rv_out")
+    a.label("rv_on")
+    a(ppc.lwz(3, P_OBJ, 29), ppc.lwz(9, 0, 3), ppc.lwz(12, M_MODEL_ID, 9), ppc.mtctr(12), BCTRL)
+    a(ppc.mr(26, 3), ppc.lwz(0, R["model_id"], 23), ppc.cmpw(0, 26))
+    a.br("beq", "rv_same")
+    a(ppc.mr(3, 23))
+    a.br("bl", "fp_release")                            # another golfer's (or none): free them, then load
+    a(ppc.cmpwi(3, 0))
+    a.br("beq", "rv_out")
+    # one load at a time (a load takes its memory a few frames on, and the heaps' free counts must show it before the
+    # next is placed), into whichever of RCV_HEAPS has the most free, if that's the golfer's size (RCV_SIZES) with room
+    # to spare (three golfers don't fit the main heap: the third stalled loading)
+    for k in range(N_RCV):
+        for name in ("mh", "bh"):
+            a(ppc.lwz(0, D["rcv"] + RSIZE * k + R[name] + 4, 31), ppc.cmpwi(0, 1))
+            a.br("beq", "rv_out")
+    a(ppc.lbz(9, P_CODE, 29), ppc.cmplwi(9, len(RCV_SIZES) - 1))
+    a.br("ble", "rv_size")
+    a(ppc.li(9, len(RCV_SIZES) - 1))                     # (past the table: its last entry, the largest)
+    a.label("rv_size")
+    a(ppc.slwi(9, 9, 2), ppc.addi(9, 9, D["need"]), ppc.lwzx(10, 31, 9), ppc.li(5, -1), ppc.li(6, 0))
+    for h in RCV_HEAPS:
+        hi, lo = ppc.hi_lo(HEAPS + 0x14 * h + 4)
+        a(ppc.lis(12, hi), ppc.lwz(0, lo, 12), cmplw(0, 10))
+        a.br("blt", f"rv_heap{h}")
+        a(cmplw(0, 6))
+        a.br("ble", f"rv_heap{h}")
+        a(ppc.mr(6, 0), ppc.li(5, h))
+        a.label(f"rv_heap{h}")
+    a(ppc.cmpwi(5, 0))
+    a.br("blt", "rv_out")                               # (no room anywhere: not drawn this frame)
+    a.label("rv_load")
+    a(ppc.mr(3, 23), ppc.mr(4, 26))
+    a.br("bl", "fp_load")
+    a.br("b", "rv_out")
+    a.label("rv_same")
+    a(ppc.addi(28, 23, R["mh"]), ppc.mr(3, 28))
+    _call(a, INSTANCE)
+    a(ppc.mr(27, 3), ppc.cmpwi(3, 0))                   # r27 = its instance (0 while loading)
+    a.br("beq", "rv_out")
+    # the motion (r25 = the clip, "t" its time) and where it faces
+    a(ppc.li(25, CLIP["ready"]), ppc.lfs(0, D["zero"], 31), ppc.stfs(0, R["t"], 23))
+    a(ppc.lwz(0, fb.S["kind"], 24), ppc.cmpwi(0, fb.KIND_PASS))
+    a.br("bne", "rv_aim")
+    a(ppc.lwz(0, D["rcv_live"], 31), ppc.cmpwi(0, 0))   # (the play's first update still to come: where it stood)
+    a.br("beq", "rv_placed")
+    a(ppc.lfs(1, R["x"], 23), ppc.lfs(2, R["y"], 23), ppc.lfs(0, R["jump_h"], 23), ppc.fadds(2, 2, 0),
+      ppc.lfs(3, R["z"], 23))
+    a(ppc.lwz(0, fb.S["phase"], 24), ppc.cmpwi(0, fb.PH_HOLD))
+    a.br("bne", "rv_not_held")
+    a(ppc.lwz(0, D["catcher"], 31), ppc.cmpw(0, 22))
+    a.br("bne", "rv_face_ball")                         # the others stand by
+    a(ppc.li(25, CLIP["hold"]))
+    a.br("b", "rv_face_ball")
+    a.label("rv_not_held")
+    a(ppc.cmpwi(0, fb.PH_FLY))
+    a.br("bne", "rv_face_ball")
+    a(ppc.lfs(8, R["dive_t"], 23), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(8, 0))
+    a.br("ble", "rv_no_dive")
+    a(ppc.lfs(4, R["dive_x"], 23), ppc.lfs(5, R["dive_z"], 23), ppc.lfs(6, D["one"], 31),
+      ppc.li(25, CLIP["down"]), ppc.lfs(0, D["down_frames"], 31), ppc.fcmpu(8, 0))
+    a.br("ble", "rv_dir")
+    a(ppc.li(25, CLIP["dive"]), ppc.fsubs(8, 8, 0), ppc.lfs(0, D["inv_dive"], 31), ppc.fmuls(8, 8, 0),
+      ppc.lfs(0, D["one"], 31), ppc.fsubs(8, 0, 8), ppc.stfs(8, R["t"], 23))
+    a.br("b", "rv_dir")
+    a.label("rv_no_dive")
+    a(ppc.lfs(8, R["jump_t"], 23), ppc.fcmpu(8, 0))
+    a.br("ble", "rv_no_jump")
+    a(ppc.li(25, CLIP["jump"]), ppc.lfs(0, D["inv_jump"], 31), ppc.fmuls(8, 8, 0), ppc.lfs(0, D["one"], 31),
+      ppc.fsubs(8, 0, 8), ppc.stfs(8, R["t"], 23))
+    a.label("rv_no_jump")
+    a(ppc.lfs(4, R["vx"], 23), ppc.lfs(5, R["vz"], 23), ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6),
+      ppc.lfs(0, D["run_speed2"], 31), ppc.fcmpu(6, 0))
+    a.br("ble", "rv_still")
+    a(ppc.cmpwi(25, CLIP["ready"]))                      # running (unless in the air)
+    a.br("bne", "rv_dir")
+    a(ppc.li(25, CLIP["run"]))
+    a.br("b", "rv_dir")
+    a.label("rv_still")                                 # standing: hands up for a ball coming near
+    a(ppc.cmpwi(25, CLIP["ready"]))
+    a.br("bne", "rv_face_ball")
+    a(ppc.lwz(9, P_BALL, 30), ppc.lfs(4, B_POS, 9), ppc.fsubs(4, 4, 1), ppc.lfs(5, B_POS + 8, 9), ppc.fsubs(5, 5, 3),
+      ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6), ppc.lfs(0, D["catch_d2"], 31), ppc.fcmpu(6, 0))
+    a.br("bge", "rv_face_ball")
+    a(ppc.li(25, CLIP["catch"]), ppc.lfs(0, D["inv_catch_d2"], 31), ppc.fmuls(7, 6, 0), ppc.lfs(0, D["one"], 31),
+      ppc.fsubs(7, 0, 7), ppc.stfs(7, R["t"], 23))
+    a.br("b", "rv_face_ball")
+    # aiming (or a kick picked): rank 0 on the landing star, 1 and 2 "spread" feet to its left and right
+    a.label("rv_aim")
+    a(ppc.lwz(9, P_SETUP, 30), ppc.lfs(1, S_TARGET, 9), ppc.lfs(2, S_TARGET + 4, 9), ppc.lfs(3, S_TARGET + 8, 9))
+    a(ppc.lwz(9, P_BALL, 30), ppc.lfs(4, B_POS, 9), ppc.lfs(5, B_POS + 8, 9), ppc.fsubs(4, 1, 4), ppc.fsubs(5, 3, 5),
+      ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6), ppc.lfs(0, D["tiny"], 31), ppc.fcmpu(6, 0))
+    a.br("ble", "rv_stand")
+    _rsqrt(a, 7, 6, 8, 9, 10)
+    a(ppc.fmuls(4, 4, 7), ppc.fmuls(5, 5, 7))           # (f4, f5) = the throw's way
+    a(ppc.cmpwi(21, 0))
+    a.br("bne", "rv_side")
+    a(ppc.lfs(7, D["dbg_near"], 31), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(7, 0))
+    a.br("ble", "rv_stand")                             # (tests: "dbg_near" feet from the QB's ball toward the aim)
+    a(ppc.lwz(9, P_BALL, 30), ppc.lfs(1, B_POS, 9), ppc.lfs(2, B_POS + 4, 9), ppc.lfs(3, B_POS + 8, 9),
+      ppc.fmadds(1, 4, 7, 1), ppc.fmadds(3, 5, 7, 3))
+    a.br("b", "rv_stand")
+    a.label("rv_side")
+    a(ppc.lfs(0, D["spread"], 31), ppc.cmpwi(21, 1))
+    a.br("bne", "rv_right")
+    a(ppc.fneg(0, 0))
+    a.label("rv_right")
+    a(fnmsubs(1, 5, 0, 1), ppc.fmadds(3, 4, 0, 3))      # across the throw: x - dz s, z + dx s
+    a.br("bl", "fp_ground")
+    a.label("rv_stand")
+    a(ppc.stfs(1, R["x"], 23), ppc.stfs(2, R["y"], 23), ppc.stfs(3, R["z"], 23))
+    a.label("rv_placed")
+    a(ppc.lfs(1, R["x"], 23), ppc.lfs(2, R["y"], 23), ppc.lfs(3, R["z"], 23))
+    a.label("rv_face_ball")
+    a(ppc.lwz(9, P_BALL, 30), ppc.lfs(4, B_POS, 9), ppc.fsubs(4, 4, 1), ppc.lfs(5, B_POS + 8, 9), ppc.fsubs(5, 5, 3),
+      ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6), ppc.lfs(0, D["tiny"], 31), ppc.fcmpu(6, 0))
+    a.br("bgt", "rv_dir")
+    a(ppc.lfs(4, D["zero"], 31), ppc.lfs(5, D["one"], 31), ppc.fmr(6, 5))
+    a.label("rv_dir")                                   # (f4, f5) /= sqrt(f6)
+    _rsqrt(a, 7, 6, 8, 9, 10)
+    a(ppc.fmuls(4, 4, 7), ppc.fmuls(5, 5, 7))
+    a(ppc.stfs(1, R["px"], 23), ppc.stfs(2, R["py"], 23), ppc.stfs(3, R["pz"], 23), ppc.stfs(4, R["dx"], 23),
+      ppc.stfs(5, R["dz"], 23))
+    a(ppc.lwz(9, P_OBJ, 29), ppc.lfs(0, OBJ_SCALE, 9), ppc.stfs(0, R["scale"], 23))
+    a(ppc.lbz(26, P_CODE, 29), ppc.cmplwi(26, N_RIGS - 1))   # r26 = the golfer code (no rig: Mario's)
+    a.br("ble", "rv_code")
+    a(ppc.li(26, 0))
+    a.label("rv_code")
+    a(ppc.mulli(9, 26, RIG_SIZE))
+    _li32(a, 10, L["rigs"])
+    a(ppc.add(9, 9, 10), ppc.lfs(1, RIG_HIPS, 9), ppc.stfs(1, R["hips"], 23))
+    a(ppc.cmpwi(25, CLIP["run"]))                        # the run's phase: on by distance, a cycle each
+    a.br("bne", "rv_pose")                               # RUN_CYCLE hips heights
+    a(ppc.lfs(4, R["vx"], 23), ppc.lfs(5, R["vz"], 23), ppc.fmuls(6, 4, 4), ppc.fmadds(6, 5, 5, 6))
+    _rsqrt(a, 7, 6, 8, 9, 10)
+    a(ppc.fmuls(6, 6, 7), ppc.lfs(0, R["scale"], 23), ppc.fmuls(1, 1, 0), ppc.lfs(0, D["run_cycle"], 31),
+      ppc.fmuls(1, 1, 0), ppc.fdivs(6, 6, 1), ppc.lfs(0, R["phase"], 23), ppc.fadds(0, 0, 6),
+      ppc.lfs(1, D["one"], 31), ppc.fcmpu(0, 1))
+    a.br("blt", "rv_phase")
+    a(ppc.fsubs(0, 0, 1))
+    a.label("rv_phase")
+    a(ppc.stfs(0, R["phase"], 23), ppc.stfs(0, R["t"], 23))
+    a.label("rv_pose")
+    a(ppc.cmpwi(21, 0))                                 # (tests: receiver 0 takes a forced clip, "dbg_clip", its time
+    a.br("bne", "rv_pose2")                             # running at "dbg_speed")
+    a(ppc.lwz(0, D["dbg_clip"], 31), ppc.cmpwi(0, 0))
+    a.br("blt", "rv_pose2")
+    a(ppc.mr(25, 0), ppc.lfs(1, D["dbg_t"], 31), ppc.stfs(1, R["t"], 23), ppc.lfs(0, D["dbg_speed"], 31),
+      ppc.fadds(1, 1, 0), ppc.lfs(0, D["one"], 31), ppc.fcmpu(1, 0))
+    a.br("ble", "rv_dbg_t")
+    a(ppc.fsubs(1, 1, 0))
+    a.label("rv_dbg_t")
+    a(ppc.stfs(1, D["dbg_t"], 31))
+    a.label("rv_pose2")
+    a(ppc.mr(3, 28))                                    # its skinned vertices' other buffer this frame
+    _call(a, HOLDER_FLIP)
+    a(ppc.mr(3, 27), ppc.mr(4, 26), ppc.mr(5, 25), ppc.lfs(1, R["t"], 23))
+    a.br("bl", "fp_pose")
+    # the world matrix: T(place) RotY(+Z to (dx, dz)) RotX(pitch) S(scale), pitched about the hips and dropped
+    r = R["rec"]
+    a(ppc.lfs(0, R["scale"], 23), ppc.lfs(4, R["dx"], 23), ppc.lfs(5, R["dz"], 23), ppc.lfs(6, D["pc"], 31),
+      ppc.lfs(7, D["ps"], 31))
+    a(ppc.fmuls(10, 4, 0), ppc.fmuls(11, 5, 0), ppc.fmuls(12, 6, 0), ppc.fmuls(13, 7, 0))   # dx s, dz s, c s, sn s
+    a(ppc.stfs(11, r + 0x00, 23), ppc.fmuls(1, 10, 7), ppc.stfs(1, r + 0x04, 23), ppc.fmuls(1, 10, 6),
+      ppc.stfs(1, r + 0x08, 23))
+    a(ppc.lfs(1, D["zero"], 31), ppc.stfs(1, r + 0x10, 23), ppc.stfs(12, r + 0x14, 23), ppc.fneg(1, 13),
+      ppc.stfs(1, r + 0x18, 23))
+    a(ppc.fneg(1, 10), ppc.stfs(1, r + 0x20, 23), ppc.fmuls(1, 11, 7), ppc.stfs(1, r + 0x24, 23),
+      ppc.fmuls(1, 11, 6), ppc.stfs(1, r + 0x28, 23))
+    a(ppc.lfs(8, R["hips"], 23), ppc.fmuls(9, 8, 7))                                       # h sn
+    a(ppc.lfs(1, R["px"], 23), fnmsubs(1, 10, 9, 1), ppc.stfs(1, r + 0x0C, 23))            # x - dx s h sn
+    a(ppc.lfs(1, R["pz"], 23), fnmsubs(1, 11, 9, 1), ppc.stfs(1, r + 0x2C, 23))            # z - dz s h sn
+    a(ppc.lfs(1, D["one"], 31), ppc.lfs(2, D["drop"], 31), ppc.fsubs(1, 1, 2), ppc.fsubs(1, 1, 6),
+      ppc.fmuls(1, 1, 8), ppc.fmuls(1, 1, 0), ppc.lfs(2, R["py"], 23), ppc.fadds(1, 2, 1),
+      ppc.stfs(1, r + 0x1C, 23))                                                           # y + s h (1 - drop - c)
+    a(ppc.cmpwi(21, 0))                                 # (tests: the football in receiver 0's right hand, this frame's
+    a.br("bne", "rv_queue")                             # pose: MODEL_DRAW turns the bones into skin matrices once drawn)
+    a(ppc.lwz(0, D["dbg_ball"], 31), ppc.cmpwi(0, 2))
+    a.br("bne", "rv_queue")
+    a(ppc.mulli(4, 26, RIG_SIZE))
+    _li32(a, 10, L["rigs"])
+    a(ppc.add(4, 4, 10), ppc.mr(3, 27), ppc.addi(5, 23, r))
+    a.br("bl", "fp_palm")
+    a(ppc.lfs(4, R["dx"], 23), ppc.stfs(4, D["bv"], 31), ppc.lfs(4, D["half"], 31), ppc.stfs(4, D["bv"] + 4, 31),
+      ppc.lfs(4, R["dz"], 23), ppc.stfs(4, D["bv"] + 8, 31), ppc.li(0, 1), ppc.stw(0, D["ball_mode"], 31))
+    a.br("bl", "fp_ball")
+    a.label("rv_queue")
+    a(ppc.lbz(5, P_CODE, 29), ppc.stw(5, r + 0x30, 23), ppc.stw(28, r + 0x34, 23), ppc.li(0, 0),
+      ppc.stb(0, r + 0x38, 23))
+    a(ppc.cmpwi(5, 6), ppc.li(5, 1))
+    a.br("bne", "rv_layer")
+    a(ppc.li(5, 3))
+    a.label("rv_layer")
+    hi, lo = ppc.hi_lo(GOLFER_DEPTH)
+    a(ppc.lis(12, hi), ppc.lfs(1, lo, 12), ppc.addi(4, 23, r))
+    _li32(a, 3, GOLFER_DRAW)
+    _call(a, QUEUE)
+    a.label("rv_out")
+    _leave(a, 0x40, 21)
+
+    # ---- fp_recv_update: bl from football.py's fb_frame every update of a pass in the air (r28 = the setup, r29 =
+    # the ball, r30 = the QB, r31 = football's state): every receiver runs, jumps and dives on its own pad, bumps off
+    # the others, and the first with the ball in reach catches it
+    a.label("fp_recv_update")
+    _enter(a, 0x40, 21)
+    a(ppc.mr(24, 31), ppc.mr(21, 29))                    # r24 = football's state, r21 = the ball
+    _li32(a, 31, data)
+    a(ppc.lwz(0, D["rcv_live"], 31), ppc.cmpwi(0, 0))
+    a.br("bne", "ru_live")
+    a(ppc.li(0, 1), ppc.stw(0, D["rcv_live"], 31), ppc.li(0, -1), ppc.stw(0, D["catcher"], 31), ppc.li(0, 0),
+      ppc.stw(0, D["pred_n"], 31), ppc.lfs(0, D["zero"], 31))
+    for k in range(N_RCV):
+        for name in ("vx", "vz", "jump_t", "dive_t", "jump_h"):
+            a(ppc.stfs(0, D["rcv"] + RSIZE * k + R[name], 31))
+    a.label("ru_live")
+    a(ppc.lwz(0, fb.S["phase"], 24), ppc.cmpwi(0, fb.PH_FLY))
+    a.br("bne", "ru_out")
+    for k in range(N_RCV):
+        a(ppc.addi(23, 31, D["rcv"] + RSIZE * k))
+        a.br("bl", "fp_run1")
+    a.br("bl", "fp_bump")
+    for k in range(N_RCV):
+        a(ppc.addi(23, 31, D["rcv"] + RSIZE * k), ppc.li(22, k))
+        a.br("bl", "fp_catch1")
+    a.label("ru_out")
+    _leave(a, 0x40, 21)
+
+    # ---- fp_run1: (r23 = a receiver slot; r21 = the ball, r24 = football's state, r31 = our data) its own pad moves
+    # it: the main stick, plus the analog triggers for up and down (the mod's controls put the left stick's up and down
+    # there, so before v28 a real controller only ran sideways), camera-relative (up = toward the throw); A jumps, B
+    # dives (along the stick, or at the ball); on the ground
+    a.label("fp_run1")
+    a(ppc.lwz(9, R["player"], 23), ppc.cmpwi(9, 0), BEQLR)
+    a(ppc.stwu(1, -0x20, 1), ppc.mflr(0), ppc.stw(0, 0x24, 1))
+    a(ppc.lwz(6, fb.P_PAD, 9), ppc.lhz(0, fb.PAD_PRESSED, 6), ppc.stw(0, 0x08, 1))
+    a(ppc.lis(0, 0x4330), ppc.stw(0, 0x10, 1), lfd(0, D["magic"], 31))
+    for off, f in ((fb.PAD_STICK_X, 7), (fb.PAD_STICK_Y, 8)):    # s8 -> float, the usual 0x43300000 way
+        a(ppc.lbz(7, off, 6), ppc.extsb(7, 7), ppc.xoris(7, 7, 0x8000), ppc.stw(7, 0x14, 1), lfd(f, 0x10, 1),
+          fsub(f, f, 0), ppc.frsp(f, f))
+    a(ppc.lfs(0, fb.C["stick"], 24), ppc.fmuls(7, 7, 0), ppc.fmuls(8, 8, 0))
+    a(ppc.lfs(0, PAD_TRIG_L, 6), ppc.fadds(8, 8, 0), ppc.lfs(0, PAD_TRIG_R, 6), ppc.fsubs(8, 8, 0))
+    a(ppc.fmuls(9, 7, 7), ppc.fmadds(9, 8, 8, 9), ppc.lfs(0, fb.C["dead2"], 24), ppc.fcmpu(9, 0))
+    a.br("bge", "r1_live")
+    a(ppc.lfs(7, D["zero"], 31), ppc.fmr(8, 7))
+    a.br("b", "r1_dir")
+    a.label("r1_live")
+    a(ppc.lfs(0, D["one"], 31), ppc.fcmpu(9, 0))
+    a.br("ble", "r1_dir")
+    _rsqrt(a, 10, 9, 11, 12, 13)
+    a(ppc.fmuls(7, 7, 10), ppc.fmuls(8, 8, 10))
+    a.label("r1_dir")                       # wanted velocity (f6, f7) = (right x sx + forward x sy) x run
+    a(ppc.fmr(1, 7), ppc.fmr(2, 8), ppc.lfs(4, fb.S["fx"], 24), ppc.lfs(5, fb.S["fz"], 24))
+    a(ppc.fmuls(6, 4, 2), ppc.fmuls(7, 5, 1), ppc.fsubs(6, 6, 7))
+    a(ppc.fmuls(7, 4, 1), ppc.fmuls(8, 5, 2), ppc.fadds(7, 7, 8))
+    a(ppc.lfs(0, fb.C["run"], 24), ppc.fmuls(6, 6, 0), ppc.fmuls(7, 7, 0))
+    a(ppc.lfs(8, R["dive_t"], 23), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(8, 0))   # a dive: on along it, then down
+    a.br("ble", "r1_no_dive")
+    a(ppc.lfs(0, D["one"], 31), ppc.fsubs(8, 8, 0), ppc.stfs(8, R["dive_t"], 23), ppc.lfs(0, fb.C["down_frames"], 24),
+      ppc.fcmpu(8, 0))
+    a.br("blt", "r1_down")
+    a(ppc.lfs(0, fb.C["dive_speed"], 24), ppc.lfs(6, R["dive_x"], 23), ppc.lfs(7, R["dive_z"], 23),
+      ppc.fmuls(6, 6, 0), ppc.fmuls(7, 7, 0))
+    a.br("b", "r1_set")
+    a.label("r1_down")
+    a(ppc.lfs(6, D["zero"], 31), ppc.fmr(7, 6))
+    a.br("b", "r1_set")
+    a.label("r1_no_dive")
+    a(ppc.lwz(9, 0x08, 1), ppc.lfs(8, R["jump_t"], 23), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(8, 0))
+    a.br("bgt", "r1_glide")                 # in the air: no new jump or dive
+    a(ppc.andi_(0, 9, fb.PAD_B))
+    a.br("beq", "r1_no_b")
+    a(ppc.fmr(1, 6), ppc.fmr(2, 7), ppc.fmuls(9, 6, 6), ppc.fmadds(9, 7, 7, 9), ppc.lfs(0, D["tiny"], 31),
+      ppc.fcmpu(9, 0))
+    a.br("bgt", "r1_dive_dir")
+    a(ppc.lfs(1, B_POS, 21), ppc.lfs(0, R["x"], 23), ppc.fsubs(1, 1, 0), ppc.lfs(2, B_POS + 8, 21),
+      ppc.lfs(0, R["z"], 23), ppc.fsubs(2, 2, 0), ppc.fmuls(9, 1, 1), ppc.fmadds(9, 2, 2, 9),
+      ppc.lfs(0, D["tiny"], 31), ppc.fcmpu(9, 0))
+    a.br("ble", "r1_glide")                 # (the ball right overhead: no dive)
+    a.label("r1_dive_dir")
+    _rsqrt(a, 10, 9, 11, 12, 13)
+    a(ppc.fmuls(1, 1, 10), ppc.fmuls(2, 2, 10))
+    a(ppc.stfs(1, R["dive_x"], 23), ppc.stfs(2, R["dive_z"], 23), ppc.lfs(0, fb.C["dive_total"], 24),
+      ppc.stfs(0, R["dive_t"], 23), ppc.lfs(0, fb.C["dive_speed"], 24), ppc.fmuls(6, 1, 0), ppc.fmuls(7, 2, 0))
+    a.br("b", "r1_set")
+    a.label("r1_no_b")
+    a(ppc.andi_(0, 9, fb.PAD_A))
+    a.br("beq", "r1_glide")
+    a(ppc.lfs(0, fb.C["jump_frames"], 24), ppc.stfs(0, R["jump_t"], 23))
+    a.label("r1_glide")                     # ease toward the stick's velocity
+    a(ppc.lfs(0, fb.C["accel"], 24), ppc.lfs(8, R["vx"], 23), ppc.fsubs(6, 6, 8), ppc.fmadds(6, 6, 0, 8),
+      ppc.lfs(8, R["vz"], 23), ppc.fsubs(7, 7, 8), ppc.fmadds(7, 7, 0, 8))
+    a.label("r1_set")                       # f6, f7 = this frame's velocity; the jump's height; the move, on the ground
+    a(ppc.stfs(6, R["vx"], 23), ppc.stfs(7, R["vz"], 23))
+    a(ppc.lfs(8, R["jump_t"], 23), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(8, 0))
+    a.br("ble", "r1_no_jump")
+    a(ppc.lfs(0, D["one"], 31), ppc.fsubs(8, 8, 0), ppc.stfs(8, R["jump_t"], 23),
+      ppc.lfs(9, fb.C["inv_jump_frames"], 24), ppc.fmuls(8, 8, 9), ppc.fsubs(9, 0, 8), ppc.fmuls(8, 8, 9),
+      ppc.lfs(0, fb.C["jump_h4"], 24), ppc.fmuls(8, 8, 0))
+    a.br("b", "r1_height")                  # 4 h t (1 - t)
+    a.label("r1_no_jump")
+    a(ppc.lfs(8, D["zero"], 31))
+    a.label("r1_height")
+    a(ppc.stfs(8, R["jump_h"], 23))
+    a(ppc.lfs(1, R["x"], 23), ppc.fadds(1, 1, 6), ppc.stfs(1, R["x"], 23), ppc.lfs(3, R["z"], 23),
+      ppc.fadds(3, 3, 7), ppc.stfs(3, R["z"], 23), ppc.lfs(2, R["y"], 23))
+    a.br("bl", "fp_ground")
+    a(ppc.stfs(2, R["y"], 23), ppc.lwz(0, 0x24, 1), ppc.mtlr(0), ppc.addi(1, 1, 0x20), BLR)
+
+    # ---- fp_bump: (r31 = our data) receivers closer than "bump" feet are pushed apart, half the overlap each, along
+    # the line between them (Andrew: "receivers should be able to collide with each other to make it harder")
+    a.label("fp_bump")
+    for i in range(N_RCV):
+        for j in range(i + 1, N_RCV):
+            si, sj, lab = D["rcv"] + RSIZE * i, D["rcv"] + RSIZE * j, f"bp_{i}{j}"
+            a(ppc.lwz(9, si + R["player"], 31), ppc.lwz(10, sj + R["player"], 31), ppc.cmpwi(9, 0))
+            a.br("beq", lab)
+            a(ppc.cmpwi(10, 0))
+            a.br("beq", lab)
+            a(ppc.lfs(1, sj + R["x"], 31), ppc.lfs(2, si + R["x"], 31), ppc.fsubs(1, 1, 2),
+              ppc.lfs(3, sj + R["z"], 31), ppc.lfs(4, si + R["z"], 31), ppc.fsubs(3, 3, 4),
+              ppc.fmuls(5, 1, 1), ppc.fmadds(5, 3, 3, 5), ppc.lfs(0, D["bump2"], 31), ppc.fcmpu(5, 0))
+            a.br("bge", lab)
+            a(ppc.lfs(0, D["tiny"], 31), ppc.fcmpu(5, 0))
+            a.br("bgt", lab + "_d")
+            a(ppc.lfs(1, D["one"], 31), ppc.lfs(3, D["zero"], 31), ppc.fmr(5, 1))   # on top of each other: along x
+            a.label(lab + "_d")
+            _rsqrt(a, 6, 5, 7, 8, 9)
+            a(ppc.fmuls(1, 1, 6), ppc.fmuls(3, 3, 6), ppc.fmuls(5, 5, 6))      # the unit (f1, f3), the distance f5
+            a(ppc.lfs(0, D["bump"], 31), ppc.fsubs(0, 0, 5), ppc.lfs(7, D["half"], 31), ppc.fmuls(0, 0, 7))
+            a(ppc.lfs(7, sj + R["x"], 31), ppc.fmadds(7, 1, 0, 7), ppc.stfs(7, sj + R["x"], 31),
+              ppc.lfs(7, sj + R["z"], 31), ppc.fmadds(7, 3, 0, 7), ppc.stfs(7, sj + R["z"], 31),
+              ppc.lfs(7, si + R["x"], 31), fnmsubs(7, 1, 0, 7), ppc.stfs(7, si + R["x"], 31),
+              ppc.lfs(7, si + R["z"], 31), fnmsubs(7, 3, 0, 7), ppc.stfs(7, si + R["z"], 31))
+            a.label(lab)
+    a(BLR)
+
+    # ---- fp_catch1: (r23 = a receiver slot, r22 = its number; r21 = the ball, r24 = football's state, r31 = our data)
+    # the ball in its catch zone (football.py's sizes: a dive reaches farther but lower, down after one none): caught,
+    # held there
+    a.label("fp_catch1")
+    a(ppc.lwz(9, R["player"], 23), ppc.cmpwi(9, 0), BEQLR, ppc.lwz(0, fb.S["phase"], 24), ppc.cmpwi(0, fb.PH_FLY),
+      BNELR)
+    a(ppc.lfs(1, B_POS, 21), ppc.lfs(2, B_POS + 4, 21), ppc.lfs(3, B_POS + 8, 21))
+    a(ppc.lfs(4, R["x"], 23), ppc.lfs(5, R["y"], 23), ppc.lfs(6, R["z"], 23))
+    a(ppc.fsubs(7, 1, 4), ppc.fsubs(8, 3, 6), ppc.fmuls(9, 7, 7), ppc.fmadds(9, 8, 8, 9), ppc.fsubs(10, 2, 5))
+    a(ppc.lfs(11, R["dive_t"], 23), ppc.lfs(0, fb.C["down_frames"], 24), ppc.fcmpu(11, 0))
+    a.br("blt", "c1_not_diving")
+    a(ppc.lfs(12, fb.C["dive_r2"], 24), ppc.lfs(13, fb.C["dive_reach"], 24))
+    a.br("b", "c1_test")
+    a.label("c1_not_diving")
+    a(ppc.lfs(0, D["zero"], 31), ppc.fcmpu(11, 0), fb.BGTLR)          # down after a dive: no catch
+    a(ppc.lfs(12, fb.C["catch_r2"], 24), ppc.lfs(13, fb.C["reach"], 24), ppc.lfs(0, R["jump_h"], 23),
+      ppc.fadds(13, 13, 0))
+    a.label("c1_test")
+    a(ppc.fcmpu(9, 12), fb.BGTLR, ppc.fcmpu(10, 13), fb.BGTLR, ppc.lfs(0, fb.C["low"], 24), ppc.fcmpu(10, 0),
+      fb.BLTLR)
+    a(ppc.li(0, fb.PH_HOLD), ppc.stw(0, fb.S["phase"], 24), ppc.li(0, fb.R_CAUGHT), ppc.stw(0, fb.S["result"], 24),
+      ppc.stw(22, D["catcher"], 31))
+    a(ppc.stfs(4, fb.S["hx"], 24), ppc.lfs(0, fb.C["lift"], 24), ppc.fadds(0, 5, 0), ppc.stfs(0, fb.S["hy"], 24),
+      ppc.stfs(6, fb.S["hz"], 24), BLR)
+
+    # ---- fp_track_pass: bl from football.py's fb_track every update of a pass (r28 = the setup, r29 = the ball,
+    # r31 = football's state): the landing star where the ball will come down (the flight run on ahead with the
+    # game's own ball update, wind and spin and all; Andrew: "a landing zone star on the receiver side to see where its
+    # gonna land"), and the camera's focus (football's rx, ry, rz, which fb_cam frames): the catcher once caught, else
+    # the receivers' middle, backed off toward the camera by how far apart they are
+    a.label("fp_track_pass")
+    _enter(a, 0x30, 24)
+    a(ppc.mr(24, 31), ppc.mr(26, 28), ppc.mr(27, 29))
+    _li32(a, 31, data)
+    a(ppc.lwz(0, fb.S["phase"], 24), ppc.cmpwi(0, fb.PH_FLY))
+    a.br("bne", "tp_focus")
+    a(ppc.lwz(9, D["pred_n"], 31), ppc.addi(0, 9, -1), ppc.stw(0, D["pred_n"], 31), ppc.cmpwi(9, 0))
+    a.br("bgt", "tp_focus")
+    a(ppc.li(0, PRED_EVERY - 1), ppc.stw(0, D["pred_n"], 31))
+    a.br("bl", "fp_predict")
+    a.label("tp_focus")
+    a(ppc.lwz(9, D["catcher"], 31), ppc.cmpwi(9, 0))
+    a.br("blt", "tp_mid")
+    a(ppc.mulli(9, 9, RSIZE), ppc.add(9, 9, 31), ppc.lfs(1, D["rcv"] + R["x"], 9), ppc.lfs(2, D["rcv"] + R["y"], 9),
+      ppc.lfs(3, D["rcv"] + R["z"], 9))
+    a.br("b", "tp_set")
+    a.label("tp_mid")
+    a(ppc.lfs(1, D["zero"], 31), ppc.fmr(2, 1), ppc.fmr(3, 1), ppc.fmr(4, 1), ppc.lfs(5, D["one"], 31))
+    for k in range(N_RCV):
+        sk = D["rcv"] + RSIZE * k
+        a(ppc.lwz(0, sk + R["player"], 31), ppc.cmpwi(0, 0))
+        a.br("beq", f"tp_sum{k}")
+        a(ppc.lfs(0, sk + R["x"], 31), ppc.fadds(1, 1, 0), ppc.lfs(0, sk + R["y"], 31), ppc.fadds(2, 2, 0),
+          ppc.lfs(0, sk + R["z"], 31), ppc.fadds(3, 3, 0), ppc.fadds(4, 4, 5))
+        a.label(f"tp_sum{k}")
+    a(ppc.lfs(0, D["zero"], 31), ppc.fcmpu(4, 0))
+    a.br("ble", "tp_out")                               # (nobody: football's own)
+    a(ppc.fdivs(1, 1, 4), ppc.fdivs(2, 2, 4), ppc.fdivs(3, 3, 4), ppc.lfs(6, D["zero"], 31))
+    for k in range(N_RCV):                              # the spread: the farthest from the middle, squared
+        sk = D["rcv"] + RSIZE * k
+        a(ppc.lwz(0, sk + R["player"], 31), ppc.cmpwi(0, 0))
+        a.br("beq", f"tp_far{k}")
+        a(ppc.lfs(0, sk + R["x"], 31), ppc.fsubs(0, 0, 1), ppc.fmuls(7, 0, 0), ppc.lfs(0, sk + R["z"], 31),
+          ppc.fsubs(0, 0, 3), ppc.fmadds(7, 0, 0, 7), ppc.fcmpu(7, 6))
+        a.br("ble", f"tp_far{k}")
+        a(ppc.fmr(6, 7))
+        a.label(f"tp_far{k}")
+    a(ppc.lfs(0, D["tiny"], 31), ppc.fcmpu(6, 0))
+    a.br("ble", "tp_set")
+    _rsqrt(a, 7, 6, 8, 9, 10)
+    a(ppc.fmuls(6, 6, 7), ppc.lfs(0, D["pull"], 31), ppc.fmuls(6, 6, 0), ppc.lfs(0, fb.S["fx"], 24),
+      fnmsubs(1, 0, 6, 1), ppc.lfs(0, fb.S["fz"], 24), fnmsubs(3, 0, 6, 3))   # backed off, away from the throw
+    a.label("tp_set")
+    a(ppc.stfs(1, fb.S["rx"], 24), ppc.stfs(2, fb.S["ry"], 24), ppc.stfs(3, fb.S["rz"], 24))
+    a.label("tp_out")
+    _leave(a, 0x30, 24)
+
+    # ---- fp_predict: (r26 = the setup, r27 = the ball, r31 = our data) the ball copied and flown on with the game's
+    # own update (BALL_STEP, what the aim preview loops; the copy's trail recorder is off in flight) and the spin's
+    # dip or float (fp_spinfly's) until it touches down: the setup's target there (the landing star)
+    a.label("fp_predict")
+    _enter(a, 0x20, 28)
+    a(ppc.addi(3, 31, D["pball"] - 4), ppc.addi(4, 27, -4), ppc.li(0, BALL_SIZE // 4), ppc.mtctr(0))
+    a.label("pr_copy")
+    a(ppc.lwzu(0, 4, 4), ppc.stwu(0, 4, 3))
+    a.br("bdnz", "pr_copy")
+    a(ppc.li(28, PRED_MAX))
+    a.label("pr_step")
+    a(ppc.addi(3, 31, D["pball"]))
+    _call(a, BALL_STEP)
+    a(ppc.lwz(3, S_SPIN, 26), ppc.addi(3, 3, -1), ppc.cmplwi(3, 3))
+    a.br("bgt", "pr_spun")
+    a(ppc.lfs(1, D["pball"] + B_VEL + 4, 31), ppc.lfs(0, D["zero"], 31), ppc.fcmpu(1, 0))
+    a.br("bge", "pr_spun")
+    a(ppc.slwi(3, 3, 2), ppc.addi(3, 3, D["spin_dv"]), lfsx(0, 31, 3), ppc.fadds(1, 1, 0),
+      ppc.stfs(1, D["pball"] + B_VEL + 4, 31))
+    a.label("pr_spun")
+    a(ppc.lwz(0, D["pball"] + B_FLAGS, 31), ppc.andi_(0, 0, 1))
+    a.br("bne", "pr_down")
+    a(ppc.addi(28, 28, -1), ppc.cmpwi(28, 0))
+    a.br("bgt", "pr_step")
+    a.label("pr_down")
+    for k in range(3):
+        a(ppc.lfs(0, D["pball"] + B_POS + 4 * k, 31), ppc.stfs(0, S_TARGET + 4 * k, 26))
+    _leave(a, 0x20, 28)
+
+    # ---- fp_posts_hide: bl from football.py's fb_posts (r31 = football's state, its pnx/pnz the way from the
+    # shooter's lie to the pin, just set) -> r3 = 1 to leave the posts out this frame: a pass whose camera is past them
+    # (behind receivers standing near the posts it looks back at the QB, and an upright stood in the way); kicks keep them
+    a.label("fp_posts_hide")
+    a(ppc.li(3, 0), ppc.lwz(0, fb.S["kind"], 31), ppc.cmpwi(0, fb.KIND_PASS), BNELR)
+    hi, lo = ppc.hi_lo(fb.CAMERA)
+    a(ppc.lis(12, hi), ppc.lwz(12, lo, 12), ppc.lfs(1, 0, 12), ppc.lfs(3, 8, 12))
+    hi, lo = ppc.hi_lo(fb.PIN)
+    a(ppc.lis(12, hi), ppc.lfs(4, lo, 12), ppc.lfs(6, lo + 8, 12), ppc.fsubs(1, 1, 4), ppc.fsubs(3, 3, 6),
+      ppc.lfs(7, fb.S["pnx"], 31), ppc.lfs(8, fb.S["pnz"], 31), ppc.fmuls(9, 1, 7), ppc.fmadds(9, 3, 8, 9))
+    _li32(a, 12, data)
+    a(ppc.lfs(0, D["zero"], 12), ppc.fcmpu(9, 0), fb.BLELR, ppc.li(3, 1), BLR)
+
+    # ---- fp_rotate: bl from ROTATE (r3 = the team's first player, r31 = the golf state; the game flips the team
+    # record's alternate-shot toggle +0x1C2 there, then makes the shooter the team or, toggled, its partner): in
+    # Pigskin's one team of 3 or 4 the QB goes round everyone (Andrew: "1 qb 3 receivers rotating"): the toggle counts
+    # 0 .. players - 1 and the shooter is the team + it
+    a.label("fp_rotate")
+    hi, lo = ppc.hi_lo(fb.ON)
+    a(ppc.lis(12, hi), ppc.lwz(0, lo, 12), ppc.cmpwi(0, 0))
+    a.br("beq", "ro_game")
+    a(ppc.lis(12, 0x804E), ppc.lbz(10, D15 & 0xFFFF, 12), ppc.lbz(11, D16 & 0xFFFF, 12), ppc.cmpwi(10, 1))
+    a.br("bne", "ro_game")
+    a(ppc.cmpwi(11, 2))
+    a.br("ble", "ro_game")
+    _li32(a, 12, data)                                  # (our own count: the game's toggle starts at 1, so it put
+    a(ppc.lwz(9, 8, 3), ppc.lwz(8, D["rot"], 12), ppc.addi(8, 8, 1), ppc.cmpw(8, 11))   # player 2 up first; ours
+    a.br("blt", "ro_set")                               # starts each round at -1: 1P first)
+    a(ppc.li(8, 0))
+    a.label("ro_set")
+    a(ppc.stw(8, D["rot"], 12), ppc.stb(8, 0x1C2, 9), ppc.lbz(10, 0xD17, 31), ppc.add(10, 10, 8),
+      ppc.stb(10, 0xD17, 31))
+    _li32(a, 12, PICK_DONE)
+    a(ppc.mtlr(12), BLR)                                # (on where the game loads the shooter)
+    a.label("ro_game")
+    a.b(TOGGLE)
+
+    # ---- fp_quiet: bl from GOLF_SOUNDS (in place of bl SOUND; r3 the sound, r4 its volume): no golf club sounds in
+    # Pigskin (Andrew: "remove the golf impact sound in football mode"); else the game's call
+    a.label("fp_quiet")
+    hi, lo = ppc.hi_lo(fb.ON)
+    a(ppc.lis(12, hi), ppc.lwz(0, lo, 12), ppc.cmpwi(0, 0), BNELR)
+    a.b(SOUND)
+
     # ---- fp_label: bl from fbhud.LABEL_HOOKS (`addi r4,r4,0xa29`, r4 = 0): the HUD badge's name file base, ours in
     # Football (fbhud.py: J/A/<club>, the shot type's name)
     a.label("fp_label")
@@ -848,33 +1349,35 @@ def make_code(L):
         a(*struct.unpack(f">{-(-len(text) // 4)}I", text + bytes(-len(text) % 4)))
 
     # ---- fp_release: free our holders; r3 = 1 once both are free (r31 = our data)
+    # ---- fp_release: (r3 = a receiver slot) its holders let go; r3 = 1 when both are free (then it can load)
     a.label("fp_release")
-    _enter(a, 0x20, 30)
-    a(ppc.li(30, 1))
+    _enter(a, 0x20, 29)
+    a(ppc.mr(29, 3), ppc.li(30, 1))
     for name in ("mh", "bh"):
-        a(ppc.addi(3, 31, D[name]))
+        a(ppc.addi(3, 29, R[name]))
         _call(a, HOLDER_FREE)
         a(ppc.cmpwi(3, 0))
         a.br("bne", "r_free_" + name)
-        a(ppc.addi(3, 31, D[name]), ppc.li(30, 0))
+        a(ppc.addi(3, 29, R[name]), ppc.li(30, 0))
         _call(a, HOLDER_RELEASE)
         a.label("r_free_" + name)
-    a(ppc.li(0, 0), ppc.stw(0, D["model_id"], 31), ppc.mr(3, 30))
-    _leave(a, 0x20, 30)
+    a(ppc.li(0, 0), ppc.stw(0, R["model_id"], 29), ppc.mr(3, 30))
+    _leave(a, 0x20, 29)
 
-    # ---- fp_load: (r29 = the receiver, r26 = its model's id) load its bank (if any) and model into our holders
+    # ---- fp_load: (r3 = a receiver slot, r4 = its model's id, r5 = a heap, r29 = the receiver) load its bank (if any)
+    # and model into the slot's holders
     a.label("fp_load")
-    _enter(a, 0x30, 25)
-    a(ppc.stw(26, D["model_id"], 31), ppc.li(25, GOLFER_HEAP), ppc.li(27, 0))
+    _enter(a, 0x30, 24)
+    a(ppc.mr(24, 3), ppc.mr(26, 4), ppc.stw(26, R["model_id"], 24), ppc.mr(25, 5), ppc.li(27, 0))
     a(ppc.lwz(3, P_OBJ, 29), ppc.lwz(9, 0, 3), ppc.lwz(12, M_BANK_ID, 9), ppc.mtctr(12), BCTRL)
     a(ppc.cmpwi(3, -1))
     a.br("beq", "l_model")
-    a(ppc.mr(4, 3), ppc.addi(27, 31, D["bh"]), ppc.mr(3, 27), ppc.mr(5, 25))
+    a(ppc.mr(4, 3), ppc.addi(27, 24, R["bh"]), ppc.mr(3, 27), ppc.mr(5, 25))
     _call(a, LOAD_BANK)
     a.label("l_model")
-    a(ppc.addi(3, 31, D["mh"]), ppc.mr(4, 26), ppc.mr(5, 27), ppc.mr(6, 25))
+    a(ppc.addi(3, 24, R["mh"]), ppc.mr(4, 26), ppc.mr(5, 27), ppc.mr(6, 25))
     _call(a, LOAD_MODEL)
-    _leave(a, 0x30, 25)
+    _leave(a, 0x30, 24)
 
     # ---- fp_pose: (r3 = an instance, r4 = its golfer code, r5 = a clip, f1 = its time) the pose, into the instance
     a.label("fp_pose")
@@ -1201,6 +1704,14 @@ def data_blob(at):
     for name, vtable in (("mh", HOLDER_VTABLE), ("bh", BANK_VTABLE)):   # free holders (the tail reloads each round);
         struct.pack_into(">III", b, D[name], vtable, 5, 5)                 # +0x14 -> +0x10 (the unloader reads it)
         struct.pack_into(">I", b, D[name] + 0x14, at + D[name] + 0x10)
+        for k in range(N_RCV):                                             # each receiver slot's too
+            off = D["rcv"] + RSIZE * k + R[name]
+            struct.pack_into(">III", b, off, vtable, 5, 5)
+            struct.pack_into(">I", b, off + 0x14, at + off + 0x10)
+    struct.pack_into(">i", b, D["catcher"], -1)
+    struct.pack_into(">i", b, D["rot"], -1)
+    struct.pack_into(">i", b, D["hole_seen"], -1)
+    struct.pack_into(f">{len(RCV_SIZES)}I", b, D["need"], *(n + RCV_SPARE for n in RCV_SIZES))
     return bytes(b)
 
 
@@ -1241,6 +1752,8 @@ def overlay_patches(rel):
             (SPIN_STORE[0], ppc.bl(SPIN_STORE[0], L["fp_spin"]), SPIN_STORE[1]),
             (ANGLE_FINAL[0], ppc.bl(ANGLE_FINAL[0], L["fp_angle0"]), ANGLE_FINAL[1]),
             (BEND_END[0], ppc.bl(BEND_END[0], L["fp_bend"]), BEND_END[1])] + [
+        (at, ppc.bl(at, L["fp_quiet"]), ppc.bl(at, SOUND)) for at in GOLF_SOUNDS] + [
+        (ROTATE, ppc.bl(ROTATE, L["fp_rotate"]), ppc.bl(ROTATE, TOGGLE))] + [
         (at, ppc.bl(at, L["fp_label"]), old) for at, old in fbhud.LABEL_HOOKS] + [
         (at, ppc.bl(at, L["fp_badge"]), old) for at, old in fbhud.BALL_HOOKS]
 

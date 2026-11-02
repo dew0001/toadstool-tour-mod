@@ -160,11 +160,12 @@ SCREEN_PUSH, COURSE_LIST = 0x80439C1C, 0x80413910
 SUBLIST_HOOK = (0x8041CAE4, 0x4E800020)      # blr ending the Doubles case of FUN_8041ca00
 SUB_TEX, SUB_HELP = 0x8044C50C, 0x8044C534   # 10 ints each: icon/label texture and help (message 0x22 + value)
 SUB_COUNTS = 0x8044617C                      # Doubles' choice count for 1..4 human players (words)
-SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (9, 13, 12, 13)   # the one-team games from 2 humans, Wolf from 3,
-                                             # v27 Football for 2 (one team) or 4 (2v2)
+SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (9, 12, 13, 14)   # the one-team games from 2 humans, Wolf from 3,
+                                             # Pigskin 2v2 with 4 (v28: in that order, so the list's end is cut by
+                                             # the human count; v27's Wolf before Football showed it to 2 humans)
 CHOICE_BB_MATCH, CHOICE_BB_STROKE, CHOICE_SCRAMBLE, CHOICE_WORST = 5, 6, 7, 8
-CHOICE_TEAM, CHOICE_TEAM_WORST, CHOICE_WOLF = 9, 10, 11
-CHOICE_FOOTBALL = 12                         # v27 (football.py)
+CHOICE_TEAM, CHOICE_TEAM_WORST, CHOICE_WOLF = 9, 10, 12
+CHOICE_FOOTBALL, CHOICE_FOOTBALL_2V2 = 11, 13   # v28 Pigskin (football.py): one team of 2-4; 2v2 (v27: 12, both)
 HUMANS = 0x8044B014                          # menu overlay: how many humans picked the game (word)
 # The game keeps a sub-list's icons and help in two arrays of 10 (SUB_TEX, SUB_HELP, back to back); v20's 11
 # choices have their own (cave "list"), which the list's three readers load through a pointer (LIST_READERS).
@@ -181,9 +182,10 @@ ROW_TIGHT, ROW_STEP = 11, 60
 ICONS, LABELS = "B/V/V", "B/V/W"             # the sub-lists' 96x96 CMPR icons and IA4 labels (25 each)
 FIRST_TEX = 25                               # ours: 25.. in NAMES order
 NAMES = ("Best Ball Match", "Best Ball Stroke", "Scramble", "Worst Ball", "Team Scramble", "Team Worst Ball",
-         "Wolf", "Football")
-HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEC, 0x7FEB,   # our help messages, answered by build_mod.py's
-            football.MSG_HELP)                                         # hook (Football's text is football.py's)
+         "Pigskin", "Wolf", "Pigskin 2v2")
+HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEC, football.MSG_HELP,   # our help messages by NAMES, answered
+            0x7FEB, football.MSG_HELP2)                                      # by build_mod.py's hook (Pigskin's:
+TEXT_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEC, 0x7FEB)        # football.py's); HELP_TEXTS' ids
 HELP_TEXTS = (
     b"\x074\x094Two-vs-two match: the best\x01ball on each hole wins it.\x00",
     b"\x074\x094Two-vs-two. Each team counts\x01its best score on every hole.\x00",
@@ -1004,8 +1006,12 @@ def hooks_code(d, x, b, at, w):
     # and a partner's; the partner's is whoever is up when it isn't the lead.
     a.label("face")
     _la(a, 12, d["team_mode"])
-    a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, SCRAMBLE))   # (one team: Team Scramble, Team Worst Ball)
-    a.br("blt", "face_game")
+    a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, SCRAMBLE))   # (one team: Team Scramble, Team Worst Ball; v28 Pigskin's)
+    a.br("bge", "face_team")
+    hi, lo = ppc.hi_lo(football.ON)
+    a(ppc.lis(12, hi), ppc.lwz(12, lo, 12), ppc.cmpwi(12, 0))
+    a.br("beq", "face_game")
+    a.label("face_team")
     a(ppc.lis(12, 0x804E), ppc.lbz(11, D15 & 0xFFFF, 12), ppc.cmpwi(11, 1))
     a.br("bne", "face_game")
     a(ppc.cmpw(3, 11))
@@ -1084,6 +1090,8 @@ def hooks_code(d, x, b, at, w):
     a.label("commit_ours")
     a(ppc.cmpwi(9, CHOICE_FOOTBALL))
     a.br("beq", "commit_football")
+    a(ppc.li(0, football.FOOTBALL), ppc.cmpwi(9, CHOICE_FOOTBALL_2V2))   # v28 Pigskin 2v2: Doubles' team screen
+    a.br("beq", "commit_on")
     a(ppc.cmpwi(9, CHOICE_TEAM))
     a.br("beq", "commit_team")
     a(ppc.cmpwi(9, CHOICE_TEAM_WORST))
@@ -1113,12 +1121,9 @@ def hooks_code(d, x, b, at, w):
     a.bl(SCREEN_PUSH)
     a.bl(COURSE_LIST)
     a.b(COMMIT_END)
-    a.label("commit_football")                # v27: 2 humans one team (straight to the course), 4 Doubles' 2v2
-    hi, lo = ppc.hi_lo(HUMANS)
-    a(ppc.lis(12, hi), ppc.lwz(12, lo, 12), ppc.cmpwi(12, 2), ppc.li(0, football.FOOTBALL_TEAM))
-    a.br("beq", "commit_team_on")
-    a(ppc.li(0, football.FOOTBALL))
-    a.br("b", "commit_on")
+    a.label("commit_football")                # v28 Pigskin: one team of 2-4, straight to the course select
+    a(ppc.li(0, football.FOOTBALL_TEAM))
+    a.br("b", "commit_team_on")
     return a
 
 
@@ -1816,12 +1821,18 @@ def caves():
         out.append((at, first, code))
     labels = {**h.labels, "stroke": t["stroke"], "mulligan": t["mulligan"], "cam_update": c.labels["cam_update"], **{f"best_{k}": v for k, v in b_labels.items()}, **{f"pick_{k}": v for k, v in x.labels.items()},
               **{f"data_{k}": v for k, v in d.items()}, **{f"w_{k}": v for k, v in w_labels.items()}}
-    labels["_texts"] = [(HELP_IDS[k], d[f"help_{k}"] if k in DATA_HELP_KEYS else w_labels[f"help_{k}"])
+    labels["_texts"] = [(TEXT_IDS[k], d[f"help_{k}"] if k in DATA_HELP_KEYS else w_labels[f"help_{k}"])
                         for k in range(len(HELP_TEXTS))] + \
         [(MSG_TEAM_HELP, d["team_help"])] + [(ALT_IDS[k], e.labels[f"alt_{k}"]) for k in range(len(ALT_IDS))]
     labels["_sizes"] = {name: len(code) for name, code in sizes}
     labels["row_x"] = e.labels["row_x"]
     out += football.caves()[0]                # v27: Football's caves travel with Team Play's
+    import modemenu   # (it imports this module) v28: the list as a dropdown, its caves too
+    mm_out, mm_labels = modemenu.caves()
+    out += mm_out
+    labels.update({k: v for k, v in mm_labels.items() if k != "_sizes"})
+    labels["_texts"] = labels["_texts"] + modemenu.texts(mm_labels)
+    labels["_mm_sizes"] = mm_labels["_sizes"]
     return out, labels
 
 
@@ -1852,11 +1863,13 @@ def overlay_patches(rel, labels, word):
     elif rel == "B/U/C":
         for (site, old), stub, link in ((CLEAR_SUBLIST, "clear_sublist", True), (CLEAR_DIRECT, "clear_direct", True),
                                          (COMMIT_HOOK, "commit", False), (SUBLIST_HOOK, "w_sublist", False),
-                                         (LIST_FILL, "w_list_reset", False), (ROW_X, "row_x", True)) + \
+                                         (LIST_FILL, "w_list_reset", False)) + \
                 tuple(((site, old), "w_" + stub, True) for site, old, stub in LIST_READERS):
             out.append((site, (ppc.bl if link else ppc.b)(site, labels[stub]), old))
         for k, (old, new) in enumerate(zip(SUB_COUNTS_OLD, SUB_COUNTS_NEW)):
             out.append((SUB_COUNTS + 4 * k, new, old))
+        import modemenu   # v28: the list as a dropdown (its ROW_X hook in place of row_x's)
+        out += modemenu.overlay_patches(rel, labels)
     return out + football.overlay_patches(rel)
 
 
@@ -1985,7 +1998,7 @@ def icon_image(name, size=96, scale=4):
                       width=2 * scale)
             d.ellipse(((x - 2) * u, 44 * u, (x + 2) * u, 50 * u), fill=(0, 0, 0, 255))
         d.ellipse((43 * u, 60 * u, 53 * u, 68 * u), fill=(20, 20, 20, 255))
-    elif kind == "Football":          # v27: a football in front of yellow goalposts
+    elif kind in ("Pigskin", "Pigskin 2v2"):   # v27 Football, v28 Pigskin: a football in front of yellow goalposts
         post, black = (255, 222, 0, 255), (0, 0, 0, 255)
         for box in ((44, 46, 52, 90), (16, 40, 80, 48), (16, 6, 24, 48), (72, 6, 80, 48)):
             d.rectangle(tuple(v * u for v in box), fill=post, outline=black, width=2 * scale)

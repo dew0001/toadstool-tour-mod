@@ -169,7 +169,9 @@ STATE_SIZE = S["ground"] + 24
 ON = CAVES["state"][0] + S["on"]             # the football flag (teams.py's setup writes it each round)
 
 MSG_HELP = 0x7FED
-HELP_TEXT = b"\x074\x094Pass and catch down the field,\x01then kick a field goal!\x00"
+HELP_TEXT = b"\x074\x094One QB, the others catch,\x01then kick a field goal!\x00"
+MSG_HELP2 = 0x7FBF                             # v28 Pigskin 2v2
+HELP2_TEXT = b"\x074\x094Two-vs-two: pass, catch,\x01then kick it in!\x00"
 
 CONST_LIST = ("zero", "one", "half", "threehalf", "tiny", "run", "accel", "stick", "dead2",
               "dive_speed", "dive_total", "down_frames", "jump_frames", "inv_jump_frames", "jump_h4", "catch_r2",
@@ -273,14 +275,14 @@ def make_frame(L):
     a.br("bne", "f_held")
     a(ppc.lwz(0, S["kind"], 31), ppc.cmpwi(0, KIND_PASS))
     a.br("bne", "f_kick")
-    a.bl(L["fb_run"])
-    a.bl(L["fb_catch"])
+    import fbpose   # (it imports this module) v28: the receivers (run, bump, catch) and the spin, in the golf tail
+    tail = fbpose.build()[1]
+    a.bl(tail["fp_recv_update"])
     a.br("b", "f_contact")
     a.label("f_kick")
     a.bl(L["fb_kick"])
     a.label("f_contact")
-    import fbpose   # (it imports this module) the spin combos' dip and float, in the golf overlay's tail
-    a.bl(fbpose.build()[1]["fp_spinfly"])
+    a.bl(tail["fp_spinfly"])
     a(ppc.lwz(0, S["phase"], 31), ppc.cmpwi(0, PH_FLY))
     a.br("bne", "f_held")
     a.bl(L["fb_contact"])
@@ -558,8 +560,12 @@ def make_track(L):
     a(ppc.lfs(1, B_POS, 29), ppc.lfs(2, B_POS + 4, 29), ppc.lfs(3, B_POS + 8, 29), ppc.stfs(1, S["pbx"], 31),
       ppc.stfs(2, S["pby"], 31), ppc.stfs(3, S["pbz"], 31))
     a(ppc.lwz(0, S["kind"], 31), ppc.cmpwi(0, KIND_PASS), BNELR)
+    _enter(a, 0x10)
+    import fbpose   # (it imports this module) v28: the landing star run on ahead and the camera's focus (rx, ry, rz:
+    a.bl(fbpose.build()[1]["fp_track_pass"])   # the receivers' middle), in the golf overlay's tail
+    a(ppc.lwz(0, 0x14, 1), ppc.mtlr(0), ppc.addi(1, 1, 0x10))
+    a(ppc.lfs(1, B_POS, 29), ppc.lfs(2, B_POS + 4, 29), ppc.lfs(3, B_POS + 8, 29))
     a(ppc.lfs(4, S["rx"], 31), ppc.lfs(5, S["ry"], 31), ppc.lfs(6, S["rz"], 31))
-    a(ppc.stfs(4, S_TARGET, 28), ppc.stfs(5, S_TARGET + 4, 28), ppc.stfs(6, S_TARGET + 8, 28))
     a.b(L["fb_cam"])
     return a
 
@@ -768,6 +774,12 @@ def make_posts(L):
     a.bl(L["fb_norm"])
     a(ppc.stfs(7, S["pnx"], 31), ppc.stfs(8, S["pnz"], 31))
     a.label("p_dir")
+    import fbpose   # (it imports this module)
+    a.bl(fbpose.build()[1]["fp_posts_hide"])            # (v28: not while a pass's camera is past them)
+    a(ppc.cmpwi(3, 0))
+    a.br("beq", "p_draw")
+    a(ppc.lwz(31, 0x5C, 1), ppc.lwz(0, 0x64, 1), ppc.mtlr(0), ppc.addi(1, 1, 0x60), BLR)
+    a.label("p_draw")
     a.b(L["fb_posts_m"])
     return a
 
@@ -878,6 +890,7 @@ MSG_SAY = 0x7FC0                        # + the result (1-4); + 5.. the shot typ
 SAY_TEXTS = (None, b"\x075Caught!\x00", b"\x075Incomplete!\x00", b"\x075It's good!\x00", b"\x075No good!\x00",
              None, None, None)          # None: a shot type's text (in the golf overlay's tail, fbpose.py)
 SAY_X, SAY_Y, SAY_FRAMES = 320, 150, 100
+TIP_X, TIP_Y = 520, 130        # a shot type's tip: its box's middle, up on the right (the menus' 640 x 448 space)
 
 # ---- the shot types, in LB/RB's order: (name, the golfer's club it is, x its launch angle, x its backspin, the box's
 # text). The club makes its reach (the golfer's drive x the club's share), its timing window (the golfer's impact, the
@@ -885,10 +898,10 @@ SAY_X, SAY_Y, SAY_FRAMES = 320, 150, 100
 # found for the same carry, so a flat throw is a fast one; backspin is lift: an iron's at a low angle still balloons).
 # Clubs: 0 driver 100%, 2 86%, 4 74%, 11 38% of the drive.
 SHOT_TYPES = (
-    ("Bomb", 0, 1.0, 1.0, b"\x075Bomb\x01\x073Farthest, most hang time.\x01Hardest to time, big wind.\x00"),
-    ("Bullet", 4, 0.35, 0.1, b"\x075Bullet\x01\x073Low and fast, little wind.\x01The receiver must be there.\x00"),
-    ("Lob", 11, 1.15, 1.0, b"\x075Lob\x01\x073Short and floaty.\x01Easiest to time, drifts.\x00"),
-    ("Field goal", 2, 1.1, 1.0, b"\x075Field goal try!\x01\x073Kick it through the posts.\x00"),
+    ("Bomb", 0, 1.0, 1.0, b"\x073Bomb\x01\x071Far, high, windy\x00"),     # (the tips: small, two short lines)
+    ("Bullet", 4, 0.35, 0.1, b"\x073Bullet\x01\x071Low, fast, steady\x00"),
+    ("Lob", 11, 1.15, 1.0, b"\x073Lob\x01\x071Short and floaty\x00"),
+    ("Field goal", 2, 1.1, 1.0, b"\x073Field goal\x01\x071Kick it through!\x00"),
 )
 TYPE_FG = 3                             # the field goal try
 TYPE_MSG = (MSG_SAY + 5, MSG_SAY + 6, MSG_SAY + 7, MSG_SAY)   # each type's message (SAY_TEXTS' None entries)
@@ -900,11 +913,17 @@ BALL_MATRIX, BALL_NORMAL, BALL_BIG = 0x805025E8, 0.14, 0.0   # in the air: none 
 def make_say(L):
     a = ppc.Asm(CAVES["say"][0])
     # (r3 = message) the box with that message, instead of any open one
+    a.label("fb_say_side")                  # (r3 = message) a shot type's tip, up on the right (Andrew: "too big and
+    _enter(a, 0x20)                         # in the middle make it smaller and to the side")
+    a(ppc.stw(3, 0x08, 1), ppc.li(0, TIP_X), ppc.stw(0, 0x0C, 1), ppc.li(0, TIP_Y))
+    a.br("b", "say_at")
     a.label("fb_say")
     _enter(a, 0x20)
-    a(ppc.stw(3, 0x08, 1))
+    a(ppc.stw(3, 0x08, 1), ppc.li(0, SAY_X), ppc.stw(0, 0x0C, 1), ppc.li(0, SAY_Y))
+    a.label("say_at")
+    a(ppc.stw(0, 0x10, 1))
     a.bl(L["fb_unsay"])
-    a(ppc.lwz(3, 0x08, 1), ppc.li(4, SAY_X), ppc.li(5, SAY_Y), ppc.li(6, -1), ppc.li(7, 15))
+    a(ppc.lwz(3, 0x08, 1), ppc.lwz(4, 0x0C, 1), ppc.lwz(5, 0x10, 1), ppc.li(6, -1), ppc.li(7, 15))
     a.bl(BOX_OPEN)
     a(ppc.stw(3, S["box"], 31), ppc.li(0, SAY_FRAMES), ppc.stw(0, S["box_t"], 31))
     _leave(a, 0x20)
@@ -981,7 +1000,7 @@ def make_choose(L):
     a.br("bne", "ch_say")
     a(ppc.li(3, TYPE_MSG[TYPE_FG]))
     a.label("ch_say")
-    a.b(L["fb_say"])
+    a.b(L["fb_say_side"])
     return a
 
 
@@ -991,6 +1010,8 @@ def make_texts(L):
     a.label("fb_messages")
     a(ppc.cmpwi(3, MSG_HELP))
     a.br("beq", "m_help")
+    a(ppc.cmpwi(3, MSG_HELP2))
+    a.br("beq", "m_help2")
     a(ppc.addi(12, 3, -MSG_SAY), ppc.cmplwi(12, len(SAY_TEXTS) - 1))
     a.br("bgt", "m_game")
     a(ppc.slwi(12, 12, 2))
@@ -999,9 +1020,14 @@ def make_texts(L):
     a.label("m_help")
     hi, lo = ppc.hi_lo(CAVES["consts"][0] + C["help"] - C0)
     a(ppc.lis(3, hi), ppc.addi(3, 3, lo), BLR)
+    a.label("m_help2")
+    a.la(3, "help2")
+    a(BLR)
     a.label("m_game")
     a(MSG_LOOKUP_FIRST)
     a.b(MSG_LOOKUP + 4)
+    a.label("help2")                        # v28 Pigskin 2v2's help line
+    a(*struct.unpack(f">{-(-len(HELP2_TEXT) // 4)}I", HELP2_TEXT + bytes(-len(HELP2_TEXT) % 4)))
     a.label("say_table")
     a(*([0] * len(SAY_TEXTS)))
     for k, text in enumerate(SAY_TEXTS):
@@ -1055,7 +1081,7 @@ MAKERS = {"frame": make_frame, "ground": make_ground, "launch": make_launch, "ru
 CALLS = ("fb_launch", "fb_run", "fb_run2", "fb_run_set", "fb_norm", "fb_cam", "fb_cam2", "fb_cam_clear",
          "fb_posts_m", "fb_posts2", "fb_posts2b", "fb_posts3", "fb_posts4", "post_boxes", "post_bright",
          "post_dark", "post_colors", "fb_catch", "fb_hold", "fb_kick", "fb_contact", "fb_track", "fb_ground",
-         "fb_say", "fb_unsay", "fb_said", "fb_tick", "fb_choose")
+         "fb_say", "fb_say_side", "fb_unsay", "fb_said", "fb_tick", "fb_choose")
 
 
 def data_blobs():
@@ -1100,7 +1126,8 @@ def caves():
 def texts():
     """[(message id, string address)]: answered by fb_messages (teams.py's message hook goes on to it)."""
     L = caves()[1]
-    return [(MSG_HELP, L["help"])] + [(MSG_SAY + k, L[f"say_{k}"]) for k in range(len(SAY_TEXTS))]
+    return [(MSG_HELP, L["help"]), (MSG_HELP2, L["help2"])] + [(MSG_SAY + k, L[f"say_{k}"])
+                                                                 for k in range(len(SAY_TEXTS))]
 
 
 def overlay_patches(rel):

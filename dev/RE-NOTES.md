@@ -72,16 +72,17 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8003D35C, 0x80037A90, 0x8004893C, 0x8006C168, 0x80040AAC, 0x8006BA90, 0x80094660, 0x800459B8 | 280, 280, 276, 272, 276, 272, 272, 272 | | v26 the course select's dropdown (coursemenu.py: "list", "hint", "input", "keys", "move", "show", "fill", "toad") |
 | 0x800462D8 | 236 | FUN_800462d8 | v27 the Team Play list's icon/help arrays, 13 choices (teams.py "arrays"; were in "list") |
 | 29 caves from 0x800389B4 (272) to 0x8005C678 (212) | 7,020 | | v27 Football (football.py `CAVES`: "state", "consts", "frame", "run", "run2", "run3", "track", "launch", "catch", "contact", "kick", "cam", "cam2", "cam3", "shot", "small", "ground", "posts", "posts_m", "posts2", "posts2b", "posts3", "posts4", "pdata", "say", "tick", "texts", "star", "choose") |
+| 0x800961DC, 0x8002063C, 0x8003FFDC, 0x800369AC, 0x8008C9C4, 0x800867A4, 0x8006F978 | 252, 216, 212, 212, 208, 208, 208 | | v28 Team Play's game list as a dropdown (modemenu.py: "names", "data", "input", "keys", "show", "fill", "rows") |
 
 Still free: 0x80057A14 (712, used by the `draws` debug patch) and 0x8005DAFC (444, `messages` debug patch), plus
-225 smaller dead functions (v27), 28.9 KB in all, the largest 0x800961DC (252), 0x8002063C (216), 0x8003FFDC and
-0x800369AC (212). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
+218 smaller dead functions (v28), 27.4 KB in all, the largest 0x80084924, 0x8006FA48 (204), 0x8009A77C and
+0x80067758 (200). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
 from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unreferenced64.tsv`, main.dol
 0x80003100-0x80400000) through `find_dead_code.py`. Do NOT use 0x80001800: it is wiped before the first frame.
 
 For code that only runs in a round there is far more room: **the golf overlay's tail**, 0x80528000..0x80548000 (128 KB,
 golfext.py; see "Football's players"), appended to C/L/V. v27's fbpose.py uses about 28 KB of it (code, data, the
-golfers' rigs, the pose keys, the football's mesh).
+golfers' rigs, the pose keys, the football's mesh); v28's about 36 KB (three receivers).
 
 ## Gotchas
 
@@ -1161,6 +1162,74 @@ the character". football.SHOT_TYPES: Bomb (club 0), Bullet (4), Lob (11), Field 
 - Checked (profile 2, Lakitu Valley 1): LB/RB steps Bomb, Bullet, Lob, Field goal and stops at both ends; the zone
   (5, 7, 7, 7 on the tee), meter and star follow the type; the box and the badge name each; the field goal's football
   stands on the tee; full-power Bullets land on the aim line; Stroke Play keeps its clubs, badge and grid.
+
+## Pigskin (v28)
+
+Andrew (2026-11-02), after v27: "add a 4 person team mode 1 qb 3 receivers rotating receivers should be able to collide
+with each other", "a landing zone star on the receiver side", "can only move side to side as the reciever cant move
+forward and back", "the ball isnt really in their hands when throwing", "remove the golf impact sound in football mode",
+"call it pigskin mode", the tips "too big and in the middle". Football is now **Pigskin** (choice 11, one team of 2-4)
+and **Pigskin 2v2** (choice 13, 4 humans, the team screen); teams.py counts (9, 12, 13, 14) for 1-4 humans, Wolf 12.
+- **Pads, analog L/R.** The pad state (0x8026BB60 + 0x38 x port) has the analog triggers as bytes at +0x1B / +0x1C and
+  as floats 0..1 at +0x30 / +0x34. The mod's controller profile sends the left stick's up to the game's analog L and its
+  down to R (they set the power while aiming) and leaves the main stick's Y alone, so the receiver ran only sideways on
+  +0x18. fbpose's run reads the stick's X and (L - R) as forward/back (PAD_TRIG_L/R).
+- **Heaps** (main.dol table 0x8023FA18, 12 of 0x14: +0 the free list, +4 free bytes). Heap 0 the main 16 MB (about 3.8
+  MB free in a 1-player Stroke round, 2.9 MB in a 4-player Pigskin round before any receiver), 2 the hole arena (9 MB,
+  hole files: 1.2 MB free on Pebble Beach 1, 2.8 on Lakitu Valley 1, 3.0 on Battleground 1, 4.0 on Timber Creek 1), 6
+  1 MB, 8 the shooter's golfer (2 MB). A golfer's model and bank unpacked: Peach 1.63 MB (her textures are in the
+  model), Yoshi 1.53, DK 1.36, Tony 1.21, most about 0.9-1.1, Boo 0.29 (fbpose.RCV_SIZES, the larger of each golfer's
+  normal and costume files). Three receivers don't fit one heap: each goes in heap 0 or 2, whichever has the most free
+  past its size + 128 KB, one load at a time (a load waits in state 1 while another is pending), and a model in heap 2
+  is let go as soon as its team's hole ends (record +0x1BE set, before the next hole's files load there).
+- **Rotation.** The Doubles pick part (`FUN_80402f1c`): `bl FUN_80426b58` at 0x8040347C flips the team record's
+  alternate-shot toggle (+0x1C2 ^= 1), then the shooter is the team (d17) or, toggled, team + sides; 0x804034AC loads d17
+  and starts that player's turn. fp_rotate (on that `bl`) counts 0 .. players - 1 itself for one team of 3 or 4 (the
+  game's toggle starts at 1, which put 2P up first) and makes the shooter team + count.
+- **The landing star in flight.** `FUN_80417B00(ball)` is one update of a ball's flight (the aim preview loops it):
+  fp_predict copies the ball record (0xE0 bytes; +0x4C its state, +0x50 velocity, +0x9C place, +0xC0 bit 0 touched
+  down) and runs it on, with the spin's dip or float, until it touches down (at most 720 updates, every 4th update of the
+  play), and puts the setup's target (+0x1EC) there: the star the HUD draws. Checked: the ball comes down on it.
+- **Receivers** (fbpose.py, a slot per player: rank 0 on the star, 1 and 2 RCV_SPREAD = 18 ft left / right; each runs,
+  jumps and dives on its own pad, fp_bump pushes any two closer than 2.5 ft apart, the first under the ball catches;
+  the camera frames their middle, backed off by their spread, or the catcher). Models are kept between turns (a new
+  turn reloads only the old QB's) and hidden while the QB isn't aiming or playing.
+- **The posts and the receiver camera.** Receivers standing near the posts put the camera (behind them, looking back at
+  the QB) past the posts, with an upright in the foreground: fp_posts_hide (on fb_posts, after it works out the way
+  from the shooter's lie to the pin, S pnx/pnz) leaves the posts out of a pass's frames while (camera eye - pin) . that
+  way > 0. Kicks always draw them. (The thin pole with a green gem by the pin in flight views is the game's pin marker.)
+- **The ball in the hand.** MODEL_DRAW turns the instance's bone matrices (+0x14) into skin matrices in place when it
+  draws (+0x2C 0), so a hand's place has to be read right after the pose is built and before the draw (fp_palm).
+- **The golf sounds.** The club's hit on the ball is FUN_80421154's `bl SOUND` at 0x80422144 (0x1B2, or by the lie's
+  method +0x30, or 0x1B5 / 0x1B6 by club), a power shot's hit FUN_804598c8's at 0x80459DA4; fp_quiet (on both) drops
+  them in Pigskin.
+- **Tips** (fb_say_side): the shot type's box opens at (520, 130), up on the right, instead of the middle, with two
+  short lines in text sizes '3' (1.0) and '1' (0.95).
+- **Messages**: build_mod's cave 3 (id, address) table has 1844 of 1872 bytes used (v28).
+- Checked in game (profile 2, Lakitu Valley 1): the star's prediction; forward running at 24 ft/s on the stick's Y; the
+  bump to 2.5 ft; 3 receivers loaded (Peach, Daisy, Yoshi); the QB going 1P, 2P, 3P, 4P; no club sound (sfx log); the
+  tip box on the right; the football in the hand; receivers on the in-flight star catch the ball there and the team
+  plays on from the catch (one team of 2; football_test.ps1 -Chase); Pigskin 2v2 (4 humans, team screen, the teams
+  alternating); a 2-hole round: the receivers let go at the hole's end (heap 2 139 KB -> 2.8 MB free) before hole 2
+  loads, then loaded again (fb_hole_test.ps1); Stroke Play unchanged (skill_test.ps1).
+
+## Play Mode list (v28 dropdown)
+
+Andrew: "should make the game modes a dropdown menu like we did the maps" (modemenu.py; Team Play's sub-list had 14
+icons, as wide as the screen).
+- **The screen** (menu overlay): `FUN_8041cc9c` runs it, `FUN_8041b6c4` draws it. 0x8044C434 = 0 the carousel, 1 a
+  sub-list, 2 a sub-list's sub-list; 0x8044C42C the sub-list's cursor, 0x8044C440 its length, 0x8044C438 "decided"
+  (A counts it up to 0x10, then the game is set up). The buttons from 0x8041D5C0 (`andi. r0,r23,0x200`; r23 the pads'
+  new presses, r20 their repeating directions, A 0x100, B 0x200, Up 8, Down 4); 0x8041DB40 past them shows the cursor's
+  help in Toad's box (message 0x22 + its value); 0x8041D6B8 is A's tail (`bl` the menu sound `FUN_800035ec(kind, 0xFF)`:
+  0 back, 1 cursor, 2 decide, then 0x8041DB40). The icon loop's x: `addi r9,r9,0x164` at 0x8041C3A0 (r9 = 72 i - 36
+  count, r30 = i, r11 = 0x80450000 and cr0 read after it); the arrows: `mulli r11,r11,0x24` at 0x8041C10C (count x 36
+  + 24 apart).
+- **v28**: a sub-list of 5 or more (only Team Play's) draws the cursor's icon at x 320 and the rest off the screen, the
+  arrows as for one icon (40 apart while the window is up); A opens a text box (320, 266, 360 x 135, style 0xD) with
+  6 games by name (message 0x7FBE, the cursor's in yellow, scrolling), Up/Down move the cursor (wrapping; the icon and
+  Toad's help follow), A plays it (the game's A tail), B closes it and puts the cursor back. Left/Right on the closed
+  row step as before. The alternate-shot five are named "Alt Shot Stroke / Match / Slots x4 / Slots x3 / Skins".
 
 ## HUD (v3)
 
