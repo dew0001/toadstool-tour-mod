@@ -73,10 +73,11 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x800462D8 | 236 | FUN_800462d8 | v27 the Team Play list's icon/help arrays, 13 choices (teams.py "arrays"; were in "list") |
 | 29 caves from 0x800389B4 (272) to 0x8005C678 (212) | 7,020 | | v27 Football (football.py `CAVES`: "state", "consts", "frame", "run", "run2", "run3", "track", "launch", "catch", "contact", "kick", "cam", "cam2", "cam3", "shot", "small", "ground", "posts", "posts_m", "posts2", "posts2b", "posts3", "posts4", "pdata", "say", "tick", "texts", "star", "choose") |
 | 0x800961DC, 0x8002063C, 0x8003FFDC, 0x800369AC, 0x8008C9C4, 0x800867A4, 0x8006F978 | 252, 216, 212, 212, 208, 208, 208 | | v28 Team Play's game list as a dropdown (modemenu.py: "names", "data", "input", "keys", "show", "fill", "rows") |
+| 0x80084924 | 204 | | v29 a pass's extra flight steps (football.py "fast") |
 
 Still free: 0x80057A14 (712, used by the `draws` debug patch) and 0x8005DAFC (444, `messages` debug patch), plus
-218 smaller dead functions (v28), 27.4 KB in all, the largest 0x80084924, 0x8006FA48 (204), 0x8009A77C and
-0x80067758 (200). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
+217 smaller dead functions (v29), 27.2 KB in all, the largest 0x8006FA48 (204), 0x8009A77C and 0x80067758
+(200). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
 from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unreferenced64.tsv`, main.dol
 0x80003100-0x80400000) through `find_dead_code.py`. Do NOT use 0x80001800: it is wiped before the first frame.
 
@@ -1190,6 +1191,15 @@ and **Pigskin 2v2** (choice 13, 4 humans, the team screen); teams.py counts (9, 
   fp_predict copies the ball record (0xE0 bytes; +0x4C its state, +0x50 velocity, +0x9C place, +0xC0 bit 0 touched
   down) and runs it on, with the spin's dip or float, until it touches down (at most 720 updates, every 4th update of the
   play), and puts the setup's target (+0x1EC) there: the star the HUD draws. Checked: the ball comes down on it.
+- **Pass speed (v29).** Andrew: "speed up the ball for passes". A flying ball takes one step of its flight an update:
+  `FUN_80421154` (in the player update) calls `FUN_80417b00(team record +0xE8)` while the player's state is 7 (a
+  loop of the same call finishes a skipped flight). football.py's fb_fast (main.dol 0x80084924, after the receivers'
+  update in fb_frame) gives a pass PASS_SPEED - 1 (0.5) more steps an update on average (fbpose `fp_fast_due`): first
+  the tests the game's step needs (contact, the spin's dip or float, the previous velocities), then the step, then
+  every receiver's catch test (`fp_catch_all`), so the path, wind and landing stay the same and only the time
+  shrinks. Measured (Lakitu Valley 1's tee, no wind): a caught Bomb 5.0 s -> 3.1 s, a Bullet 2.5 s -> 1.7 s, the
+  ball 1.46-1.6 times as far a frame; uncaught passes land on the in-flight star and count as incomplete. Kicks
+  keep the game's speed.
 - **Receivers** (fbpose.py, a slot per player: rank 0 on the star, 1 and 2 RCV_SPREAD = 18 ft left / right; each runs,
   jumps and dives on its own pad, fp_bump pushes any two closer than 2.5 ft apart, the first under the ball catches;
   the camera frames their middle, backed off by their spread, or the catcher). Models are kept between turns (a new

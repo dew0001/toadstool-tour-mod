@@ -89,6 +89,7 @@ CAVES = {
     "texts": (0x8007FE70, 220, 0x9421FFF0),
     "star": (0x8003FF04, 216, 0x7C0802A6),      # the receiver's star, steady and bigger
     "choose": (0x8005C678, 212, 0x7C0802A6),    # pass or kick
+    "fast": (0x80084924, 204, 0x9421FFF0),      # v29: a pass's extra flight steps
 }
 
 # ---- game addresses (golf overlay unless noted)
@@ -98,6 +99,8 @@ D15, D16, D17 = 0x804E68F9, 0x804E68FA, 0x804E68FB    # sides, records, the shoo
 PIN = 0x804E6864                                       # x, y, z
 CAMERA = 0x802D7E64                                    # -> eye xyz +0, look-at xyz +0xC
 B_POS, B_VEL = 0x9C, 0x50                              # ball record: position, velocity (feet, feet a frame)
+BALL_STEP = 0x80417B00                                 # (ball) one step of a ball's flight (FUN_80421154 runs it
+                                                       # once an update in state 7; the aim preview in a loop)
 S_TARGET = 0x1EC                                       # setup: the aim point, where the landing star is drawn
 S_CLUB = 0x1D4                                         # setup: the club (13 the putter)
 STATE_MOVING = 7
@@ -278,6 +281,7 @@ def make_frame(L):
     import fbpose   # (it imports this module) v28: the receivers (run, bump, catch) and the spin, in the golf tail
     tail = fbpose.build()[1]
     a.bl(tail["fp_recv_update"])
+    a.bl(L["fb_fast"])                      # v29: the pass faster (extra steps, each tested)
     a.br("b", "f_contact")
     a.label("f_kick")
     a.bl(L["fb_kick"])
@@ -299,6 +303,35 @@ def make_frame(L):
     a.label("f_out")
     a(ppc.lmw(26, 0x10, 1), ppc.lwz(0, 0x34, 1), ppc.mtlr(0), ppc.addi(1, 1, 0x30), ppc.cmpwi(21, 0), BLR)
 
+    return a
+
+
+def make_fast(L):
+    a = ppc.Asm(CAVES["fast"][0])
+    # v29, after the receivers' update on every update of a pass in the air (Andrew: "speed up the ball for passes"):
+    # every so often (fbpose.PASS_SPEED) the ball takes another step of its flight (FUN_80417b00, the game's own, so the
+    # path, the wind and the landing stay the same and only the time shrinks). First the tests the game's step needs
+    # (touched anything? its spin's dip or float, the velocities the next contact test compares with), then the step,
+    # then every receiver's catch test at the new place; fb_frame's own spin and contact tests follow for this step.
+    import fbpose   # (it imports this module)
+    tail = fbpose.build()[1]
+    a.label("fb_fast")
+    _enter(a, 0x10)
+    a(ppc.lwz(0, S["phase"], 31), ppc.cmpwi(0, PH_FLY))
+    a.br("bne", "x_out")
+    a.bl(tail["fp_fast_due"])
+    a(ppc.cmpwi(3, 0))
+    a.br("beq", "x_out")
+    a.bl(L["fb_contact"])
+    a(ppc.lwz(0, S["phase"], 31), ppc.cmpwi(0, PH_FLY))
+    a.br("bne", "x_out")
+    a.bl(tail["fp_spinfly"])
+    a(ppc.lfs(1, B_VEL, 29), ppc.lfs(2, B_VEL + 4, 29), ppc.lfs(3, B_VEL + 8, 29), ppc.stfs(2, S["pvy"], 31),
+      ppc.fmuls(1, 1, 1), ppc.fmuls(3, 3, 3), ppc.fadds(1, 1, 3), ppc.stfs(1, S["phs2"], 31), ppc.mr(3, 29))
+    a.bl(BALL_STEP)
+    a.bl(tail["fp_catch_all"])
+    a.label("x_out")
+    _leave(a, 0x10)
     return a
 
 
@@ -1077,11 +1110,11 @@ MAKERS = {"frame": make_frame, "ground": make_ground, "launch": make_launch, "ru
           "cam": make_cam, "cam2": make_cam2, "cam3": make_cam3, "shot": make_shot, "small": make_small,
           "posts": make_posts, "posts_m": make_posts_m, "posts2": make_posts2, "posts2b": make_posts2b,
           "posts3": make_posts3, "posts4": make_posts4, "pdata": make_pdata, "say": make_say, "tick": make_tick,
-          "texts": make_texts, "star": make_star, "choose": make_choose}
+          "texts": make_texts, "star": make_star, "choose": make_choose, "fast": make_fast}
 CALLS = ("fb_launch", "fb_run", "fb_run2", "fb_run_set", "fb_norm", "fb_cam", "fb_cam2", "fb_cam_clear",
          "fb_posts_m", "fb_posts2", "fb_posts2b", "fb_posts3", "fb_posts4", "post_boxes", "post_bright",
          "post_dark", "post_colors", "fb_catch", "fb_hold", "fb_kick", "fb_contact", "fb_track", "fb_ground",
-         "fb_say", "fb_say_side", "fb_unsay", "fb_said", "fb_tick", "fb_choose")
+         "fb_say", "fb_say_side", "fb_unsay", "fb_said", "fb_tick", "fb_choose", "fb_fast")
 
 
 def data_blobs():

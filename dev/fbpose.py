@@ -143,6 +143,8 @@ BALL_STEP = 0x80417B00                 # (ball) one update of a ball's flight (t
 BALL_SIZE = 0xE0                       # a ball record (a team record +0xE8, of 0x1C8)
 B_FLAGS = 0xC0                         # the ball: bit 0 = it has touched down
 PRED_EVERY, PRED_MAX = 4, 720          # the landing run every 4 updates, at most 720 updates ahead
+PASS_SPEED = 1.5                       # v29 (Andrew: "speed up the ball for passes"): a pass flies its same path this
+                                       # many times as fast (football.py's fb_fast steps it again every other update)
 BALL_SEE = 1 / 25.0                    # the football in the air drawn bigger past 25 ft from the camera (its size x
                                        # distance / 25), so it stays in sight
 BAG = sum(1 << c for c in TYPE_CLUBS[:fb.TYPE_FG])     # the passes (the auto-aim never picks a kick)
@@ -208,7 +210,7 @@ for _name, _size in (("rec", 0x40), ("tmp", 0x30), ("mh", 0x24), ("bh", 0x24), (
                      ("dbg_noqb", 4), ("dbg_near", 4), ("dbg_clip", 4), ("dbg_t", 4), ("dbg_speed", 4),
                      ("types", 4), ("angle_k", 4 * 14), ("spin_k", 4 * 14), ("badge_reset", 4), ("a0", 4), ("s0", 4), ("spin_dv", 16),
                      ("rcv", RSIZE * N_RCV), ("need", 4 * 18), ("lead", 4), ("hole_seen", 4), ("rot", 4), ("rcv_live", 4), ("catcher", 4), ("pred_n", 4), ("gq", 24), ("spread", 4),
-                     ("bump", 4), ("bump2", 4), ("pull", 4), ("gq_max", 4), ("ball_see2", 4), ("pball", BALL_SIZE),
+                     ("bump", 4), ("bump2", 4), ("pull", 4), ("gq_max", 4), ("ball_see2", 4), ("pball", BALL_SIZE), ("fast_acc", 4), ("fast_extra", 4),
                      ("magic", 8), ("cvt", 8), ("e", 16), ("t1", 16),
                      ("dbuf", 16 * N_JOINTS), ("q", 16 * N_JOINTS), ("map", 256)):
     if _size == 8 or _size == 16:
@@ -216,7 +218,7 @@ for _name, _size in (("rec", 0x40), ("tmp", 0x30), ("mh", 0x24), ("bh", 0x24), (
     D[_name] = _off
     _off += _size
 DATA_SIZE = (_off + 31) & ~31
-CONSTS = {"spread": RCV_SPREAD, "bump": RCV_BUMP, "bump2": RCV_BUMP ** 2, "pull": RCV_PULL, "gq_max": 9.0,
+CONSTS = {"fast_extra": PASS_SPEED - 1, "spread": RCV_SPREAD, "bump": RCV_BUMP, "bump2": RCV_BUMP ** 2, "pull": RCV_PULL, "gq_max": 9.0,
           "ball_see2": BALL_SEE ** 2, "throw_up": THROW_UP, "hand_in": HAND_IN, "throw_side": THROW_SIDE, "tee_up": BALL_A * 0.95, "tee_tilt": 0.25, "dbg_ball_f": 3.0, "dbg_ball_up": 4.0, "bax": 1.0, "bcs": 1.0, "spin_c": math.cos(BALL_SPIN), "spin_s": math.sin(BALL_SPIN), "big": 1e9, "zero": 0.0, "one": 1.0, "half": 0.5, "threehalf": 1.5, "tiny": 1e-6, "run_cycle": RUN_CYCLE,
           "run_speed2": RUN_SPEED2, "catch_d2": CATCH_D ** 2, "inv_catch_d2": 1 / CATCH_D ** 2,
           "down_frames": float(T["down_frames"]), "inv_dive": 1.0 / T["dive_frames"], "inv_jump": 1.0 / T["jump_frames"],
@@ -1050,7 +1052,7 @@ def make_code(L):
     a(ppc.lwz(0, D["rcv_live"], 31), ppc.cmpwi(0, 0))
     a.br("bne", "ru_live")
     a(ppc.li(0, 1), ppc.stw(0, D["rcv_live"], 31), ppc.li(0, -1), ppc.stw(0, D["catcher"], 31), ppc.li(0, 0),
-      ppc.stw(0, D["pred_n"], 31), ppc.lfs(0, D["zero"], 31))
+      ppc.stw(0, D["pred_n"], 31), ppc.lfs(0, D["zero"], 31), ppc.stfs(0, D["fast_acc"], 31))
     for k in range(N_RCV):
         for name in ("vx", "vz", "jump_t", "dive_t", "jump_h"):
             a(ppc.stfs(0, D["rcv"] + RSIZE * k + R[name], 31))
@@ -1065,6 +1067,28 @@ def make_code(L):
         a(ppc.addi(23, 31, D["rcv"] + RSIZE * k), ppc.li(22, k))
         a.br("bl", "fp_catch1")
     a.label("ru_out")
+    _leave(a, 0x40, 21)
+
+    # ---- fp_fast_due: (leaf) r3 = 1 when a pass's ball gets an extra step this update: PASS_SPEED - 1 steps an
+    # update on average ("fast_acc" counts them up; fp_recv_update clears it when a play starts). Uses r3, r12, f0, f1.
+    a.label("fp_fast_due")
+    _li32(a, 12, data)
+    a(ppc.lfs(1, D["fast_acc"], 12), ppc.lfs(0, D["fast_extra"], 12), ppc.fadds(1, 1, 0), ppc.lfs(0, D["one"], 12),
+      ppc.fcmpu(1, 0), ppc.li(3, 0))
+    a.br("blt", "fd_keep")
+    a(ppc.fsubs(1, 1, 0), ppc.li(3, 1))
+    a.label("fd_keep")
+    a(ppc.stfs(1, D["fast_acc"], 12), BLR)
+
+    # ---- fp_catch_all: (r29 = the ball, r31 = football's state) every receiver's catch test, at the ball's place now
+    # (football.py's fb_fast after its extra step, so a fast ball can't pass through a receiver between two tests)
+    a.label("fp_catch_all")
+    _enter(a, 0x40, 21)
+    a(ppc.mr(24, 31), ppc.mr(21, 29))
+    _li32(a, 31, data)
+    for k in range(N_RCV):
+        a(ppc.addi(23, 31, D["rcv"] + RSIZE * k), ppc.li(22, k))
+        a.br("bl", "fp_catch1")
     _leave(a, 0x40, 21)
 
     # ---- fp_run1: (r23 = a receiver slot; r21 = the ball, r24 = football's state, r31 = our data) its own pad moves
