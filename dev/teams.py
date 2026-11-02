@@ -38,6 +38,11 @@ v20 adds two more (the list has its own icon/help arrays now: the game's hold 10
     1 to each of the others when the Lone Wolf loses, nothing for a tie. Skins' own scoring is swapped for stroke
     play's per shot plus ours per hole; the points show where the game shows skins (score panel, the hole-end
     scorecard counting them up, the results).
+
+v27 adds Football (football.py has the game itself), choice 12, for 2 humans (one team, straight to the course
+select) or 4 (2v2 on the team screen): setup byte 7 or 8, which the round's `setup` makes plain Doubles (team mode 0)
+with football.py's flag on; the shot hook and the message hook go on to football.py's. The list's arrays (13
+choices) moved to their own cave, "arrays".
 """
 import os
 import struct
@@ -47,6 +52,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import camelot_lz as lz  # noqa: E402
+import football  # noqa: E402
 import ppc  # noqa: E402
 import textures  # noqa: E402
 
@@ -74,6 +80,7 @@ CAVES = {            # name: (address, size, first word)
     "wstep": (0x80042AE4, 324, 0x7C0802A6),    # Wolf: running its menus
     "wname": (0x800550A4, 320, 0x7C0802A6),    # Wolf: the scoring hook, players' names, team_of
     "waward": (0x80067068, 324, 0x9421FFD8),   # Wolf: a hole's points
+    "arrays": (0x800462D8, 236, 0x7C0802A6),   # v27: the Team Play list's icon/help arrays (13 choices; were in "list")
 }
 
 MODE_BYTE = 0xA7D            # setup block (main.dol 0x80175600) + 0xA7D = 0x8017607D: unused by the game
@@ -153,9 +160,12 @@ SCREEN_PUSH, COURSE_LIST = 0x80439C1C, 0x80413910
 SUBLIST_HOOK = (0x8041CAE4, 0x4E800020)      # blr ending the Doubles case of FUN_8041ca00
 SUB_TEX, SUB_HELP = 0x8044C50C, 0x8044C534   # 10 ints each: icon/label texture and help (message 0x22 + value)
 SUB_COUNTS = 0x8044617C                      # Doubles' choice count for 1..4 human players (words)
-SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (9, 11, 12, 12)   # the one-team games from 2 humans, Wolf from 3
+SUB_COUNTS_OLD, SUB_COUNTS_NEW = (5, 5, 5, 5), (9, 13, 12, 13)   # the one-team games from 2 humans, Wolf from 3,
+                                             # v27 Football for 2 (one team) or 4 (2v2)
 CHOICE_BB_MATCH, CHOICE_BB_STROKE, CHOICE_SCRAMBLE, CHOICE_WORST = 5, 6, 7, 8
 CHOICE_TEAM, CHOICE_TEAM_WORST, CHOICE_WOLF = 9, 10, 11
+CHOICE_FOOTBALL = 12                         # v27 (football.py)
+HUMANS = 0x8044B014                          # menu overlay: how many humans picked the game (word)
 # The game keeps a sub-list's icons and help in two arrays of 10 (SUB_TEX, SUB_HELP, back to back); v20's 11
 # choices have their own (cave "list"), which the list's three readers load through a pointer (LIST_READERS).
 LIST_FILL = (0x8041CA00, 0x3CE08017)         # lis r7,0x8017: FUN_8041ca00's first instruction (fills the arrays)
@@ -171,8 +181,9 @@ ROW_TIGHT, ROW_STEP = 11, 60
 ICONS, LABELS = "B/V/V", "B/V/W"             # the sub-lists' 96x96 CMPR icons and IA4 labels (25 each)
 FIRST_TEX = 25                               # ours: 25.. in NAMES order
 NAMES = ("Best Ball Match", "Best Ball Stroke", "Scramble", "Worst Ball", "Team Scramble", "Team Worst Ball",
-         "Wolf")
-HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEC, 0x7FEB)  # our help messages, answered by build_mod.py's hook
+         "Wolf", "Football")
+HELP_IDS = (0x7FE1, 0x7FE2, 0x7FE3, 0x7FEA, 0x7FE4, 0x7FEC, 0x7FEB,   # our help messages, answered by build_mod.py's
+            football.MSG_HELP)                                         # hook (Football's text is football.py's)
 HELP_TEXTS = (
     b"\x074\x094Two-vs-two match: the best\x01ball on each hole wins it.\x00",
     b"\x074\x094Two-vs-two. Each team counts\x01its best score on every hole.\x00",
@@ -832,6 +843,12 @@ def hooks_code(d, x, b, at, w):
     a.br("bne", "setup_mode")
     a(ppc.li(11, WORST))                      # (Team Worst Ball: Worst Ball with one side)
     a.label("setup_mode")
+    a(ppc.li(9, 0), ppc.cmpwi(11, football.FOOTBALL))      # v27: Football is plain Doubles (team mode 0) here,
+    a.br("blt", "setup_football")                          # with football.py's flag on
+    a(ppc.li(9, 1), ppc.li(11, 0))
+    a.label("setup_football")
+    hi, lo = ppc.hi_lo(football.ON)
+    a(ppc.lis(10, hi), ppc.stw(9, lo, 10))
     _la(a, 10, d["team_mode"])
     a(ppc.stw(11, 0, 10), ppc.li(9, -1))      # (r0 is the player count the game halves next: keep it)
     _la(a, 10, d["bb_hole"])
@@ -844,6 +861,8 @@ def hooks_code(d, x, b, at, w):
     a(ppc.stw(9, 0, 10))
     _la(a, 10, d["starts"])
     a(ppc.stw(9, 0, 10), ppc.lbz(9, MODE_BYTE, 30), ppc.cmpwi(9, TEAM_WORST))
+    a.br("beq", "setup_team")
+    a(ppc.cmpwi(9, football.FOOTBALL_TEAM))
     a.br("beq", "setup_team")
     a(ppc.cmpwi(11, TEAM_SCRAMBLE))
     a.br("beq", "setup_team")
@@ -896,6 +915,11 @@ def hooks_code(d, x, b, at, w):
 
     # -- after a shot (b from SHOT_HOOK): r30 = player. Not a scramble: the game's own penalty and lie code.
     a.label("shot")
+    hi, lo = ppc.hi_lo(football.ON)          # v27: Football's plays decide (football.py)
+    a(ppc.lis(12, hi), ppc.lwz(12, lo, 12), ppc.cmpwi(12, 0))
+    a.br("beq", "shot_teams")
+    a.b(football.caves()[1]["fb_shot"])
+    a.label("shot_teams")
     _la(a, 12, d["team_mode"])
     a(ppc.lwz(12, 0, 12), ppc.cmpwi(12, SCRAMBLE))
     a.br("blt", "shot_game")
@@ -1045,9 +1069,8 @@ def hooks_code(d, x, b, at, w):
     a(ppc.mulli(12, 12, OPTION_TEXT))
     _la(a, 3, x["_options"])
     a(ppc.add(3, 3, 12), ppc.BLR)
-    a.label("messages_game")
-    a(MSG_LOOKUP_FIRST)
-    a.b(MSG_LOOKUP + 4)
+    a.label("messages_game")                  # v27: football.py's messages, then the game's
+    a.b(football.caves()[1]["fb_messages"])
 
     # -- menus (B/U/C). Clearing the doubles flag clears our byte too (bl; r0 / r29 = 0, cr0 untouched).
     a.label("clear_sublist")
@@ -1059,6 +1082,8 @@ def hooks_code(d, x, b, at, w):
     a.br("bgt", "commit_ours")
     a.b(COMMIT_TABLE)
     a.label("commit_ours")
+    a(ppc.cmpwi(9, CHOICE_FOOTBALL))
+    a.br("beq", "commit_football")
     a(ppc.cmpwi(9, CHOICE_TEAM))
     a.br("beq", "commit_team")
     a(ppc.cmpwi(9, CHOICE_TEAM_WORST))
@@ -1088,6 +1113,12 @@ def hooks_code(d, x, b, at, w):
     a.bl(SCREEN_PUSH)
     a.bl(COURSE_LIST)
     a.b(COMMIT_END)
+    a.label("commit_football")                # v27: 2 humans one team (straight to the course), 4 Doubles' 2v2
+    hi, lo = ppc.hi_lo(HUMANS)
+    a(ppc.lis(12, hi), ppc.lwz(12, lo, 12), ppc.cmpwi(12, 2), ppc.li(0, football.FOOTBALL_TEAM))
+    a.br("beq", "commit_team_on")
+    a(ppc.li(0, football.FOOTBALL))
+    a.br("b", "commit_on")
     return a
 
 
@@ -1214,13 +1245,15 @@ def v20_code(d, t, x, cam, L):
     T = s.labels
 
     # -- list (menu overlay): the Team Play list's arrays
+    arr = ppc.Asm(CAVES["arrays"][0])
+    arr.label("new_tex")
+    arr(*([0] * (SUB_COUNT_DOUBLES + len(NAMES))))
+    arr.label("new_help")
+    arr(*([0] * (SUB_COUNT_DOUBLES + len(NAMES))))
+    out["arrays"] = arr
     a = ppc.Asm(CAVES["list"][0])
     a.word("tex_ptr", SUB_TEX)
     a.word("help_ptr", SUB_HELP)
-    a.label("new_tex")
-    a(*([0] * (SUB_COUNT_DOUBLES + len(NAMES))))
-    a.label("new_help")
-    a(*([0] * (SUB_COUNT_DOUBLES + len(NAMES))))
     a.label("list_reset")                     # (b from LIST_FILL) every fill starts on the game's arrays
     a.la(12, "tex_ptr")
     a(ppc.lis(11, SUB_TEX >> 16), ppc.ori(11, 11, SUB_TEX & 0xFFFF), ppc.stw(11, 0, 12),
@@ -1234,8 +1267,8 @@ def v20_code(d, t, x, cam, L):
     a.la(9, "help_ptr")
     a(ppc.lwz(9, 0, 9), ppc.BLR)
     a.label("sublist")                        # (b from SUBLIST_HOOK, the end of the Doubles case) our arrays:
-    a.la(11, "new_tex")                       # Doubles' own five (their help says alternate shot), then ours
-    a.la(12, "new_help")
+    _la(a, 11, arr.labels["new_tex"])         # Doubles' own five (their help says alternate shot), then ours
+    _la(a, 12, arr.labels["new_help"])
     _la(a, 10, SUB_TEX)
     for k in range(SUB_COUNT_DOUBLES):
         a(ppc.lwz(0, 4 * k, 10), ppc.stw(0, 4 * k, 11), ppc.li(0, ALT_IDS[k] - 0x22), ppc.stw(0, 4 * k, 12))
@@ -1784,10 +1817,11 @@ def caves():
     labels = {**h.labels, "stroke": t["stroke"], "mulligan": t["mulligan"], "cam_update": c.labels["cam_update"], **{f"best_{k}": v for k, v in b_labels.items()}, **{f"pick_{k}": v for k, v in x.labels.items()},
               **{f"data_{k}": v for k, v in d.items()}, **{f"w_{k}": v for k, v in w_labels.items()}}
     labels["_texts"] = [(HELP_IDS[k], d[f"help_{k}"] if k in DATA_HELP_KEYS else w_labels[f"help_{k}"])
-                        for k in range(len(NAMES))] + \
+                        for k in range(len(HELP_TEXTS))] + \
         [(MSG_TEAM_HELP, d["team_help"])] + [(ALT_IDS[k], e.labels[f"alt_{k}"]) for k in range(len(ALT_IDS))]
     labels["_sizes"] = {name: len(code) for name, code in sizes}
     labels["row_x"] = e.labels["row_x"]
+    out += football.caves()[0]                # v27: Football's caves travel with Team Play's
     return out, labels
 
 
@@ -1823,7 +1857,7 @@ def overlay_patches(rel, labels, word):
             out.append((site, (ppc.bl if link else ppc.b)(site, labels[stub]), old))
         for k, (old, new) in enumerate(zip(SUB_COUNTS_OLD, SUB_COUNTS_NEW)):
             out.append((SUB_COUNTS + 4 * k, new, old))
-    return out
+    return out + football.overlay_patches(rel)
 
 
 # ---- pictures: our icons (96x96 CMPR) and name labels (IA4), drawn here, appended to the sets
@@ -1951,6 +1985,23 @@ def icon_image(name, size=96, scale=4):
                       width=2 * scale)
             d.ellipse(((x - 2) * u, 44 * u, (x + 2) * u, 50 * u), fill=(0, 0, 0, 255))
         d.ellipse((43 * u, 60 * u, 53 * u, 68 * u), fill=(20, 20, 20, 255))
+    elif kind == "Football":          # v27: a football in front of yellow goalposts
+        post, black = (255, 222, 0, 255), (0, 0, 0, 255)
+        for box in ((44, 46, 52, 90), (16, 40, 80, 48), (16, 6, 24, 48), (72, 6, 80, 48)):
+            d.rectangle(tuple(v * u for v in box), fill=post, outline=black, width=2 * scale)
+        import math
+        t = math.radians(-30)
+        pts = [(48 * u + 30 * u * math.cos(k * math.pi / 24) * math.cos(t) - 17 * u * math.sin(k * math.pi / 24)
+                * math.sin(t), 56 * u + 30 * u * math.cos(k * math.pi / 24) * math.sin(t) + 17 * u
+                * math.sin(k * math.pi / 24) * math.cos(t)) for k in range(48)]
+        d.polygon(pts, fill=(140, 72, 30, 255), outline=black, width=line)
+        cx, cy, ca, sa = 48 * u, 56 * u, math.cos(t), math.sin(t)
+        d.line([(cx - 13 * u * ca, cy - 13 * u * sa), (cx + 13 * u * ca, cy + 13 * u * sa)],
+               fill=(255, 255, 255, 255), width=2 * scale)
+        for k in range(-2, 3):
+            x0, y0 = cx + 5 * k * u * ca, cy + 5 * k * u * sa
+            d.line([(x0 + 4 * u * sa, y0 - 4 * u * ca), (x0 - 4 * u * sa, y0 + 4 * u * ca)],
+                   fill=(255, 255, 255, 255), width=2 * scale)
     elif kind == "Team Worst Ball":   # a whole team's balls, a blue arrow down to the one it must play
         for x, y in ((18, 26), (78, 26), (20, 62), (76, 62)):
             ball(x * u, y * u, 9 * u)

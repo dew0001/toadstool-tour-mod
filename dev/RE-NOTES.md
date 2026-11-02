@@ -70,12 +70,18 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x80023518, 0x80037EDC, 0x80023188 | 284, 284, 280 | | v24 costumes ("data", "menu", "round"; costumes.py) |
 | 0x8005D624 | 280 | FUN_8005d624 | v25 skill.py: impact windows, the bend inside them, bad lies' spread (v25's auto swing misses, gone in v26); v26 the green's grid on every shot |
 | 0x8003D35C, 0x80037A90, 0x8004893C, 0x8006C168, 0x80040AAC, 0x8006BA90, 0x80094660, 0x800459B8 | 280, 280, 276, 272, 276, 272, 272, 272 | | v26 the course select's dropdown (coursemenu.py: "list", "hint", "input", "keys", "move", "show", "fill", "toad") |
+| 0x800462D8 | 236 | FUN_800462d8 | v27 the Team Play list's icon/help arrays, 13 choices (teams.py "arrays"; were in "list") |
+| 29 caves from 0x800389B4 (272) to 0x8005C678 (212) | 7,020 | | v27 Football (football.py `CAVES`: "state", "consts", "frame", "run", "run2", "run3", "track", "launch", "catch", "contact", "kick", "cam", "cam2", "cam3", "shot", "small", "ground", "posts", "posts_m", "posts2", "posts2b", "posts3", "posts4", "pdata", "say", "tick", "texts", "star", "choose") |
 
 Still free: 0x80057A14 (712, used by the `draws` debug patch) and 0x8005DAFC (444, `messages` debug patch), plus
-255 smaller dead functions, 36 KB in all, the largest 0x800389B4 (272), 0x80046A6C and 0x800409A0 (268), 0x800838B0
-(264). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
+225 smaller dead functions (v27), 28.9 KB in all, the largest 0x800961DC (252), 0x8002063C (216), 0x8003FFDC and
+0x800369AC (212). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
 from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unreferenced64.tsv`, main.dol
 0x80003100-0x80400000) through `find_dead_code.py`. Do NOT use 0x80001800: it is wiped before the first frame.
+
+For code that only runs in a round there is far more room: **the golf overlay's tail**, 0x80528000..0x80548000 (128 KB,
+golfext.py; see "Football's players"), appended to C/L/V. v27's fbpose.py uses about 28 KB of it (code, data, the
+golfers' rigs, the pose keys, the football's mesh).
 
 ## Gotchas
 
@@ -123,6 +129,22 @@ from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unrefe
   the counter reaches 2 x max - 1 the meter lapses back to view 5. Replays (+0x184) fake the press from +0x1B5.
   v13 calls cave 14 there instead: golfer 17's real shots (not putts or replays) take B alone, so Tony has no auto
   swing (checked in game: A at the power press does nothing and the meter lapses; B then A swings; putts as usual).
+- **Spin combos** (read 2026-11-02 from `FUN_80412f6c`'s view 0xC case, 0x80413560..): only in the manual swing
+  (+0x234 = 0; the auto swing's presses in view 0xC are never read). The impact press (A or B) sets the impact and is
+  the combo's first button; one more press before the phase ends (the counter 15 past the mark) is the second.
+  Buttons go to bytes +0x244 / +0x245 (1 A, 2 B), the count to +0x24C; at two presses sound 499 and the kind +0x1C8:
+  A A 1 (topspin), A B 2 (super topspin), B B 3 (backspin), B A 4 (super backspin); one press: 0 (none, sound
+  0x23D), +0x24D = 1. The shot builder copies it to shot +0x5C for real shots and mode 5 only (the aim preview's
+  modes 6/7 get 0), after a club-set modifier (`FUN_80009c24`: set kind 1 makes 0 -> 3, 3 -> 4, 4 -> 5; kind 2
+  0 -> 4, 3 -> 5, 4 -> 6); the flight setup copies shot +0x5C into the ball (+0xCC). The meter's HUD draws texture
+  0x11 + kind of the HUD set for kinds 1-4. Replays record the buttons at +0x1B0.. and press them back.
+  Football (v27, fbpose.py `fp_spinfly`, called from football.py's fb_frame every update of a play in the air): the
+  kind from setup +0x1C8 (the player's own presses; not shot +0x5C, which the club sets change) puts SPIN_DV x
+  GRAVITY (0.011 ft a frame per frame, the fall measured in flight) on the falling ball's y velocity each frame:
+  -0.25 / -0.65 (topspin dips) and +0.2 / +0.35 (backspin floats). Measured (Lakitu Valley 1's tee, Bomb, perfect
+  impact, no wind, landing vs the star): none -3.6 yd (power 59 of 60), A A -17.7, A B -25.4, B B +9.9, B A +20.3
+  (Peach's 206-yd; +24 on Mario's 212); a field goal with B A +19 yd past its no-spin landing. Each combo pressed for
+  real gave +0x1C8 1-4 (`scripts\fb_spin_test.ps1 -Manual -First Cross|Circle -Second Cross|Circle`).
 - **Meter ticks** (`FUN_8046e440`, once a frame, r31 = the meter block 0x80523CA4): +0 the impact counter
   (0x80523CA4), +4 the auto flag (CA8), +8 the impact error (CAC), +0xC the zone (CB0), +0x10 the stage (CB4), +0x14
   the power counter (CB8), +0x18 the target step (CBC), +0x1C / +0x20 the "nice power" / "nice impact" timers
@@ -818,7 +840,7 @@ green's grid on every shot, the auto swing the game's own again.
   1 -> 1. Checked: Mario's driver on Lakitu 1's tee 5 (v24 7), a 3-wood from the rough 2; Tony's driver still 3.
 - **The bend inside the window** (shot builder `FUN_804c6668`, 0x804C6DD0..0x804C6E50): f = |error| / Z x (0.22 -
   0.02 x control) (0x804E3264, 0x804E322C; the debug flag 0x41 path uses 0x804E3260 / 0x804E3244), ending `fmuls
-  f31,f31,f13` at 0x804C6E4C. Early (error < 0): launch angle + f x 10 degrees (0x804E3268), side spin + speed x 1350 f,
+  f31,f31,f13` at 0x804C6E4C. Early (error < 0): launch angle + f x 10 degrees (0x804E3268), backspin (+0x50) + speed x 1350 f,
   start line - f x 5 degrees (0x804E327C), speed x (1 - f / 2); late: angle - f x (0.2 angle + 5 degrees), speed x
   (1 - 0.3 f), spin x (1 - f / 4), start line + f x 5 degrees (mirrored for lefties, player +0x51EE). Outside the
   window the same with f = 1 (fixed: early is half the speed). f13 and r11 are loaded again on both paths after it.
@@ -973,6 +995,172 @@ Scramble, 10 Wolf; counts 9/10/11/11 for 1-4 humans: Team Scramble from 2, Wolf 
 **v21 Team Worst Ball** (choice 10, from 2 humans; Wolf moves to 11; counts 9/11/12/12): the commit writes
 0x8017607D = 6, which only the round's `setup` reads: it plays as Worst Ball (team mode 4) with one side, as Team
 Scramble does. The score panel's face swap (`face`) now runs for any scramble-kind mode with one side.
+
+## Football (v27)
+
+Andrew's game mode (football.py): partners pass down the hole and finish with a field goal. Built on Team Play's
+alternate shot: the commit writes setup byte 0x8017607D = 7 (2v2, 4 humans: Doubles' team screen) or 8 (one team of
+2: straight to the course select); the round's `setup` stub (teams.py) turns them into team mode 0 (plain Doubles to
+every teams.py hook) with football.py's flag (its state cave's first word) on, one side for 8. List choice 12 (counts
+9/13/12/13 for 1-4 humans).
+- **Per update in the air.** `cmpwi r21,0` at 0x80425BB4 follows the player update's `bl SHOT_CAMERA` (0x80425BB0)
+  and the skip round it (`bne 0x80425bb4`), so every volatile register is free there; r31 is the player being updated
+  (every player's update and fast-forward's extra ones pass it). fb_frame works for the shooter (CUR_PLAYER) while its
+  state (+0x24) is 7: the ball flying or rolling. Velocities are feet a frame (60 a second); measured on a drive: 0.55 up
+  and 2.6 along at launch, -0.94 down before the first bounce, which flips it to +0.20 (a contact = the y velocity
+  jumping up by 0.06+ or the speed across halving).
+- **The ground under a point.** `FUN_8040100c(f1 x, f2 y, f3 z, r3 out[6])`: a ray from y + 9.6 down 160 ft through the
+  hole's collision (`FUN_804379b4`), out = the point and the normal; with nothing hit out[1] stays y + 9.6. The game
+  puts the pin on the ground with it. A start 9.6 over the last height keeps a runner off tree tops.
+- **Pads.** Player +0x4F14 points at its port's pad state (0x8026BB60 + 0x38 x port: +0 held, +4 new presses, +0x17/
+  +0x18 main stick, s8, about +-56 at full tilt from the DSU test pad); player +0x5164 is the port. The game's digital L
+  (0x40) is read nowhere while aiming (the aim masks the setup's presses with 0x121F): football's pass/kick switch.
+- **The landing star** (FUN_804317f0, queued by the scene's draw while the shooter's +0x28 is 4-10 or 15) is drawn at
+  the HUD record 0x804E3620 +0x40, copied each frame from the shooter's setup +0x1EC by FUN_804305e0. It fades out
+  (0x804CE588 -= 8) when the meter's stage (0x80523CB4) is set or the state is 3 or 5-8 (`lwz r0,0x3CB4(r9)` at
+  0x8043183C, `lwz r0,36(r3)` at 0x8043184C), else blinks: 0x804CE588 = sin x 127 + 128 (`stw r0,-6776(r9)` at
+  0x804318D8). Its size: the scale matrix 0x805060B0, built once from 0.32 (0x804DC254). Its yards labels come with it.
+- **"On the green".** FUN_80414818(lie) (lie +0x2C == 2) and FUN_804148c4(ball) (+0xB8 == 2), 31 callers: the putter,
+  the putt camera and grid, the pick order. Answering no makes the green play as fairway (clubs, no putt).
+- **The flag.** The pin object 0x804E6954 (+0x30 its matrix, from FUN_8044bbb0 at the hole's start: the pin, turned by
+  the wind; +0x60 the flag model) is drawn by FUN_8044bf34 (queued by FUN_8044c0e0 from the scene's draw, layer 1) with
+  `bl MODEL_DRAW` at 0x8044C0B4. Drawing our own geometry there works with the slope grid drawer FUN_80447d48's state
+  (GXSetNumChans 1, GXSetChanCtrl(0, 0, 0, 0, 0, 2, 2), no texgens, one stage, TEV colour = rasterized, GXSetVtxDescv
+  0x804DE3E4 = position only, GXSetVtxAttrFmt(0, 9, 1, 4, 0)) and FUN_8001e980(camera +0x3C, model, 0) for the matrix;
+  colours by GXSetChanMatColor(4, &rgba) between GXBegin(0x80 quads, 0, n) batches.
+- **The ball's size.** FUN_8041d04c draws a ball through translate x its spin (+0x60) x the matrix 0x805025E8, a
+  scale of 0.14 (the ball's 1.68 inches) that FUN_8041dcb8 builds once at the round's start.
+- **Text boxes.** FUN_80024f1c(message, x, y, -1, 15) opens a box (60 slots at 0x802CC2BA) and returns it (the
+  hole's opening tip: 320, 224); FUN_80024c98(box) closes it at once (FUN_80024ce8 lets it close itself). The text
+  types itself in over the first few frames.
+- **After the shot.** The penalty and lie block (0x8041F878-0x8041F958, teams.py's `shot`) goes to fb_shot: a catch
+  runs it (the new lie; OB_TEST / HAZARD_TEST on the ball first: out or in the water is incomplete), incomplete and
+  no good skip it (the team's lie stays and the next turn starts there), a good kick writes the team's lie at the pin
+  with +0x28 = 1, which the hole-out test right after (`lie +0x28 != 0` -> record +0x1BE = 1) scores.
+- Checked in game (profile 2, Lakitu Valley 1, 2 and 4 humans): passes thrown (kind 1, the receiver on the aim point),
+  the receiver running 24 ft/s on P2's stick with its height on the ground, a catch (the ball held at the receiver, the
+  next turn from there, the catcher throwing), incompletes (back to the spot, a stroke), kicks from 30 yards (no good
+  short of the posts; good 17 ft over the bar: hole over, 7 on the card), a kick picked on the tee with L, the boxes,
+  the giant posts, the star and ball sizes; Stroke Play unchanged (the flag, the putter).
+
+## Football's players: golfer models, poses, the golf overlay's tail (v27)
+
+Andrew wanted animations ("throwing, running, catching etc."): the receiver on the field as a golfer, the QB throwing
+and kicking (fbpose.py, fbmoves.py, rigmap.py, golfext.py).
+- **The golf overlay's tail.** C/L/V loads at 0x80400000 with at most 0x150000 bytes (main.dol `FUN_8000bc14(0xCF7,
+  0x80400000, 0x150000)`); main.dol's arena starts at 0x80550000 (`FUN_80032da0(0x80550000)`); the movie player uses
+  0x80400000..0x80550000 as heap 8 only while no overlay is loaded. The image ends at 0x804E3604 and the overlay's
+  zero-filled data at about 0x80524720 (its code names nothing past 0x80524668; in a round RAM from 0x8052471C up stayed
+  zero). golfext.py pads the image with zeros to 0x80528000 and appends code and data there (to 0x80548000 at most).
+  Golf overlay hooks can call it; it reloads fresh every round (so its data starts over each round).
+- **Golfer models.** Only the shooter's model exists during a turn: the player update loads it at the turn's start
+  (state 3: `FUN_8000f00c(player +0x5170, golfer object method +0x58 = [22] the main model, *(player +0x516C) the bank
+  holder, heap 8)`, after `FUN_8000ecac(bank holder, method +0x5C, 8)` when the golfer has a bank; states 10/0xB load
+  +0x60, the second model, the same way), and the turn's end frees it (`FUN_8042685c` -> `FUN_80426b6c`; in Doubles the
+  partner's too). Heap 8 is 2 MB (made in the round's init, `FUN_8001a400(8, alloc 0x200000)`): room for one golfer (a
+  second load there stalls in state 1); heap 0 is the main 16 MB heap.
+- **Resource holders** (0x24): +0 class (0x80160F10 model, 0x80160F20 bank), +4 state, +8 wanted state (2 loaded,
+  5 free; `FUN_80009888` loaded, `FUN_800098b0` free, `FUN_800099dc` frees), +0xC heap, +0x10 a time stamp and +0x14 a
+  pointer to it (the unloader `FUN_8000b8cc` reads *(+0x14); 0 there crashed at 0x8000B944), +0x18 file id, +0x1C the
+  data (a model's instance: `FUN_8000f130(holder)` once it and its bank are loaded), +0x20 the bank's holder.
+- **Every player whose +0x5170 holder is loaded gets animated** by the game each frame (the per-player function around
+  0x8041EF00: golfer object methods +0x74.. on its animation set +0x4F1C), so loading the receiver there crashed in the
+  animation sampler (PC 0x80005114, reading animations the receiver doesn't have): fbpose.py loads it into holders of
+  its own (data "mh", "bh"; made free in the data blob: class, 5, 5, +0x14 -> +0x10), in heap 0, and frees them when the
+  turn moves on.
+- **Model instances** (0x44, a table of 0x400 at 0x80160F90): +0 the root, +4/+8 and +0xC/+0x10 the skinned positions'
+  and normals' two buffers (+0x36 picks one; `FUN_8000f248(holder)` = `FUN_80007d5c` flips it, which the player update
+  does for the shooter every frame; fbpose flips the receiver's), +0x14 the bones' matrices (0x60 each: +0x00 the bone
+  in model space, +0x30 the same without its own scale; MODEL_DRAW turns them into skin matrices in place, x the bone's
+  inverse bind +0x04, when +0x2C is 0, then sets it), +0x28 the list of flag-2 bones, +0x2C, +0x34 a short (mirror).
+- **The pose builder** `FUN_800080c8(instance, mask, masked)` (via `FUN_800090f4` / `FUN_80009208`): per bone (root
+  +0x64, 0x60 each: +0 parent, +4 inverse bind, +0x34 scale, +0x40 translation, +0x4C quaternion x y z w, +0x5C flags 4
+  "children take +0x30", 2 "listed", 0x400 animated) local values from the rest or the animation sampler
+  `FUN_800050f0`; +0x30 = (parent's +0x30 with flag 4, else +0x00) x MTXQuat(q) (`FUN_8003d904(m, q)`; the root just
+  MTXQuat), +0x00 = +0x30 x MTXScale(s) (`FUN_8003d700(f1, f2, f3, m)`, `FUN_8003c6c8(a, b, ab)`), its translation =
+  parent's +0x00 x t (`FUN_8002e718(m, v, dst)` writes dst's translation column) or the root's t. fp_fk does the same.
+- **The golfer's swing animations move the body**: the world matrix (player +0x51BC: T(+0x5194) x the object's scale
+  +0x84) sits at the ball, and the address/swing animations carry the hips about 13.7 units back and the ankles 1.2
+  down (Mario on Lakitu 1's tee: hips rest (0, 5.77, -0.56) -> (-1.12, 4.19, -14.21)). fp_qb reads the game's pose of
+  the frame (+0x2C = 0: built, not yet drawn) and moves its own to the game's hips across and lower ankle's height.
+- **The swing in states and views**: the meter is all state 4: the setup's view +0x1C4 0xB while the power bar runs,
+  0xC waiting for the impact press, 0xE the stroke; then state 6 for a frame and 7 (the flight) a frame later.
+- **The golfer's draw**: `FUN_8042ab38(record)` (= `FUN_8042ab58`; queued by the player's `FUN_8042b19c` with
+  `FUN_8001e924(1048576.0 (golf 0x804DBCC0), FUN_8042ab38, record, layer 1; 3 for Metal Mario)`) lights and draws
+  record +0x34's holder with record +0x00 (the 3x4 world matrix) after the camera (+0x3C of 0x802D7E64); +0x30 the
+  golfer code, +0x38 a byte (2: the see-through pass). The draw queue (`FUN_8001e924(f1 depth, fn, arg, layer)`): entries
+  at 0x8026D1D8 (depth, layer << 16 | index), fn/arg at +0x8000, the count at +0x10000, up to 0x1000. The scene's draw
+  `FUN_80406a28` (once a frame) queues the flag with `FUN_8044c0e0` every frame of a hole: fbpose's hook (its first
+  instruction) queues the receiver and the football there.
+- **Clubs** are mesh parts 3-6 and 8-11 (and 0x16; golf `FUN_80428e7c`), rigid on their own bones under the right
+  hand: scale 0 on those bones (fbmoves `club_roots`) hides them.
+- **Joints**: rigmap.py finds 19 per golfer (Boo: hips, chest, head; Petey no legs); bind poses are T's facing +Z, the
+  right side at -X. A key's D (model-space rotation from the rest) becomes the bone's local rotation conj(R_p) conj(D_a)
+  D_j R_p l_b (fbmoves.py), with nlerp between keys.
+- **The aim's preview flies from the lie**: `FUN_80415790(preview ball 0x8050272C, lie = team record +0xB4, shot, mode)`
+  (called for a human's aim at 0x80424974; it redoes the flight only when the lie's or the shot's values change) starts
+  at the lie's place, and the game keeps the ball (so the golfer's world matrix, which sits at the ball) on the lie
+  while aiming: raising the lie lifted the golfer off the ground and stayed raised after the play. fp_preview (on that
+  call) passes a copy of the lie THROW_UP hips heights higher in a pass's aim, so the arrows and the star fly from the
+  throw, and fp_qb lifts the real ball as much on the flight's first frame. Since 2026-11-02 the passer stands where
+  the kicker does (the game's address stance, beside the ball), so the copy is also moved across to the QB's hand: the
+  game's hips at address (bone +0x0C / +0x2C, noted once a turn from the game's own pose) THROW_SIDE hips heights in
+  toward the ball, through the draw record's matrix (x mirrored for a lefty); the real ball moves as much on the
+  flight's first frame. Both flights then agree: a perfect no-wind pass lands on the star (the flight bends in from
+  the hand to it, as the preview's does).
+- **The golf ball's draw**: `FUN_8041db8c(ball)` queues it (`FUN_8041d04c` builds its matrix with the scale matrix
+  0x805025E8, then `FUN_8041d208` draws one of three ball models, and `FUN_8041d80c` its shadow); scale 0 there hides it
+  (fbpose does it every Football turn, after football.py's fb_tick sets it; the tee peg is drawn apart and stays).
+- **Testing gotcha**: the test profiles have Dolphin's Free Look on the DSU pad 2's sticks (for costume_front.ps1), so a
+  test that plays a second human on pad 2 flies Dolphin's own camera with it (the view went underground and the
+  receiver "vanished" whenever it ran): scripts\freelook.ps1 -Off (football_test.ps1 does it).
+- Checked in game (profile 2, Lakitu Valley 1): the receiver standing, running, jumping, diving, down, catching and
+  holding (scripts\fb_pose_gallery.ps1), visible through passes with 2 and 4 humans (Peach, Mario, Yoshi), the QB
+  set, cocked on the power bar and throwing, the kicker's leg, both standing behind the ball on the ground, no clubs,
+  the football (scripts\fb_qb_test.ps1, the gallery); Stroke Play unchanged (skill_test.ps1: club, grid, the flag).
+
+## Football's shot types (v27)
+
+Andrew (2026-11-01): "throw types that have their advantages and disadvantages (LB/RB) and putter would be a field goal
+kick so the player can decide", then "field goal attempt is decided by the team or player just switch to the field
+goal shot type and go for it each shot type should be able to have power too, attributes per shot type should mirror
+the character". football.SHOT_TYPES: Bomb (club 0), Bullet (4), Lob (11), Field goal (2); fbpose.py, fbhud.py.
+- **Clubs** (the HUD's names): 0 1W, 1 3W, 2 4W, 3 3I .. 9 9I, 10 PW, 11 AW, 12 SW, 13 PT; reach = the drive x 100,
+  93, 86, 80, 74, 68, 63, 58, 53, 48, 43, 38, 31% (see Characters).
+- **The bag**: player +0xE (u16, a bit per club 0-13; 0x3FFF in a round). `FUN_80412ee0(setup, -1 or 1)` steps the club
+  to the next one in the bag that way (none past 0 or 13: it doesn't wrap), sets the setup's "club changed" byte +0x24E
+  and returns it; the aim (`FUN_80412f6c`) calls it on the main stick's up (-1, a longer club) and down (1) while not on
+  the green, and a replay steps toward its recorded club (+0x18C) one club a frame. The auto-aim's club pick
+  (`FUN_804ab1fc`, every club in the bag, the woods 0-2 dropped for some lies) reads the same bits.
+- **+0x24E**: `FUN_80412f6c` clears it first thing (`stb r30,0x24e(r3)` at 0x80412F8C, r30 = 0); what the frame does
+  after a club change reads it later in the same update (the club sound 500, `FUN_8041027c`, the aim camera's zone
+  and meter). A club set from outside the update is never seen as a change: fbpose's fp_snap sets it there instead.
+- **The shot builder's flight** (`FUN_804c6668`): the launch angle +0x44 = `FUN_804c65c8(power / 60, club)` (stored at
+  0x804C66E4) x the golfer's height factor (0x804C6744); the backspin +0x50 = (300 x club + 2700) x power / 60 x the
+  golfer's spin factor (stored at 0x804C67DC; lift: a 4-iron at half its angle still climbed 25 ft higher than the
+  driver); the speed +0x48 then comes from the launch-speed table (`FUN_8044cee8`, only called by the builder: the
+  first use of a (shot type, club, power step) entry searches for the speed that carries the club's reach at that
+  angle and spin, `FUN_8044ccd8`, and keeps it, with a yaw correction at entry +4). The timing miss block
+  (0x804C6D4C..0x804C70F0, both paths meet at 0x804C70F0) then adds to the angle (early: f x 10 degrees, 0x804E3268)
+  and to +0x50 (early: speed x 1350 f, 0x804E326C; RE-NOTES "Skill" calls it side spin: it is the backspin), and
+  takes from them when late. On a low, low-spin throw those fixed amounts are huge (Bullet, auto swing error -2 of
+  zone 7: 172 yd became 195 and the hang time 2.6 s 3.3 s), so fp_bend scales the block's change by the type's
+  factors.
+- **The types' factors** (angle, backspin): Bomb 1, 1; Bullet 0.35, 0.1; Lob 1.15, 1; Field goal 1.1, 1. Measured on
+  Lakitu Valley 1's tee (Mario, power 58 of 60, no wind; landing vs the star on the receiver): Bomb about 4 s in the
+  air, 35 ft over the tee; Bullet 2.55 s, about 10 ft, the speed 4.2 ft a frame (the driver 3.1), on the aim line;
+  Lob 5.2 s, 67 ft up, 80 yd; Field goal 6.2 s, 95 ft up, 174 yd. On this downhill hole the Bullet's star is 176 yd
+  (its 157-yd reach on flat ground: a flat line keeps flying below the tee's height).
+- **The HUD badge** (bottom left, `FUN_8042f98c`): the club's picture from file 0xA45 + 2 x club + 0x1C x club set
+  (B/Y/O.., 78x117 CMPR; `addi r29,r29,0xa45`, then `add r3,r28,r29` the preload `FUN_8000baac(id, 6)`, `add
+  r29,r31,r29` the file, r28 = 2 x club, r31 = 2 x club + 0x1C x set) and its name from 0xA29 + 2 x club (B/Y/A..
+  B/Y/N, 96x54 CMPR; `addi r4,r4,0xa29` at 0x8042FBE4 and 0x8042FD90), loaded by `FUN_8000c8b0(handle, file id)` into
+  handles 0x804DC38C / 0x804DC390 when the club differs from the last loaded, 0x80506080 / 0x80506084 (both 0 when the
+  round starts, with club 0's already loaded: so club 0 never reloads unless they are reset). fbhud.py's files under
+  the new disc folder J (J/A/<club> names, J/B/<club> footballs) replace them in Football.
+- Checked (profile 2, Lakitu Valley 1): LB/RB steps Bomb, Bullet, Lob, Field goal and stops at both ends; the zone
+  (5, 7, 7, 7 on the tee), meter and star follow the type; the box and the badge name each; the field goal's football
+  stands on the tee; full-power Bullets land on the aim line; Stroke Play keeps its clubs, badge and grid.
 
 ## HUD (v3)
 

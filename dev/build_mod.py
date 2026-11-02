@@ -156,7 +156,13 @@ Changes (v26, skill.py and coursemenu.py):
     and A opens a list window of the mode's courses by name (scrolling), Up/Down to move, A to pick, B to go back;
     the holes and tees rows unchanged.
 
-Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's, teams.py's, costumes.py's, skill.py's and coursemenu.py's; checked with find_dead_code.py). Low memory at
+Changes (v27, football.py with teams.py):
+  - Football in Team Play (one team of 2, or 2v2): passes to the partner, who runs, jumps and dives under their own
+    camera to catch it; incompletes go back to the spot; giant field goal posts at the pin, kicked through to finish
+    the hole; the green plays as fairway. LB/RB picks a shot type (Bomb, Bullet, Lob, Field goal: each one of the
+    golfer's clubs with its own flight; fbpose.py), named in a box and on the HUD's club badge (fbhud.py, files J/).
+
+Patch code lives over dead functions (caves 1-14 and 17 below, course8.py's, teams.py's, football.py's, costumes.py's, skill.py's and coursemenu.py's; checked with find_dead_code.py). Low memory at
 0x80001800 does NOT work: the code there is gone by the time the game first draws. dev/RE-NOTES.md explains
 the game code each hook relies on.
 """
@@ -204,6 +210,7 @@ COURSE10 = sys.argv[sys.argv.index("--course10") + 1] if "--course10" in sys.arg
 COURSE11 = sys.argv[sys.argv.index("--course11") + 1] if "--course11" in sys.argv else None   # v22: Timber Creek
 UNLOCK = "--no-unlock" not in sys.argv
 ASPECT_WRITE = "--no-aspect-write" not in sys.argv
+CODE_ONLY = "--code-only" in sys.argv   # main.dol and the overlays only, into a tree built before (quick tests)
 
 # ---- v2: hold A to fast-forward the shot, chase cam behind the ball (shots and putts)
 CAVE2 = 0x8003E86C          # dead SDK C_MTX44Concat (4x4 matrices; the game only uses 3x4)
@@ -1971,6 +1978,10 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
     if team:     # v16: Best Ball and Scramble (teams.py)
         for addr, new, old in teams.overlay_patches(rel, team[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
+        if rel == "C/L/V":   # v27: Football's players (fbpose.py) in the overlay's tail (golfext.py)
+            import football
+            import golfext
+            golfext.extend(buf, football.overlay_tail())
     if costume:  # v24: Halloween costumes (costumes.py)
         for addr, new, old in costumes.overlay_patches(rel, costume[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
@@ -2057,6 +2068,10 @@ def main():
           f" green, impact windows, bad lies)")
     print("team games: " + ", ".join(f"{name} {size} of {teams.CAVES[name][1]} bytes at 0x{teams.CAVES[name][0]:08X}"
                                      for name, size in team[1]["_sizes"].items()))
+    import football   # v27: Football (Team Play; its caves come with teams.caves())
+    print("football: " + ", ".join(f"{name} {size} of {football.CAVES[name][1]} bytes at"
+                                   f" 0x{football.CAVES[name][0]:08X}"
+                                   for name, size in football.caves()[1]["_sizes"].items()))
     cave17, v17 = cave17_code(v6)
     arrows_texts = [(MSG_ARROWS_ON, v17["arrows_text_on"]), (MSG_ARROWS_OFF, v17["arrows_text_off"]),
                     (MSG_ARROWS_HELP, v17["arrows_text_help"])]
@@ -2107,9 +2122,16 @@ def main():
     for rel in OVERLAY_MATRIX_HOOKS:
         patch_overlay(os.path.join(clean, "files"), os.path.join(build, "files"), rel, stubs, v2, v3, v4, v9, course,
                       team, v17, costume, harder)
+    if CODE_ONLY:
+        return
     for rel, make in ((teams.ICONS, teams.icons_file), (teams.LABELS, teams.labels_file),
                       (teams.BANNERS, teams.banners_file)):
         open(os.path.join(build, "files", *rel.split("/")), "wb").write(make(os.path.join(clean, "files")))
+    import fbhud   # v27: Football's shot type badge (the HUD's club picture and name), new files under J/
+    for rel, data in fbhud.files().items():
+        dst = os.path.join(build, "files", *rel.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        open(dst, "wb").write(data)
     if course:
         count = course[1]["_count"]
         open(os.path.join(build, "files", "B", "W", "R"), "wb").write(
