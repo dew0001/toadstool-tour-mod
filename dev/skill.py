@@ -3,12 +3,14 @@ the landing grid only give a slope grid on the green, knowing exactly where a ba
 im thinking increase the impact mishit percentage a bit"; then of the ideas offered "i like all the ideas except for
 the last 3, also keep the auto just make it miss sometimes"). v26 (Andrew: "the green grid should show up on
 approaches chips etc. like it should always be there when zooming if its in view, revert that auto swing misses
-sometimes change").
+sometimes change"). v31 (Andrew: "impact frames: 2 frames left and right of 0 impact is too taxing we need to tone
+that down back to what it was originally. left and including -3 and right and including 3 can stay how they are now").
 
   - The slope grid covers the green on every shot (the game's green-view grid round the pin), never the landing spot;
     putts keep the game's putt grid.
   - Impact windows about a quarter narrower for every golfer but Tony (his are 3 and 1 frames already).
-  - A press inside the window but off the mark bends and shortens the shot more (BEND x the game's amount).
+  - A press inside the window but off the mark bends and shortens the shot more (BEND x the game's amount), from 3
+    frames off; 1 or 2 frames off bend as in the game (v31).
   - Bad lies (rough, bunkers and worse: the lie's spread of 3% or more) spread the power half as much again.
   - The auto swing is the game's own again (v25 made 10% of them land just outside the window; v26 dropped it).
 
@@ -25,7 +27,9 @@ The game side (RE-NOTES "Skill (v25)"):
   - The bend inside the window, the shot builder FUN_804c6668: f = |error| / Z x (0.22 - 0.02 x control)
     (`fmuls f31,f31,f13` at BEND_MUL); f scales the launch angle (+10 degrees at 1), speed (x 1 - f/2 early,
     1 - 0.3 f late), side spin and start line (5 degrees at 1). A press outside the window is a full miss (f = 1:
-    half the speed when early). bend multiplies f by BEND.
+    half the speed when early). bend multiplies f by BEND; v31: for |error| <= NEAR it makes f the game's own instead,
+    |error| / Z0 x k with Z0 the zone before zone_cut (Z is odd: Z0 = (4 Z // 3) | 1, a table of Z / Z0), Tony's
+    (zone not cut) x 1. The error is 0x80523CAC, the zone 0x80523CB0, r30 the player.
   - The auto swing's error is the game's random -2..2 (the meter tick, `stw r29,8(r31)` at 0x8046E534): with the
     narrower zones Z is 2 or more wherever the game's was 3 or more, so it still never leaves the window there.
   - The lie's spread (setup +0x238, % of power, drawn at the power press as +-spread) comes from the lie classes'
@@ -35,6 +39,7 @@ The game side (RE-NOTES "Skill (v25)"):
 import ppc
 
 CAVE = (0x8005D624, 280, 0x7C0802A6)   # dead FUN_8005d624 (find_dead_code.py: DEAD, 2026-10-30): (address, size, first word)
+CAVE2 = (0x80045CC0, 200, 0x7C0802A6)  # v31 the bend: dead FUN_80045cc0 (mod/ghidra_out/golf/dead_unused.txt)
 GRID_BUILD, GRID_BUILD_WORD = 0x80448120, 0x9421FF28     # golf: FUN_80448120's stwu r1,-216(r1)
 ZONE_NOTE, ZONE_NOTE_WORD = 0x80416A7C, 0x807D025C       # golf: lwz r3,0x25C(r29)
 ZONE_SET, ZONE_SET_WORD = 0x80416AB4, 0x3869FFFF         # golf: addi r3,r9,-1
@@ -50,12 +55,16 @@ CLUB, PUTTER = 0x1D4, 13            # setup: the club
 SETUP_PLAYER = 0x25C
 TONY = 17
 
-BEND = 1.5          # x the game's bend inside the window
+BEND = 1.5          # x the game's bend inside the window ...
+NEAR = 2            # ... but for a press at most this many frames off the mark (v31: the game's own bend there)
+METER = 0x80523CA4  # golf: the meter block (+8 the impact error, +0xC the zone)
+ZONES = 16          # the table's zones (bigger ones use its last)
 SPREAD_FROM = 3     # lies with a spread (%) of at least this ...
 # ... get half as much again (x 1.5, rounded down)
 
 
 def srawi(ra, rs, sh): return 0x7C000670 | rs << 21 | ra << 16 | sh << 11
+def xor(ra, rs, rb): return 0x7C000278 | rs << 21 | ra << 16 | rb << 11
 
 
 def code():
@@ -78,14 +87,6 @@ def code():
     a(ppc.BLR)
     a.label("zone_one")
     a(ppc.li(3, 1), ppc.BLR)
-
-    # Replaces `fmuls f31,f31,f13` at BEND_MUL: the bend inside the window, BEND times the game's. f13 and r11 are
-    # loaded again before their next use on both paths after it.
-    a.label("bend")
-    a(ppc.fmuls(31, 31, 13))
-    a.la(11, "bend_k")
-    a(ppc.lfs(13, 0, 11), ppc.fmuls(31, 31, 13), ppc.BLR)
-    a.float("bend_k", BEND)
 
     # Replaces `lwz r0,28(r1)` at SPREAD_EXIT (r3 = the lie's spread, r31 = the setup): bad lies spread more.
     a.label("spread")
@@ -119,14 +120,45 @@ def code():
     return a
 
 
+def code2():
+    a = ppc.Asm(CAVE2[0])
+    # Replaces `fmuls f31,f31,f13` at BEND_MUL (f31 = |error| / Z, f13 = the control's factor k, r30 = the player):
+    # BEND times the game's bend, or for a press NEAR frames or fewer off the game's own with its zone. f13, r11, r12,
+    # r0 and cr0 are loaded again before their next use on both paths after it (cr7, the early/late test, is kept).
+    hi, lo = ppc.hi_lo(METER)
+    a.label("bend")
+    a(ppc.fmuls(31, 31, 13), ppc.lis(11, hi), ppc.lwz(12, lo + 8, 11), srawi(0, 12, 31), xor(12, 12, 0),
+      ppc.subf(12, 0, 12), ppc.cmpwi(12, NEAR))
+    a.br("bgt", "bend_more")
+    a(ppc.lbz(0, GOLFER_CODE, 30), ppc.cmpwi(0, TONY), ppc.BEQLR)    # (his zone isn't cut)
+    a(ppc.lwz(12, lo + 0xC, 11), ppc.cmplwi(12, ZONES - 1))
+    a.br("ble", "bend_z")
+    a(ppc.li(12, ZONES - 1))
+    a.label("bend_z")
+    a.la(11, "bend_z0")
+    a(ppc.slwi(12, 12, 2), ppc.add(11, 11, 12), ppc.lfs(13, 0, 11), ppc.fmuls(31, 31, 13), ppc.BLR)
+    a.label("bend_more")
+    a.la(11, "bend_k")
+    a(ppc.lfs(13, 0, 11), ppc.fmuls(31, 31, 13), ppc.BLR)
+    a.float("bend_k", BEND)
+    a.label("bend_z0")                  # Z / Z0 by Z (zone_cut's Z0: the odd zone it narrows to Z)
+    for z in range(ZONES):
+        a.float(f"bend_z0_{z}", z / ((4 * z // 3) | 1) if z else 1.0)
+    return a
+
+
 def caves():
     """[(address, first word, bytes)] and the labels."""
-    asm = code()
-    blob = asm.assemble()
-    at, size, first = CAVE
-    if len(blob) > size:
-        raise SystemExit(f"skill: {len(blob)} bytes; only {size} fit at 0x{at:08X}")
-    return [(at, first, blob)], {**asm.labels, "_size": len(blob)}
+    out, labels = [], {}
+    for cave, asm in ((CAVE, code()), (CAVE2, code2())):
+        blob = asm.assemble()
+        at, size, first = cave
+        if len(blob) > size:
+            raise SystemExit(f"skill: {len(blob)} bytes; only {size} fit at 0x{at:08X}")
+        out.append((at, first, blob))
+        labels.update(asm.labels)
+        labels.setdefault("_size", len(blob))
+    return out, labels
 
 
 def overlay_patches(rel, labels, word):

@@ -1895,7 +1895,7 @@ def overlay_patches(rel, labels, word):
         import knockout   # v30: Knockout's stubs (in the golf tail) go first, then on to the Wolf's
         K = knockout.tail(labels)[1]
         for (site, old), stub, link in ((PICKER, "ko_pick", False), (SCORE, "ko_score", False),
-                                         (POINTS_GET, "ko_points", False)) + \
+                                         (POINTS_GET, "ko_points", False), (knockout.OVER, "ko_over", False)) + \
                 tuple((hook, "ko_totals", True) for hook in TOTALS):
             out.append((site, (ppc.bl if link else ppc.b)(site, K[stub]), old))
     elif rel == "B/U/C":

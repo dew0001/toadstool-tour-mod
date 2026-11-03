@@ -68,7 +68,8 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8007CCC0 | 308 | FUN_8007ccc0 | v22 the course select's commit, icon row spacing, preview and name stubs (cave 22) |
 | 0x8003176C | 316 | FUN_8003176c | v22 the hole file resolver (course8.py cave 23) |
 | 0x80023518, 0x80037EDC, 0x80023188 | 284, 284, 280 | | v24 costumes ("data", "menu", "round"; costumes.py) |
-| 0x8005D624 | 280 | FUN_8005d624 | v25 skill.py: impact windows, the bend inside them, bad lies' spread (v25's auto swing misses, gone in v26); v26 the green's grid on every shot |
+| 0x8005D624 | 280 | FUN_8005d624 | v25 skill.py: impact windows, the bend inside them, bad lies' spread (v25's auto swing misses, gone in v26); v26 the green's grid on every shot; v31 the bend moved out |
+| 0x80045CC0 | 200 | FUN_80045cc0 | v31 skill.py: the bend inside the window (the game's for 1-2 frames off, x 1.5 from 3) |
 | 0x8003D35C, 0x80037A90, 0x8004893C, 0x8006C168, 0x80040AAC, 0x8006BA90, 0x80094660, 0x800459B8 | 280, 280, 276, 272, 276, 272, 272, 272 | | v26 the course select's dropdown (coursemenu.py: "list", "hint", "input", "keys", "move", "show", "fill", "toad") |
 | 0x800462D8 | 236 | FUN_800462d8 | v27 the Team Play list's icon/help arrays, 13 choices (teams.py "arrays"; were in "list") |
 | 29 caves from 0x800389B4 (272) to 0x8005C678 (212) | 7,020 | | v27 Football (football.py `CAVES`: "state", "consts", "frame", "run", "run2", "run3", "track", "launch", "catch", "contact", "kick", "cam", "cam2", "cam3", "shot", "small", "ground", "posts", "posts_m", "posts2", "posts2b", "posts3", "posts4", "pdata", "say", "tick", "texts", "star", "choose") |
@@ -77,7 +78,7 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 0x8006FA48 | 204 | | v30 Knockout's commit and help lines (knockout.py's menu cave, 192 used) |
 
 Still free: 0x80057A14 (712, used by the `draws` debug patch) and 0x8005DAFC (444, `messages` debug patch), plus
-216 smaller dead functions (v30), 27.0 KB in all, the largest 0x8009A77C and 0x80067758 (200). Since v30 football's
+215 smaller dead functions (v31), 26.8 KB in all, the largest 0x8009A77C and 0x80067758 (200). Since v30 football's
 30 caves ("state" .. "fast" above, 7.2 KB) are free too while `teams.PIGSKIN` is False. The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
 from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unreferenced64.tsv`, main.dol
 0x80003100-0x80400000) through `find_dead_code.py`. Do NOT use 0x80001800: it is wiped before the first frame.
@@ -848,7 +849,13 @@ green's grid on every shot, the auto swing the game's own again.
   start line - f x 5 degrees (0x804E327C), speed x (1 - f / 2); late: angle - f x (0.2 angle + 5 degrees), speed x
   (1 - 0.3 f), spin x (1 - f / 4), start line + f x 5 degrees (mirrored for lefties, player +0x51EE). Outside the
   window the same with f = 1 (fixed: early is half the speed). f13 and r11 are loaded again on both paths after it.
-  v25 `bend` multiplies f by 1.5.
+  v25 `bend` multiplies f by 1.5. v31 (Andrew: "2 frames left and right of 0 impact is too taxing we need to tone that
+  down back to what it was originally. left and including -3 and right and including 3 can stay how they are now"):
+  for |error| <= 2 (0x80523CAC) it gives the game's own f, |error| / Z0 x k, Z0 the zone before zone_cut (Z is
+  odd, so Z0 = (4 Z // 3) | 1 from the cut zone 0x80523CB0: a table of Z / Z0), Tony's (not cut) unchanged; r30 is
+  the player there, and cr7 (the early/late test) is live, so the stub compares in cr0 only. Mario's driver (Z 7 ->
+  5, k 0.14): f 0.02 / 0.04 at 1 / 2 frames (v25-v30 0.042 / 0.084), 0.126 at 3 as before (skill.py `code2`, cave
+  0x80045CC0).
 - **The auto swing** (A at the power press: setup +0x234 = 1, meter stage 3): every frame of view 0xC the meter tick
   `FUN_8046e440` sets the impact error 0x80523CAC to `(int)(random x 5.0 - 2.5)` (0x804DF9DC, 0x804DF9E0; -2..2, 0
   twice as likely; `FUN_8001aa54` = a random number in [0, 1) in f1; debug flag 0x29 forces 0), stored by `stw
@@ -1287,9 +1294,45 @@ done playing, and the game ends with last person standing" (knockout.py).
   holing out, but a 2-player Knockout (Skins is mode 2) waited forever on a green with no HUD. ko_score answers 5 / 6 /
   7 for 2 sides once the hole is decided (kept its lives / lost one / everyone tied). Stroke play's other answers: 6
   and par x 3 at the stroke limit (status 2).
+- **v31 playoffs** (Andrew: "instead of ties it should be a playoff shot closest to the pin ... a random place on that
+  same hole in the rough, bunker, or fairway within 100 yards"; his blacked-out screens for those not hitting were
+  dropped, "forget about that": NetPlay shows every PC the same picture). With 3 or 4 players a tie at the worst
+  score sends the tied players back out (2 players and 2v2 push a tied hole: Andrew, "for 2v2 make it 3 lives per
+  team and no playoffs, ties push", "2 player knockout should work the same"): their lies (record +0xB4) moved to one
+  spot, +0x1BE = 0 (playing), strokes and the last penalty (+0x1C4) 0, so the pick gives each a turn from there; after
+  a player's shot (strokes > 0 at the scoring that follows it) its distance is kept (the lie against the pin; holed 0;
+  a penalty: the farthest) and +0x1BE = 2.
+  - **The ground's attribute at a point**: the ground query `FUN_8040100c(x, y, z, out[6])` (out = point and normal)
+    builds a ray (at its r1+0x08: x, y + 9.6 (0x804DA30C), z, direction 0x804DA310 / 0x804DA314 / 0x804DA310, length
+    0x804DA318) and results (r1+0x28: a 0x34-byte hit buffer from `FUN_8001a670`, a list of 1 pointer to it, max 1,
+    count 0, +0x10 0, +0x1C 0), calls `FUN_804379b4(results, ray, 1)` and frees both (`FUN_8001a85c`). A hit record:
+    +0x10 the normal, +0x1C the plane's d, **+0x20 the triangle's attribute halfword** (the ball step, `FUN_80417b00`,
+    copies it: low byte to ball +0xB8, bits 13-14 to +0xC8). knockout.py's ko_attr repeats the query and keeps it.
+  - **The lie** (0x34; `FUN_80414a1c(ball, lie)` saves one, `FUN_80414970(ball, lie)` puts the ball back on it, every
+    turn's start): +0 xyz (ball +0x9C), +0xC the ball's spin (+0x60..+0x6C), +0x1C the ground's normal (+0xA8..+0xB0),
+    +0x28 in the hole (+0x71), +0x29 zone (+0xC8), +0x2A ball +0x75 (a physics flag, 0 at rest), +0x2C the surface
+    (+0xB8), +0x30 ball +0xBC (an object, -1 none). The spot: a player's lie with the place, normal, surface, zone 0,
+    +0x2A 0, +0x30 -1.
+  - The spot: random points (`FUN_8001aa54`, [0, 1)) 60-300 ft from the pin, the ground under each (`FUN_8040100c`
+    from 100 ft over the pin's height), its attribute in play (zone 0) with a surface of 0x01, 0x11, 0x0A, 0x04, 0x16,
+    0x03, 0x21 or 0x24; 64 tries (none: the v30 rule). `FUN_80019da4(dx, dz)` measures.
 - **The round's hole count**: `FUN_804014c0` copies the whole setup block (0xAAD bytes) to golf state +0x54, so setup
   +0xA7C (holes) is 0x804E66B4 (state +0xAD0) and +0xA84 (the sub-mode) 0x804E66BC; the hole's end (`FUN_80403b0c`'s
-  last part) ends the round when hole + 1 == +0xAD0 (state +0x3E = 1).
+  last part) ends the round when hole + 1 == +0xAD0 (see the next bullet).
+- **The next-hole step** (`FUN_80403b0c`, state +0xB0C = 9, 0x80405F78): `FUN_804034e0(state)` answers "the round
+  is over" (state +0x3D = 1) when hole (+0xD14) >= +0xAD0 - 1 (or +0xACF != 1, or +0x3E bit 7) and the signed
+  byte +0x3E < 1, unless sub-mode 4 or mode 3; else `FUN_80401e78(state, (hole + 1) % +0xAD0)` starts that slot
+  (+0xD12 = the hole order's byte, state +0xAB4 + slot (setup +0xA60, 18 bytes); the files by `FUN_80443e14`) and
+  0x80406174 stores the slot in +0xD14 later. `FUN_80403680` (after the end-of-hole scorecard, for sub-modes 2, 5
+  and 8: match play's) gives a match level after its last hole **extra holes**: +0xAD0 + 1 (past 17 it becomes 1)
+  and +0x3E = 1 (go on), so an 18-hole match replays slot 0, then 1, ... (the card's entries are overwritten);
+  +0x3E = 0xFF (a match already decided) ends it. The Skins round (sub-mode 3) skips all that.
+- **v31 the tiebreaker** (Andrew: "if tied with amount of lives after 18 then a random closest to the pin on any
+  hole with the same 100 yard random shot"): when the round's last hole is decided with two or more level on the
+  most lives (2v2: the teams), ko_over (on `FUN_804034e0`'s first instruction) does match play's trick: +0xAD0 = 1,
+  +0x3E = 1 and slot 0's hole a random one of the 18 (`FUN_8001aa54` x 18). That hole's first pick moves the
+  leaders to a random spot as a playoff (the rest done, +0x1BE = 2) and sets +0x3E = 0, so the round ends after it;
+  the farther ball (2v2: each team's closest) loses a life; level again, another one (slot 0 again).
 - **Shown**: ko_points answers `FUN_80469720(player)` with the player's lives (the score panel's "3P" = 3 points, the
   scoreboard, the results, ranked high first); ko_totals writes them as the scorecards' Skins totals (0x80523FFC..)
   with nothing carried (0x80523FF8 = 0).
