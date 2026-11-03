@@ -1978,10 +1978,10 @@ def patch_overlay(clean_files, build_files, rel, stubs, v2, v3, v4, v9=None, cou
     if team:     # v16: Best Ball and Scramble (teams.py)
         for addr, new, old in teams.overlay_patches(rel, team[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
-        if rel == "C/L/V":   # v27: Football's players (fbpose.py) in the overlay's tail (golfext.py)
-            import football
+        if rel == "C/L/V":   # the overlay's tail (golfext.py): v30 Knockout (knockout.py), after v27-v29 Football's
+            import knockout  # players (fbpose.py) when Pigskin is built (teams.PIGSKIN)
             import golfext
-            golfext.extend(buf, football.overlay_tail())
+            golfext.extend(buf, knockout.tail_blob(team[1]))
     if costume:  # v24: Halloween costumes (costumes.py)
         for addr, new, old in costumes.overlay_patches(rel, costume[1], lambda a: word(buf, OVERLAY_BASE, a)):
             put(buf, OVERLAY_BASE, addr, new, old)
@@ -2068,10 +2068,14 @@ def main():
           f" green, impact windows, bad lies)")
     print("team games: " + ", ".join(f"{name} {size} of {teams.CAVES[name][1]} bytes at 0x{teams.CAVES[name][0]:08X}"
                                      for name, size in team[1]["_sizes"].items()))
-    import football   # v27: Football (Team Play; its caves come with teams.caves())
-    print("football: " + ", ".join(f"{name} {size} of {football.CAVES[name][1]} bytes at"
-                                   f" 0x{football.CAVES[name][0]:08X}"
-                                   for name, size in football.caves()[1]["_sizes"].items()))
+    import knockout   # v30
+    print(f"knockout: menu {team[1]['_ko_size']} of {knockout.MENU_CAVE[1]} bytes at 0x{knockout.MENU_CAVE[0]:08X},"
+          f" the round {len(knockout.tail(team[1])[0])} bytes in the golf tail at 0x{knockout.base():08X}")
+    if teams.PIGSKIN:
+        import football   # v27: Football (Team Play; its caves come with teams.caves())
+        print("football: " + ", ".join(f"{name} {size} of {football.CAVES[name][1]} bytes at"
+                                       f" 0x{football.CAVES[name][0]:08X}"
+                                       for name, size in football.caves()[1]["_sizes"].items()))
     cave17, v17 = cave17_code(v6)
     arrows_texts = [(MSG_ARROWS_ON, v17["arrows_text_on"]), (MSG_ARROWS_OFF, v17["arrows_text_off"]),
                     (MSG_ARROWS_HELP, v17["arrows_text_help"])]
@@ -2127,11 +2131,14 @@ def main():
     for rel, make in ((teams.ICONS, teams.icons_file), (teams.LABELS, teams.labels_file),
                       (teams.BANNERS, teams.banners_file)):
         open(os.path.join(build, "files", *rel.split("/")), "wb").write(make(os.path.join(clean, "files")))
-    import fbhud   # v27: Football's shot type badge (the HUD's club picture and name), new files under J/
-    for rel, data in fbhud.files().items():
-        dst = os.path.join(build, "files", *rel.split("/"))
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        open(dst, "wb").write(data)
+    if teams.PIGSKIN:
+        import fbhud   # v27: Football's shot type badge (the HUD's club picture and name), new files under J/
+        for rel, data in fbhud.files().items():
+            dst = os.path.join(build, "files", *rel.split("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            open(dst, "wb").write(data)
+    elif os.path.isdir(os.path.join(build, "files", "J")):   # v30: no Pigskin, so no J files left from older builds
+        shutil.rmtree(os.path.join(build, "files", "J"))
     if course:
         count = course[1]["_count"]
         open(os.path.join(build, "files", "B", "W", "R"), "wb").write(

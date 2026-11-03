@@ -74,16 +74,18 @@ no branch, no relocation, no lis/addi building the address). `build_mod.py` chec
 | 29 caves from 0x800389B4 (272) to 0x8005C678 (212) | 7,020 | | v27 Football (football.py `CAVES`: "state", "consts", "frame", "run", "run2", "run3", "track", "launch", "catch", "contact", "kick", "cam", "cam2", "cam3", "shot", "small", "ground", "posts", "posts_m", "posts2", "posts2b", "posts3", "posts4", "pdata", "say", "tick", "texts", "star", "choose") |
 | 0x800961DC, 0x8002063C, 0x8003FFDC, 0x800369AC, 0x8008C9C4, 0x800867A4, 0x8006F978 | 252, 216, 212, 212, 208, 208, 208 | | v28 Team Play's game list as a dropdown (modemenu.py: "names", "data", "input", "keys", "show", "fill", "rows") |
 | 0x80084924 | 204 | | v29 a pass's extra flight steps (football.py "fast") |
+| 0x8006FA48 | 204 | | v30 Knockout's commit and help lines (knockout.py's menu cave, 192 used) |
 
 Still free: 0x80057A14 (712, used by the `draws` debug patch) and 0x8005DAFC (444, `messages` debug patch), plus
-217 smaller dead functions (v29), 27.2 KB in all, the largest 0x8006FA48 (204), 0x8009A77C and 0x80067758
-(200). The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
+216 smaller dead functions (v30), 27.0 KB in all, the largest 0x8009A77C and 0x80067758 (200). Since v30 football's
+30 caves ("state" .. "fast" above, 7.2 KB) are free too while `teams.PIGSKIN` is False. The list (address, size; none used by dev/*.py, dev/tools, dev/course) is `mod\ghidra_out\golf\dead_unused.txt`,
 from a 2026-10-30 run of `ListUnreferenced.java` with a 64-byte minimum (`unreferenced64.tsv`, main.dol
 0x80003100-0x80400000) through `find_dead_code.py`. Do NOT use 0x80001800: it is wiped before the first frame.
 
 For code that only runs in a round there is far more room: **the golf overlay's tail**, 0x80528000..0x80548000 (128 KB,
 golfext.py; see "Football's players"), appended to C/L/V. v27's fbpose.py uses about 28 KB of it (code, data, the
-golfers' rigs, the pose keys, the football's mesh); v28's about 36 KB (three receivers).
+golfers' rigs, the pose keys, the football's mesh); v28's about 36 KB (three receivers). v30 builds no players: Knockout's round
+code (knockout.py, 2 KB) starts the tail.
 
 ## Gotchas
 
@@ -1000,6 +1002,13 @@ Scramble does. The score panel's face swap (`face`) now runs for any scramble-ki
 
 ## Football (v27)
 
+**v30: out of the build.** Andrew (2026-11-02): "pigskin is stupid just remove it from the game keep what you made and
+learned tho but lets remove it to save space, maybe we do a different football game later". `teams.PIGSKIN = False`
+leaves football.py, fbpose.py, fbmoves.py, rigmap.py and fbhud.py (and these notes) in dev/ but builds none of it: no
+list entries, no hooks or caves (football's 30, "fast" included, are free again), no players in the golf tail, no J
+files (build_mod.py removes a J folder left in a build tree). `True` puts it all back (Knockout's tail code then moves
+to 0x80538000, after fbpose.py's).
+
 Andrew's game mode (football.py): partners pass down the hole and finish with a field goal. Built on Team Play's
 alternate shot: the commit writes setup byte 0x8017607D = 7 (2v2, 4 humans: Doubles' team screen) or 8 (one team of
 2: straight to the course select); the round's `setup` stub (teams.py) turns them into team mode 0 (plain Doubles to
@@ -1240,6 +1249,50 @@ icons, as wide as the screen).
   6 games by name (message 0x7FBE, the cursor's in yellow, scrolling), Up/Down move the cursor (wrapping; the icon and
   Toad's help follow), A plays it (the game's A tail), B closes it and puts the cursor back. Left/Right on the closed
   row step as before. The alternate-shot five are named "Alt Shot Stroke / Match / Slots x4 / Slots x3 / Skins".
+
+## Knockout (v30)
+
+Andrew (2026-11-02): "2v2 and 2,3,4 player free for all knockout, pretty simple everyone goes and worse score loses a
+life (you get 3 lives) if everyone ties no one loses a life and move on to next hole", then "once ur out of lives ur
+done playing, and the game ends with last person standing" (knockout.py).
+- **A Wolf round with a flag.** Team Play choices 11 (Knockout, 2+ humans) and 13 (Knockout 2v2, 4) commit like Wolf
+  (mode 2, sub-mode 3: the Skins round, everyone on their own ball; setup byte 0x8017607D = WOLF, so the round's team
+  mode is the Wolf's and every teams.py path treats it so) plus the setup block's spare byte 0x8017607F = 1 / 2
+  (knockout.py's menu cave 0x8006FA48, which also sends choice 12, Wolf, on to commit_wolf; commit_wolf clears the
+  byte). Four Wolf hooks get a stub of ours in front, in the golf overlay's tail at 0x80528000: the shooter pick
+  (PICKER), the scoring (SCORE), the points shown (POINTS_GET) and the scorecards' totals (TOTALS); each checks team
+  mode WOLF and the byte, else goes on to the Wolf's. The Wolf's TIE (a tied hole carries nothing) and MARK (a winner's
+  number) already do the right thing: in Knockout nobody wins a skin.
+- **The game's tip box** (0x80505358): `FUN_80423bbc`'s aim (state 4) runs `FUN_80412f6c` only while it is 0; while
+  set, the shooter's A (pad +4, 0x100) closes it (`FUN_80024c98`) and clears it. The game opens it only in mode 9, for
+  the first player of the first hole (`FUN_80024f1c(0x5E5..0x5E7, 320, 224, -1, 15)`). Knockout's notice (message 0x7FBC,
+  a buffer in the tail written at each hole's start: the rules on the first hole, then who lost a life and how many
+  are left, "X is knocked out!", or "Tied hole: no lives lost!") opens there, so the game keeps it up until A.
+- **A hole's start** (ko_pick, the first pick with a new hole number 0x804E68F8): every player's result byte for the
+  hole is 1 (the Skins scorecard reads 0 as "won the skin", the Wolf's way), and players out of lives get record +0x1BE
+  = 2 (done), so the pick passes them over and the hole ends without them.
+- **Scoring** (ko_score): the game's scoring of the shot as stroke play (sub-mode word 0x804E66BC = 0 around it, as the
+  Wolf's), then once every player with lives is done (+0x1BE != 0): their strokes (+0x1BC); everyone tied, nobody
+  loses; else everyone at the worst loses a life; in 2v2, 1P & 2P against 3P & 4P (the game's first team layout), each
+  team's best, the worse team's two lose one. When one player or team is left, the round's hole count becomes this
+  hole + 1.
+- **Two players: the match's hole end.** A hole ends when `FUN_80402a78` finds every side with record +0x1BE != 0 and
+  +0x1BF == 0. +0x1BF is 1 from a hole's start (`FUN_80423bbc`'s hole set-up; 0 for an empty seat) until the
+  player's end-of-hole reaction (player state 0xB, once every player listed at 0x804E36BC (count +0x28) has its models
+  loaded, `FUN_80402b28`). The pick (`FUN_80402f1c`) lists for a reaction the sides whose scoring (`FUN_8046a0b8`)
+  answers 5 (won the hole: the best reaction, 0), 6 (lost: the worst, 4; `FUN_8041f144`) or 7 (halved: 2); it stops at
+  the first unless the round has 2 sides and 2 records (state +0xD14's word & 0xFFFF00 == 0x20200) in mode 1 or 2
+  (state +0xAD4, 0x804E66B8), when everyone's goes up together, the match's way. Stroke play's scoring answers 0 for a
+  holed ball (it writes the result byte and calls `FUN_804681cc`), so with 3 or 4 players each reacts right after
+  holing out, but a 2-player Knockout (Skins is mode 2) waited forever on a green with no HUD. ko_score answers 5 / 6 /
+  7 for 2 sides once the hole is decided (kept its lives / lost one / everyone tied). Stroke play's other answers: 6
+  and par x 3 at the stroke limit (status 2).
+- **The round's hole count**: `FUN_804014c0` copies the whole setup block (0xAAD bytes) to golf state +0x54, so setup
+  +0xA7C (holes) is 0x804E66B4 (state +0xAD0) and +0xA84 (the sub-mode) 0x804E66BC; the hole's end (`FUN_80403b0c`'s
+  last part) ends the round when hole + 1 == +0xAD0 (state +0x3E = 1).
+- **Shown**: ko_points answers `FUN_80469720(player)` with the player's lives (the score panel's "3P" = 3 points, the
+  scoreboard, the results, ranked high first); ko_totals writes them as the scorecards' Skins totals (0x80523FFC..)
+  with nothing carried (0x80523FF8 = 0).
 
 ## HUD (v3)
 
